@@ -8,6 +8,15 @@ import { ApiError } from '../errors.js';
 
 const execFileAsync = promisify(execFile);
 export const SESSION_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
+const NO_ACTIVE_SESSIONS_OUTPUT = 'No active zellij sessions found.';
+
+export function isNoActiveSessionsError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const output = `${'stdout' in error && typeof error.stdout === 'string' ? error.stdout : ''}\n${
+    'stderr' in error && typeof error.stderr === 'string' ? error.stderr : ''
+  }`;
+  return output.split(/\r?\n/u).some(line => line.trim() === NO_ACTIVE_SESSIONS_OUTPUT);
+}
 
 export interface ZellijAdapter {
   listSessions(): Promise<string>;
@@ -30,14 +39,19 @@ export class ExecFileZellijAdapter implements ZellijAdapter {
     for (const name of Object.keys(env)) {
       if (name === 'ZELLIJ' || name.startsWith('ZELLIJ_')) delete env[name];
     }
-    const { stdout } = await execFileAsync(this.executablePath, ['list-sessions', '--short'], {
-      encoding: 'utf8',
-      timeout: 5_000,
-      maxBuffer: 1024 * 1024,
-      shell: false,
-      env,
-    });
-    return stdout;
+    try {
+      const { stdout } = await execFileAsync(this.executablePath, ['list-sessions', '--short'], {
+        encoding: 'utf8',
+        timeout: 5_000,
+        maxBuffer: 1024 * 1024,
+        shell: false,
+        env,
+      });
+      return stdout;
+    } catch (error) {
+      if (isNoActiveSessionsError(error)) return '';
+      throw error;
+    }
   }
 
   async createSession(arguments_: string[], cwd: string): Promise<void> {

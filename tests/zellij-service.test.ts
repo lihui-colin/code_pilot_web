@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  isNoActiveSessionsError,
   repositorySessionName,
   ZellijService,
   parseSessionNames,
@@ -21,6 +22,18 @@ describe('parseSessionNames', () => {
     const warnings: string[] = [];
     expect(parseSessionNames('zeta\ninvalid name\nalpha\nalpha\n', line => warnings.push(line))).toEqual(['alpha', 'zeta']);
     expect(warnings).toEqual(['invalid name']);
+  });
+});
+
+describe('isNoActiveSessionsError', () => {
+  it('recognizes the empty-session result from stdout or stderr', () => {
+    expect(isNoActiveSessionsError({ stdout: 'No active zellij sessions found.\n', stderr: '' })).toBe(true);
+    expect(isNoActiveSessionsError({ stdout: '', stderr: 'No active zellij sessions found.\n' })).toBe(true);
+  });
+
+  it('does not hide other Zellij failures', () => {
+    expect(isNoActiveSessionsError({ stdout: '', stderr: 'permission denied\n' })).toBe(false);
+    expect(isNoActiveSessionsError(new Error('No active zellij sessions found.'))).toBe(false);
   });
 });
 

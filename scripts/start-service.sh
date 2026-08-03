@@ -28,15 +28,40 @@ fi
 if [[ -f "$pid_file" ]]; then
     existing_pid="$(<"$pid_file")"
     if [[ "$existing_pid" =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
-        echo "Terminal Web is already running with PID $existing_pid" >&2
+        command_line="$(tr '\0' ' ' < "/proc/$existing_pid/cmdline" 2>/dev/null || true)"
+        if [[ "$command_line" == *"$project_root/dist/server.js"* ]]; then
+            echo "Terminal Web is already running with PID $existing_pid" >&2
+        else
+            echo "PID file points to another running process: $existing_pid" >&2
+        fi
         exit 1
     fi
     rm -f "$pid_file"
 fi
 
+service_config="$(node -p "const config = JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')); [config.listenHost, config.listenPort, config.publicBaseUrl].join('\\t')" "$config_file")"
+IFS=$'\t' read -r listen_host listen_port access_url <<< "$service_config"
+
+node --input-type=module - "$listen_host" "$listen_port" <<'NODE'
+import net from 'node:net';
+
+const host = process.argv[2];
+const port = Number(process.argv[3]);
+const server = net.createServer();
+
+server.once('error', error => {
+    if (error.code === 'EADDRINUSE') {
+        console.error(`Terminal Web port is already in use: ${host}:${port}`);
+    } else {
+        console.error(`Unable to check Terminal Web port ${host}:${port}: ${error.message}`);
+    }
+    process.exitCode = 1;
+});
+server.listen({ host, port, exclusive: true }, () => server.close());
+NODE
+
 cd "$project_root"
 npm run build
-access_url="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).publicBaseUrl" "$config_file")"
 mkdir -p -m 700 data
 : > "$log_file"
 chmod 600 "$log_file"
