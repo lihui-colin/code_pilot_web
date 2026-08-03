@@ -16,6 +16,8 @@ a { color: #5ce0b6; text-underline-offset: .2em; }
 .button-link:hover { background: #1d4c40; }
 .shell { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 3rem 0 5rem; }
 .hero { display: flex; justify-content: space-between; gap: 2rem; align-items: end; margin-bottom: 1.75rem; }
+.restart-button { flex: 0 0 auto; border-color: #a66a35; background: #4a2c16; color: #ffe0bd; }
+.restart-button:hover { background: #5d381c; }
 h1, h2, p { margin-top: 0; }
 h1 { margin-bottom: .5rem; font-size: clamp(2rem, 6vw, 4.5rem); letter-spacing: -.055em; line-height: .95; }
 .hero-title-subtitle { margin-bottom: .65rem; font-size: 1.25rem; font-weight: 700; line-height: 1.3; }
@@ -59,6 +61,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .repository-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .55rem; }
 .repository-actions button:last-child { color: #06130f; background: #5ce0b6; border-color: #5ce0b6; }
 .repository-actions button:last-child:hover { background: #7ceac8; }
+.repository-actions .editor-link { color: #06130f; background: #5ce0b6; border-color: #5ce0b6; }
+.repository-actions .editor-link:hover { background: #7ceac8; }
 .token-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .55rem; }
 .session-actions { display: flex; align-items: center; gap: .55rem; white-space: nowrap; }
 .session-actions .button-link, .session-actions button { min-width: 4.25rem; }

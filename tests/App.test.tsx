@@ -16,6 +16,7 @@ vi.mock('../src/web/api.js', () => ({
   getSessions: vi.fn(),
   getZellijToken: vi.fn(),
   regenerateZellijToken: vi.fn(),
+  restartServices: vi.fn(),
 }));
 
 const readiness = {
@@ -27,6 +28,7 @@ const repositories = {
   breadcrumbs: [{ id: null, name: 'workspace', relativePath: '' }],
   entries: [],
 };
+const openVsCodeUrl = 'http://192.0.2.10:18023/?folder=%2Fworkspace%2Fterminal-web';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -62,6 +64,7 @@ beforeEach(() => {
     upstreamUrl: 'http://127.0.0.1:8022', webUrl: `http://192.0.2.10:8024/viewer/viewer_${'b'.repeat(22)}/`,
     createdAt: '2026-08-02T00:00:00.000Z', lastAccessedAt: '2026-08-02T00:00:00.000Z', status: 'running',
   });
+  vi.mocked(api.restartServices).mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -71,6 +74,17 @@ afterEach(() => {
 });
 
 describe('App', () => {
+  it('confirms and requests a restart of all managed backend services', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(api.restartServices).mockReturnValue(new Promise(() => undefined));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '重启后台服务' }));
+
+    await waitFor(() => expect(api.restartServices).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: '服务重启中…' })).toBeDisabled();
+  });
+
   it('opens Session links safely in a new tab', async () => {
     render(<App />);
     const link = await screen.findByRole('link', { name: '打开' });
@@ -181,6 +195,7 @@ describe('App', () => {
         relativePath: 'terminal-web',
         kind: 'repository',
         markers: ['git', 'node'],
+        openVsCodeUrl,
         viewer: null,
         session: null,
       }],
@@ -192,6 +207,22 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: '进入' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '创建 Zellij Session' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开 code-viewer' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '编辑代码' })).toBeInTheDocument();
+  });
+
+  it('opens the repository-specific OpenVSCode folder URL', async () => {
+    vi.mocked(api.getRepositories).mockResolvedValue({
+      ...repositories,
+      entries: [{
+        id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
+        kind: 'repository', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
+      }],
+    });
+    render(<App />);
+    const link = await screen.findByRole('link', { name: '编辑代码' });
+    expect(link).toHaveAttribute('href', openVsCodeUrl);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
   it('creates the deterministic Zellij Session for a repository', async () => {
@@ -199,7 +230,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', markers: ['git', 'node'], viewer: null, session: null,
+        kind: 'repository', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
       }],
     });
     render(<App />);
@@ -218,7 +249,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', markers: ['git', 'node'], viewer: null,
+        kind: 'repository', markers: ['git', 'node'], openVsCodeUrl, viewer: null,
         session: { name: sessionName, status: 'running', webUrl: `https://192.0.2.10:8021/${sessionName}` },
       }],
     });
@@ -239,7 +270,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', markers: ['git', 'node'], viewer: null, session: null,
+        kind: 'repository', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
       }],
     });
     const replace = vi.fn();

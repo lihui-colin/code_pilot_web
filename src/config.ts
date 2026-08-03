@@ -8,7 +8,7 @@ const markerNames = ['.git', 'package.json', 'pyproject.toml', 'Cargo.toml', 'go
 
 const FileConfigSchema = z.object({
   listenHost: z.string().min(1).default('0.0.0.0'),
-  listenPort: z.number().int().min(1).max(65_535).default(8024),
+  listenPort: z.number().int().min(1).max(65_535).default(8020),
   publicBaseUrl: z.string().url(),
   zellijWebBaseUrl: z.string().url(),
   zellij: z.object({
@@ -21,6 +21,10 @@ const FileConfigSchema = z.object({
       name: z.string().min(1).max(128),
       value: z.string().uuid(),
     }).strict().optional(),
+  }).strict(),
+  openVsCode: z.object({
+    executableFile: z.string().min(1),
+    port: z.number().int().min(1).max(65_535).default(8023),
   }).strict(),
   directoryIdSecretFile: z.string().min(1),
   viewerPortRange: z.object({
@@ -44,6 +48,8 @@ export interface AppConfig {
   zellijWebCertificateFile: string;
   zellijWebPrivateKeyFile: string;
   zellijWebToken: ZellijWebToken | null;
+  openVsCodeExecutableFile: string;
+  openVsCodePort: number;
   directoryIdSecretFile: string;
   viewerPortRange: { start: number; end: number };
   viewerIdleTimeoutMinutes: number;
@@ -118,6 +124,11 @@ export async function loadConfiguration(argv = process.argv.slice(2), cwd = proc
   if (new URL(publicBaseUrl).hostname !== new URL(zellijWebBaseUrl).hostname) {
     throw new Error('publicBaseUrl and zellijWebBaseUrl must use the same hostname');
   }
+  const reservedPorts = new Set([raw.listenPort, Number(new URL(zellijWebBaseUrl).port || 443)]);
+  for (let port = raw.viewerPortRange.start; port <= raw.viewerPortRange.end; port += 1) reservedPorts.add(port);
+  if (reservedPorts.has(raw.openVsCode.port)) {
+    throw new Error('OpenVSCode port must be different from management, Zellij, and viewer ports');
+  }
   const resolveConfigPath = (value: string) => path.resolve(configDirectory, value);
   const directoryIdSecretFile = resolveConfigPath(raw.directoryIdSecretFile);
 
@@ -133,6 +144,8 @@ export async function loadConfiguration(argv = process.argv.slice(2), cwd = proc
       zellijWebCertificateFile: resolveConfigPath(raw.zellij.webCertificateFile),
       zellijWebPrivateKeyFile: resolveConfigPath(raw.zellij.webPrivateKeyFile),
       zellijWebToken: raw.zellij.webToken ?? null,
+      openVsCodeExecutableFile: resolveConfigPath(raw.openVsCode.executableFile),
+      openVsCodePort: raw.openVsCode.port,
       directoryIdSecretFile,
       viewerPortRange: raw.viewerPortRange,
       viewerIdleTimeoutMinutes: raw.viewerIdleTimeoutMinutes,

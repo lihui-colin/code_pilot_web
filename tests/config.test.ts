@@ -26,6 +26,10 @@ async function fixture() {
       webCertificateFile: 'certs/cert.pem',
       webPrivateKeyFile: 'certs/key.pem',
     },
+    openVsCode: {
+      executableFile: 'openvscode/current/bin/openvscode-server',
+      port: 8023,
+    },
     directoryIdSecretFile: 'directory.secret',
     viewerPortRange: { start: 18_000, end: 18_100 },
     viewerIdleTimeoutMinutes: 60,
@@ -58,10 +62,12 @@ describe('loadConfiguration', () => {
     expect(loaded.config.zellijConfigFile).toBe(path.join(root, 'zellij/config.kdl'));
     expect(loaded.config.zellijWebTokenDatabaseFile).toBe(path.join(root, 'zellij/tokens.db'));
     expect(loaded.config.zellijWebCertificateFile).toBe(path.join(root, 'certs/cert.pem'));
+    expect(loaded.config.openVsCodeExecutableFile).toBe(path.join(root, 'openvscode/current/bin/openvscode-server'));
+    expect(loaded.config.openVsCodePort).toBe(8023);
     expect(loaded.directoryIdSecret?.length).toBe(32);
   });
 
-  it('defaults the listen port to 8024', async () => {
+  it('defaults the listen port to 8020', async () => {
     const { root, workspace } = await fixture();
     const configPath = path.join(root, 'config.json');
     const config = JSON.parse(await readFile(configPath, 'utf8'));
@@ -73,7 +79,22 @@ describe('loadConfiguration', () => {
       '--workspace-root', workspace,
     ], root);
 
-    expect(loaded.config.listenPort).toBe(8024);
+    expect(loaded.config.listenPort).toBe(8020);
+  });
+
+  it('defaults the OpenVSCode port to 8023', async () => {
+    const { root, workspace } = await fixture();
+    const configPath = path.join(root, 'config.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    delete config.openVsCode.port;
+    await writeFile(configPath, JSON.stringify(config));
+
+    const loaded = await loadConfiguration([
+      '--config', 'config.json',
+      '--workspace-root', workspace,
+    ], root);
+
+    expect(loaded.config.openVsCodePort).toBe(8023);
   });
 
   it('keeps serving possible but marks an unsafe directory secret unavailable', async () => {
@@ -123,6 +144,18 @@ describe('loadConfiguration', () => {
       '--config', 'config.json',
       '--workspace-root', workspace,
     ], root)).rejects.toThrow('must use the same hostname');
+  });
+
+  it('rejects an OpenVSCode port that overlaps another configured service', async () => {
+    const { root, workspace } = await fixture();
+    const configPath = path.join(root, 'config.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    config.openVsCode.port = 18_000;
+    await writeFile(configPath, JSON.stringify(config));
+    await expect(loadConfiguration([
+      '--config', 'config.json',
+      '--workspace-root', workspace,
+    ], root)).rejects.toThrow('OpenVSCode port must be different');
   });
 
   it('atomically persists the Zellij Web token name and value with secure permissions', async () => {

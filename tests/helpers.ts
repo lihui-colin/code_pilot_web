@@ -16,6 +16,8 @@ export function createTestConfig(workspaceRootRealPath: string): AppConfig {
       name: 'terminal-web-test',
       value: '123e4567-e89b-42d3-a456-426614174000',
     },
+    openVsCodeExecutableFile: '/unused/openvscode-server',
+    openVsCodePort: 8023,
     directoryIdSecretFile: path.join(workspaceRootRealPath, '.terminal-web/directory-id.secret'),
     viewerPortRange: { start: 18_000, end: 18_100 },
     viewerIdleTimeoutMinutes: 60,

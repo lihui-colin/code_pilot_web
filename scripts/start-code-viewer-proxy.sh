@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo="${1:-$PWD}"
-proxy_port="${CODE_VIEWER_PROXY_PORT:-8023}"
+proxy_port="${CODE_VIEWER_PROXY_PORT:-8025}"
 proxy_hostname="${CODE_VIEWER_PROXY_HOSTNAME:-0.0.0.0}"
 
 if [[ ! -d "$repo" ]]; then

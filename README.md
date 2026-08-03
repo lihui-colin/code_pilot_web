@@ -7,10 +7,11 @@
 - Node.js `26.x`（当前基线 `26.5.1`）
 - Zellij `0.44.3`
 - code-viewer `0.10.0`
+- OpenVSCode Server `1.109.5`
 
 ## 配置
 
-复制 `config.example.json` 为 `config.json`，把 `publicBaseUrl` 改为实际 HTTPS 访问地址，例如 `https://192.168.1.20:8024`，并把 `zellijWebBaseUrl` 改为同一主机上的 Zellij Web HTTPS 地址，例如 `https://192.168.1.20:8021`。
+复制 `config.example.json` 为 `config.json`，把 `publicBaseUrl` 改为实际 HTTPS 访问地址，例如 `https://192.168.1.20:8020`，并把 `zellijWebBaseUrl` 改为同一主机上的 Zellij Web HTTPS 地址，例如 `https://192.168.1.20:8021`。
 
 准备权限受限的目录 ID secret。管理页面不需要用户名、密码或 TLS 证书：
 
@@ -26,27 +27,41 @@ chmod 600 data/directory-id.secret
 
 ### 首次准备
 
-推荐使用交互式初始化脚本。它会生成 Zellij Web 自签名证书，安装 nvm 和 Node.js 26、安装项目依赖及固定版本 Zellij、创建 `config.json`、配置 Zellij Web，并生成目录 ID secret。证书生成在网络安装步骤之前完成，因此后续下载失败时可以直接重试初始化。脚本只负责初始化配置，不会启动管理服务：
+推荐使用交互式初始化脚本。它会生成 Zellij Web 自签名证书，安装 nvm 和 Node.js 26、安装项目依赖及固定版本 Zellij 和 OpenVSCode Server、创建 `config.json`、配置 Zellij Web，并生成目录 ID secret。证书生成在网络安装步骤之前完成，因此后续下载失败时可以直接重试初始化。脚本只负责初始化配置，不会启动管理服务或 OpenVSCode：
 
 ```bash
 scripts/download-zellij.sh
+scripts/download-openvscode.sh
 scripts/init.sh
 ```
 
 建议在运行 `init.sh` 前先执行 `scripts/download-zellij.sh`。该脚本会显示 GitHub Release 下载进度，将固定版本 `0.44.3` 下载并验证到 `data/zellij/zellij`，然后复制到 `$HOME/.local/bin/zellij`。如果跳过此步骤，`init.sh` 会提示确认，继续后由 `npm install` 自动下载。
 
+OpenVSCode 使用独立的 `scripts/download-openvscode.sh` 下载。该脚本显示官方 GitHub Release 下载进度，验证发布页提供的 SHA-256 摘要和 `1.109.5` 版本后安装到 `data/openvscode/`；`init.sh` 会自动调用并复用已验证的安装。
+
 也可以传入参数进行无人值守初始化：
 
 ```bash
-scripts/init.sh --host 192.168.1.20 --service-port 8024 --zellij-port 8021 --viewer-port 8022 --non-interactive
+scripts/init.sh --host 192.168.1.20 --service-port 8020 --zellij-port 8021 --viewer-port 8022 --openvscode-port 8023 --non-interactive
 ```
 
-使用 `scripts/init.sh --help` 查看全部参数。脚本不会配置主机防火墙；仍需只允许 VPN 或公司内网访问管理端口和 Zellij Web 端口。
+使用 `scripts/init.sh --help` 查看全部参数。脚本不会配置主机防火墙；仍需只允许 VPN 或公司内网访问管理端口、Zellij Web 端口和 OpenVSCode 端口。
 
 初始化完成后，显式启动后台服务：
 
 ```bash
 npm run service:start -- /实际/workspace/路径
+```
+
+OpenVSCode Server 是独立进程，使用相同 workspace root 和配置端口启动；默认命令为：
+
+```bash
+(cd /实际/workspace/路径 && /项目路径/data/openvscode/current/bin/openvscode-server \
+  --host 0.0.0.0 \
+  --port 8023 \
+  --without-connection-token \
+  --accept-server-license-terms \
+  --telemetry-level off)
 ```
 
 初始化脚本会创建 HTTPS 证书；管理服务首次启动时会校验证书并初始化 Zellij Web Token。没有使用初始化脚本时，管理服务仍会在证书和私钥都不存在时创建证书。
@@ -77,9 +92,10 @@ npm install
 cp config.example.json config.json
 ```
 
-- `publicBaseUrl` 必须使用 HTTPS，例如 `https://192.168.1.20:8024`。
+- `publicBaseUrl` 必须使用 HTTPS，例如 `https://192.168.1.20:8020`。
 - `zellijWebBaseUrl` 必须使用 HTTPS，并与 `publicBaseUrl` 使用相同主机名或 IP，例如 `https://192.168.1.20:8021`。
 - `zellij.configFile` 和 `zellij.webTokenDatabaseFile` 必须指向运行服务用户的 Zellij 配置及数据目录。
+- `openVsCode.executableFile` 指向独立下载脚本安装的程序，`openVsCode.port` 默认是 `8023`，且不能与管理、Zellij Web 或 code-viewer 端口冲突。
 
 生成权限受限的目录 ID secret：
 
@@ -114,7 +130,7 @@ npm start -- --workspace-root /实际/workspace/路径
 node dist/server.js --config config.json --workspace-root /实际/workspace/路径
 ```
 
-服务启动后，在浏览器访问 `config.json` 中配置的 `publicBaseUrl`。默认监听端口为 `8024`，例如 `https://192.168.1.20:8024`。管理页面无需登录，但必须通过防火墙限制为仅允许 VPN 或公司内网访问。
+服务启动后，在浏览器访问 `config.json` 中配置的 `publicBaseUrl`。默认监听端口为 `8020`，例如 `https://192.168.1.20:8020`。管理页面无需登录，但必须通过防火墙限制为仅允许 VPN 或公司内网访问。
 
 在前台运行时按 `Ctrl+C` 停止服务。停止管理服务不会删除已存在的 Zellij Session。
 
@@ -132,7 +148,15 @@ npm run service:start -- /实际/workspace/路径
 npm run service:stop
 ```
 
-脚本把 PID 写入 `data/terminal-web.pid`，把标准输出和错误日志写入 `data/terminal-web.log`。停止脚本只停止该 PID 对应的管理服务，不删除 Zellij Session。
+统一重启管理服务、Zellij Web、当前 code-viewer 和 OpenVSCode：
+
+```bash
+npm run service:restart -- /实际/workspace/路径
+```
+
+主页也提供“重启后台服务”按钮。重启会先优雅停止管理服务和 viewer，再校验并清理由本项目启动的 Zellij Web、OpenVSCode 进程组、PID 文件和配置端口，随后使用同一 workspace 重新拉起；不会删除 Zellij Session。若端口属于无法验证的其他进程，脚本会失败而不会误杀。网页触发的详细输出写入 `data/service-restart.log`。
+
+脚本把 PID 写入 `data/terminal-web.pid`，把标准输出和错误日志写入 `data/terminal-web.log`。统一重启还维护 `data/zellij-web.pid` 和 `data/openvscode.pid`；停止脚本只停止该 PID 对应的管理服务，并在最多 10 秒的优雅退出等待期显示百分比和耗时进度；超时后会明确提示并发送 `SIGKILL`，不会删除 Zellij Session。
 
 `npm install` 会安装项目依赖 `@youtyan/code-viewer@0.10.0`，服务端直接解析项目本地可执行文件，不要求系统单独安装 code-viewer，也不依赖全局 PATH。安装过程还会检查项目路径和 PATH 中的 Zellij；若都不存在，会把官方固定版本 `0.44.3` 安装到 `data/bin/zellij`。后端启动时会再次执行 Zellij 检查，因而使用 `--ignore-scripts` 安装后仍能自动补齐。
 
@@ -161,4 +185,4 @@ npm run probe:mvp1
 ZELLIJ_WEB_BASE_URL=https://127.0.0.1:8021 ZELLIJ_WEB_INSECURE=1 npm run probe:mvp0
 ```
 
-每个 Git 仓库固定对应一个服务端命名的 Zellij Session：不存在时可创建，存在时可直接打开或删除。仓库条目同时提供“打开 code-viewer”；code-viewer `0.10.0` 使用 `127.0.0.1:8022`，浏览器通过管理服务的同源 viewer URL 访问；当前为单活动实例，切换仓库时会停止旧实例，不会公开 localhost 上游端口。
+每个 Git 仓库固定对应一个服务端命名的 Zellij Session：不存在时可创建，存在时可直接打开或删除。仓库条目同时提供“打开 code-viewer”和“编辑代码”；code-viewer `0.10.0` 使用 `127.0.0.1:8022`，浏览器通过管理服务的同源 viewer URL 访问；当前为单活动实例，切换仓库时会停止旧实例，不会公开 localhost 上游端口。“编辑代码”会打开后端根据当前主机、`openVsCode.port` 和已校验 repository 目录生成的独立 OpenVSCode Server 地址（默认端口 `8023`），并通过 `folder` 参数自动打开该仓库。部署时应以管理服务相同的 workspace root 启动 OpenVSCode，并通过防火墙限制为仅允许 VPN/公司内网访问。

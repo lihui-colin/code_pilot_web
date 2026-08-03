@@ -1,4 +1,4 @@
-import type { ReadinessResult, RepositoryListing, SessionInfo, ViewerInstance, ZellijWebTokenInfo } from '../domain/types.js';
+import type { ReadinessResult, RepositoryListingResponse, SessionInfo, ViewerInstance, ZellijWebTokenInfo } from '../domain/types.js';
 
 interface ApiErrorBody {
   error?: { message?: string };
@@ -39,8 +39,8 @@ export async function getSessions(): Promise<SessionInfo[]> {
   return result.sessions;
 }
 
-export function getRepositories(): Promise<RepositoryListing> {
-  return getJson<RepositoryListing>('/api/repositories');
+export function getRepositories(): Promise<RepositoryListingResponse> {
+  return getJson<RepositoryListingResponse>('/api/repositories');
 }
 
 export function createSession(repositoryId: string): Promise<SessionInfo> {
@@ -81,4 +81,8 @@ export async function deleteZellijToken(): Promise<void> {
     const result = await response.json().catch(() => ({})) as ApiErrorBody;
     throw new Error(result.error?.message ?? `请求失败（HTTP ${response.status}）`);
   }
+}
+
+export async function restartServices(): Promise<void> {
+  await postJson<{ status: 'restarting' }>('/api/services/restart', {});
 }

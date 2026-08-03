@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ReadinessResult, RepositoryListing, SessionInfo, ZellijWebTokenInfo } from '../domain/types.js';
+import type { ReadinessResult, RepositoryListingResponse, SessionInfo, ZellijWebTokenInfo } from '../domain/types.js';
 import {
   createSession,
   createViewer,
@@ -10,6 +10,7 @@ import {
   getSessions,
   getZellijToken,
   regenerateZellijToken,
+  restartServices,
 } from './api.js';
 
 interface DashboardState {
@@ -20,13 +21,14 @@ interface DashboardState {
 
 export function App() {
   const [dashboard, setDashboard] = useState<DashboardState | null>(null);
-  const [repositories, setRepositories] = useState<RepositoryListing | null>(null);
+  const [repositories, setRepositories] = useState<RepositoryListingResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyRepositoryId, setBusyRepositoryId] = useState<string | null>(null);
   const [busySessionName, setBusySessionName] = useState<string | null>(null);
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
+  const [servicesRestarting, setServicesRestarting] = useState(false);
   const copyFeedbackTimer = useRef<number | undefined>(undefined);
 
   const refreshDashboard = useCallback(async () => {
@@ -168,6 +170,33 @@ export function App() {
     }
   }, []);
 
+  const restartAllServices = async () => {
+    if (!window.confirm('重启会断开当前 Zellij Web、code-viewer 和 OpenVSCode 连接，但不会删除 Zellij Session。是否继续？')) return;
+    setServicesRestarting(true);
+    try {
+      await restartServices();
+      setError(null);
+      let observedShutdown = false;
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        await new Promise(resolve => window.setTimeout(resolve, 1_000));
+        try {
+          const response = await fetch('/api/health', { credentials: 'same-origin' });
+          if (response.ok && observedShutdown) {
+            window.location.reload();
+            return;
+          }
+          if (!response.ok) observedShutdown = true;
+        } catch {
+          observedShutdown = true;
+        }
+      }
+      throw new Error('服务重启超时，请检查后台重启日志。');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '服务重启失败');
+      setServicesRestarting(false);
+    }
+  };
+
   useEffect(() => {
     void refreshDashboard();
     void refreshRepositories();
@@ -197,6 +226,12 @@ export function App() {
           <p className="hero-title-subtitle">Zellij管理与代码浏览</p>
           <p className="subtitle">通过公司内网 HTTPS 入口管理 Zellij Session 并浏览代码。</p>
         </div>
+        <button
+          className="restart-button"
+          type="button"
+          disabled={servicesRestarting}
+          onClick={() => void restartAllServices()}
+        >{servicesRestarting ? '服务重启中…' : '重启后台服务'}</button>
       </header>
 
       {error && <div className="error" role="alert">{error}</div>}
@@ -332,6 +367,12 @@ export function App() {
                   onClick={() => void browseCode(entry.id)}
                   disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
                 >打开 code-viewer</button>
+                <a
+                  className="button-link editor-link"
+                  href={entry.openVsCodeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >编辑代码</a>
               </div>
             </article>
           ))}

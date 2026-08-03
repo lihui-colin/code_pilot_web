@@ -10,12 +10,14 @@ zellij_token_database_file="${XDG_DATA_HOME:-$HOME/.local/share}/zellij/tokens.d
 
 host=""
 listen_host="0.0.0.0"
-service_port="8024"
+service_port="8020"
 zellij_port="8021"
 viewer_port="8022"
+openvscode_port="8023"
 non_interactive=false
 managed_zellij_file="$HOME/.local/bin/zellij"
 project_zellij_file="$project_root/data/bin/zellij"
+openvscode_executable_file="$project_root/data/openvscode/current/bin/openvscode-server"
 
 usage() {
     cat <<'EOF'
@@ -23,9 +25,10 @@ Usage: scripts/init.sh [options]
 
 Options:
   --host <ip-or-hostname>     Browser-facing IP address or hostname
-  --service-port <port>      Terminal Web HTTPS port (default: 8024)
+  --service-port <port>      Terminal Web HTTPS port (default: 8020)
   --zellij-port <port>       Zellij Web HTTPS port (default: 8021)
-    --viewer-port <port>       Local code-viewer port (default: 8022)
+  --viewer-port <port>       Local code-viewer port (default: 8022)
+  --openvscode-port <port>   OpenVSCode HTTP port (default: 8023)
   --listen-host <address>    Terminal Web listen address (default: 0.0.0.0)
   --non-interactive          Fail instead of prompting for missing values
   -h, --help                 Show this help
@@ -78,6 +81,11 @@ while [[ $# -gt 0 ]]; do
             viewer_port="$2"
             shift 2
         ;;
+        --openvscode-port)
+            require_value "$1" "${2:-}"
+            openvscode_port="$2"
+            shift 2
+        ;;
         --listen-host)
             require_value "$1" "${2:-}"
             listen_host="$2"
@@ -102,6 +110,7 @@ if [[ "$non_interactive" == false ]]; then
     service_port="$(prompt_with_default "Terminal Web HTTPS port" "$service_port")"
     zellij_port="$(prompt_with_default "Zellij Web HTTPS port" "$zellij_port")"
     viewer_port="$(prompt_with_default "Local code-viewer port" "$viewer_port")"
+    openvscode_port="$(prompt_with_default "OpenVSCode HTTP port" "$openvscode_port")"
 fi
 
 [[ -n "$host" ]] || die "--host is required"
@@ -111,8 +120,14 @@ fi
 validate_port "service port" "$service_port"
 validate_port "Zellij port" "$zellij_port"
 validate_port "viewer port" "$viewer_port"
-[[ "$service_port" != "$zellij_port" && "$service_port" != "$viewer_port" && "$zellij_port" != "$viewer_port" ]] \
-|| die "service, Zellij, and viewer ports must be different"
+validate_port "OpenVSCode port" "$openvscode_port"
+[[ "$service_port" != "$zellij_port" \
+    && "$service_port" != "$viewer_port" \
+    && "$service_port" != "$openvscode_port" \
+    && "$zellij_port" != "$viewer_port" \
+    && "$zellij_port" != "$openvscode_port" \
+    && "$viewer_port" != "$openvscode_port" ]] \
+|| die "service, Zellij, viewer, and OpenVSCode ports must be different"
 
 local_zellij_version=""
 project_zellij_version=""
@@ -201,6 +216,10 @@ else
     trap - EXIT
 fi
 
+echo "Installing OpenVSCode Server 1.109.5..."
+"$project_root/scripts/download-openvscode.sh"
+[[ -x "$openvscode_executable_file" ]] || die "OpenVSCode executable was not installed"
+
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
     echo "Installing nvm $nvm_version..."
@@ -214,10 +233,11 @@ echo "Installing Node.js $node_version..."
 nvm install "$node_version"
 nvm use "$node_version"
 
-HOST_VALUE="$host" node --input-type=module <<'NODE'
+HOST_VALUE="$host" SERVICE_PORT_VALUE="$service_port" node --input-type=module <<'NODE'
 const host = process.env.HOST_VALUE;
+const servicePort = process.env.SERVICE_PORT_VALUE;
 try {
-    const url = new URL(`https://${host}:8024`);
+    const url = new URL(`https://${host}:${servicePort}`);
     if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error();
 } catch {
     console.error('Error: --host must be a valid hostname, IPv4 address, or bracketed IPv6 address');
@@ -243,6 +263,8 @@ LISTEN_HOST_VALUE="$listen_host" \
 SERVICE_PORT_VALUE="$service_port" \
 ZELLIJ_PORT_VALUE="$zellij_port" \
 VIEWER_PORT_VALUE="$viewer_port" \
+OPENVSCODE_PORT_VALUE="$openvscode_port" \
+OPENVSCODE_EXECUTABLE_VALUE="$openvscode_executable_file" \
 ZELLIJ_CONFIG_VALUE="$zellij_config_file" \
 ZELLIJ_TOKEN_DB_VALUE="$zellij_token_database_file" \
 ZELLIJ_BINARY_VALUE="$managed_zellij_file" \
@@ -264,6 +286,10 @@ const config = {
     webTokenDatabaseFile: process.env.ZELLIJ_TOKEN_DB_VALUE,
     webCertificateFile: process.env.CERTIFICATE_FILE_VALUE,
     webPrivateKeyFile: process.env.PRIVATE_KEY_FILE_VALUE,
+  },
+  openVsCode: {
+    executableFile: process.env.OPENVSCODE_EXECUTABLE_VALUE,
+    port: Number(process.env.OPENVSCODE_PORT_VALUE),
   },
   directoryIdSecretFile: 'data/directory-id.secret',
   viewerPortRange: {
@@ -325,5 +351,7 @@ npm run build
 
 echo
 echo "Configuration initialization complete."
-echo "The management service was not started."
+echo "The management service and OpenVSCode Server were not started."
+echo "OpenVSCode executable: $openvscode_executable_file"
+echo "OpenVSCode port: $openvscode_port"
 echo "The self-signed certificate and Zellij token will be created when the service is started separately."

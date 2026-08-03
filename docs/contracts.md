@@ -9,10 +9,13 @@
 - Node.js：`26.x`（当前验证版本 `26.5.1`）。
 - Zellij：`0.44.3`。
 - code-viewer：`0.10.0`。
+- OpenVSCode Server：`1.109.5`。
 
-启动时检查实际版本。版本不匹配时，进程可以启动并提供 `/api/health`，但 `/api/ready` 返回 `503`，所有写操作被拒绝。
+管理服务启动时检查 Node.js、Zellij 和 code-viewer 的实际版本。版本不匹配时，进程可以启动并提供 `/api/health`，但 `/api/ready` 返回 `503`，所有写操作被拒绝。OpenVSCode 版本由独立下载脚本在安装时验证。
 
 code-viewer 以固定生产依赖 `@youtyan/code-viewer@0.10.0` 写入 `package.json` 和锁文件，由 `npm install` 自动安装。管理服务必须解析并使用项目本地包中的 `dist/code-viewer.js`，版本检查和实例启动使用同一文件，不依赖全局安装或 PATH 中的同名命令。
+
+OpenVSCode Server 使用独立脚本 `scripts/download-openvscode.sh` 从官方 GitHub Release 下载固定版本。脚本必须显示下载进度，按 Linux x64、arm64 或 armhf 选择官方归档，验证官方发布页固定的 SHA-256 摘要和解压后的 `bin/openvscode-server --version`，再安装到 `data/openvscode/openvscode-server-v1.109.5-linux-<arch>/`，并原子更新 `data/openvscode/current` 符号链接。`init.sh` 必须调用该脚本并把 `current/bin/openvscode-server` 及配置端口写入 `config.json`。
 
 Zellij `0.44.3` 同时作为项目管理的固定二进制依赖：
 
@@ -38,15 +41,27 @@ Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。
 
 ### 1.3 HTTPS 监听与访问边界
 
-管理服务提供 HTTPS，可以把 `listenHost` 配置为具体 IP 或 `0.0.0.0`。使用 `0.0.0.0` 时，`publicBaseUrl` 必须填写浏览器实际访问的 HTTPS IP 或域名，不得使用通配地址生成前端 URL。
+管理服务提供 HTTPS，`listenPort` 默认使用 `8020`，可以把 `listenHost` 配置为具体 IP 或 `0.0.0.0`。使用 `0.0.0.0` 时，`publicBaseUrl` 必须填写浏览器实际访问的 HTTPS IP 或域名，不得使用通配地址生成前端 URL。
 
 启动脚本必须在构建和拉起进程前检查 PID 文件、管理服务 `listenHost:listenPort`，以及 `viewerPortRange` 中所有 localhost code-viewer 端口。本项目服务已在运行、PID 文件指向其他存活进程，或管理服务或 code-viewer 端口已被占用时，启动脚本必须以非零状态退出，且不得覆盖 PID 文件或启动新服务进程。Zellij Web 是独立服务，其端口即使已在运行也不得阻止管理服务启动。
+
+统一重启通过固定的 `scripts/restart-service.sh <workspace-root> [config-file]` 执行。网页只能调用不接受路径、命令、参数或环境变量的 `POST /api/services/restart`；后端只向脚本传入启动时已校验的 workspace root 和配置文件。接口返回 `202` 后，脚本必须：
+
+1. 向管理服务发送 `SIGTERM`，等待其停止当前 code-viewer 进程组。
+2. 调用固定 Zellij CLI 的 `web --stop`，只停止 Zellij Web，不删除任何 Zellij Session。
+3. 按项目可执行路径、固定参数、配置文件和端口共同验证遗留的管理服务、code-viewer、Zellij Web 与 OpenVSCode 进程身份；只终止验证通过的进程或独立进程组。
+4. 删除本项目的陈旧 PID 记录，并确认管理、viewer、Zellij Web 和 OpenVSCode 配置端口均已释放。端口属于无法验证的进程时重启失败，不得误杀或覆盖端口。
+5. 使用同一 workspace root 重新启动 Zellij Web、OpenVSCode 和管理服务，并原子重建权限为 `0600` 的 PID 文件。
+
+网页触发的重启输出追加到 `data/service-restart.log`。部分启动失败时必须再次执行相同的身份校验和端口清理；Zellij Session 始终保留。
 
 管理应用不设置用户名、密码、Basic Auth、Bearer Token 或登录页面。页面、API 和后续 viewer 代理在 VPN/公司内网边界内通过 HTTPS 访问，并复用 Zellij Web 证书和私钥。
 
 `publicBaseUrl` 和 `zellijWebBaseUrl` 必须为 HTTPS，并使用相同主机名或 IP。Zellij Web 的登录 Cookie 为 `Secure; SameSite=Strict`，同主机 HTTPS 入口确保从管理页面打开 Session 时能够复用 Remember me 登录。两者都不得包含查询参数、片段或应用路径，也不得使用 `0.0.0.0` 或 `[::]` 作为浏览器地址。配置中的文件路径相对配置文件所在目录解析。
 
 配置必须提供项目托管 Zellij 二进制路径、Zellij 默认 `config.kdl` 路径、Zellij Web 证书路径和私钥路径。管理服务启动时先确认 `config.kdl` 是普通文件，并在顶层原子补充或修正 `web_sharing "on"`，同时保留原文件权限。这样之后通过普通 `zellij --session <name>` 创建的新 Session 会允许运行中的 Zellij Web 附加。
+
+配置还必须提供 `openVsCode.executableFile` 和 `openVsCode.port`。端口默认 `8023`，且不得与管理端口、Zellij Web 端口或任一 code-viewer 端口冲突。OpenVSCode 路径相对配置文件所在目录解析。
 
 `web_sharing` 是 Session 创建时读取的选项，不会追溯修改已经运行的 Session。启用前创建且未主动共享的 Session 需要停止后用相同命令重新创建；管理服务不得为此自动删除现有 Session。
 
@@ -381,6 +396,24 @@ API 和 viewer 代理均不要求应用层登录。上游端口不得监听公�
 
 不得自动改为公开端口池。通用多实例限制见 [ADR-002](decisions/002-viewer-proxy.md)，当前兼容结构见 [ADR-004](decisions/004-single-viewer-compatibility-proxy.md)。
 
+### 4.5 OpenVSCode 编辑入口
+
+每个 repository 条目的“打开 code-viewer”旁边显示“编辑代码”链接。链接在新标签页打开，并设置 `rel="noopener noreferrer"`。
+
+OpenVSCode Server 是部署侧独立启动的编辑服务。后端必须对每个 repository ID 重新执行真实路径解析、Git repository 检查和 workspace containment 校验，然后根据 `publicBaseUrl` 的主机名、`openVsCode.port` 和校验后的 repository 绝对路径生成 `http://<host>:<port>/?folder=<encoded-absolute-path>`。`GET /api/repositories` 在每个 repository 条目中返回对应的 `openVsCodeUrl`；OpenVSCode 将 `folder` 参数解析为远程目录并自动打开该 repository。
+
+前端必须直接使用条目中的 `openVsCodeUrl`，不得接收用户输入的目录，也不得自行拼接或提交服务器绝对路径、命令、环境变量或任意端口。后端不得为 workspace 之外、已经消失或不再是 Git repository 的目录生成 OpenVSCode URL。
+
+OpenVSCode 进程的工作目录必须设置为配置给管理服务的同一 workspace root。部署命令的参数数组固定为：
+
+```text
+["--host", "0.0.0.0", "--port", String(openVsCode.port), "--without-connection-token", "--accept-server-license-terms", "--telemetry-level", "off"]
+```
+
+该入口不由 code-viewer 代理处理，也不改变 code-viewer 只监听 localhost 的约束。OpenVSCode 端口只能由配置和部署侧决定，不能由前端请求修改。
+
+OpenVSCode 平时仍是独立进程，但统一重启脚本负责停止并重新拉起本项目配置的实例。停止时必须校验可执行文件安装目录和固定端口，并终止其独立进程组，以清理 Server、Extension Host 等子进程；不得按进程名全局终止其他 OpenVSCode 实例。
+
 ## 5. API 契约
 
 ### 5.1 路由
@@ -399,8 +432,9 @@ API 和 viewer 代理均不要求应用层登录。上游端口不得监听公�
 | `GET` | `/api/viewers` | `200` | 当前进程的 viewer 列表 |
 | `POST` | `/api/viewers` | `200` 或 `201` | 复用或创建 viewer |
 | `DELETE` | `/api/viewers/:id` | `204` | 停止 viewer |
+| `POST` | `/api/services/restart` | `202` | 重启管理、Zellij Web、code-viewer 和 OpenVSCode 服务 |
 
-`DELETE` 请求不接受请求体。`GET /api/viewers` 按 `createdAt` 升序返回。
+`DELETE` 请求不接受请求体。`POST /api/services/restart` 只接受空 JSON 对象并拒绝额外字段。`GET /api/viewers` 按 `createdAt` 升序返回。
 
 ### 5.2 错误响应
 
@@ -449,9 +483,11 @@ Fastify 为请求、查询和响应配置 schema；Zod 定义共享领域类型�
 
 管理应用不提供应用层认证，不要求用户名、密码、Bearer Token 或登录 Cookie，也不提供 `/api/me`。
 
-页面、API 和 viewer 代理必须同源 HTTPS。Zellij Web 使用同主机、不同端口的 HTTPS 入口。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
+页面、API 和 viewer 代理必须同源 HTTPS。Zellij Web 使用同主机、不同端口的 HTTPS 入口。OpenVSCode 是显式例外，使用同主机、配置端口（默认 `8023`）的独立 HTTP 入口。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
 
-访问控制由 VPN/公司内网和主机防火墙承担。公开管理端口和 Zellij Web 端口只允许受控网段访问；code-viewer 上游端口只监听 localhost。
+服务重启接口同样执行严格同源校验。前端不能提交 workspace、配置文件、端口、PID、命令、环境变量或服务列表。
+
+访问控制由 VPN/公司内网和主机防火墙承担。公开管理端口、Zellij Web 端口和配置的 OpenVSCode 端口只允许受控网段访问；code-viewer 上游端口只监听 localhost。
 
 Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理专用 Zellij Web Token，并只通过主页专用接口展示。Token 管理写请求必须执行同源 Origin 校验。
 
@@ -495,12 +531,16 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 
 首版不接管历史 viewer。历史 PID 只在同时验证命令和启动时间属于本服务时终止，随后清空 viewer 和端口记录。用户下次访问时重新创建。
 
+`scripts/stop-service.sh` 必须先验证 PID 文件指向本项目的管理服务，再发送 `SIGTERM`。在最多 10 秒的优雅退出等待期内，交互终端必须显示单行百分比和耗时进度，非交互输出必须至少每秒记录一次进度。服务提前退出时显示实际耗时并删除 PID 文件；超时后明确显示升级为 `SIGKILL`，且不得删除 Zellij Session。
+
 收到 `SIGTERM` 时：
 
 1. 停止接受新请求。
 2. 最多等待 10 秒完成进行中的请求和状态写入。
 3. 停止所有当前管理的 viewer 进程组。
 4. 不删除 Zellij Session。
+
+统一重启复用上述退出流程；管理进程退出后还必须清理已确认属于本项目的遗留 viewer 进程组和端口记录，然后才能重新启动支持服务。
 
 理由见 [ADR-003](decisions/003-state-recovery.md)。
 
@@ -520,3 +560,4 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 - viewer URL 不持久化到 localStorage。
 - 主页明确显示 Zellij Web Token 名称和值，并提供复制、删除和重新创建操作。
 - 删除和重新创建 Token 必须二次确认；Token 操作完成后立即更新页面状态。
+- 页面提供“重启后台服务”操作并二次确认，明确提示现有 Web/编辑连接会断开但 Zellij Session 会保留。请求被接受后按钮保持禁用，前端等待管理服务实际离线并恢复健康后刷新页面。

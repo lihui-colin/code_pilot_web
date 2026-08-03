@@ -1,9 +1,11 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { loadConfiguration, persistZellijWebToken } from './config.js';
 import { checkToolReadiness } from './services/tool-readiness.js';
 import { StateStore } from './services/state-store.js';
+import { SpawnServiceRestarter } from './services/service-restarter.js';
 import { bootstrapZellij } from './services/zellij-bootstrap.js';
 import { ExecFileZellijAdapter, parseSessionNames } from './services/zellij-service.js';
 import { ZellijTokenService } from './services/zellij-token-service.js';
@@ -39,6 +41,7 @@ async function main(): Promise<void> {
     zellijBootstrap.zellij.executablePath,
     codeViewerExecutablePath,
   );
+  const projectRoot = fileURLToPath(new URL('../', import.meta.url));
   const app = await createApp(loaded.config, {
     readiness,
     directoryIdSecret: loaded.directoryIdSecret,
@@ -47,6 +50,12 @@ async function main(): Promise<void> {
     persistManagedSessions: sessions => stateStore.persist(sessions),
     codeViewerExecutablePath,
     zellijTokenService,
+    serviceRestarter: new SpawnServiceRestarter(
+      path.join(projectRoot, 'scripts/restart-service.sh'),
+      loaded.config.workspaceRootRealPath,
+      loaded.configFilePath,
+      path.join(projectRoot, 'data/service-restart.log'),
+    ),
     staticRoot: path.resolve('dist/web'),
   });
 

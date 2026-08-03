@@ -73,8 +73,8 @@ terminal_web/
 ```json
 {
   "listenHost": "0.0.0.0",
-  "listenPort": 8024,
-  "publicBaseUrl": "https://192.0.2.10:8024",
+  "listenPort": 8020,
+  "publicBaseUrl": "https://192.0.2.10:8020",
   "zellijWebBaseUrl": "https://192.0.2.10:8021",
   "zellij": {
     "managedBinaryFile": "data/bin/zellij",
@@ -190,6 +190,7 @@ terminal_web/
 - 公司统一认证、权限审计和完整审计日志。
 - systemd 服务、固定版本和防火墙规则。
 - 优雅退出、请求排空和 viewer 进程组清理。
+- 固定同源重启接口与统一服务脚本，安全清理并重新拉起管理服务、Zellij Web、code-viewer 和 OpenVSCode。
 
 验收条件：服务可长期运行并在主机重启后自动启动，不产生失控 viewer，只有 VPN 内授权用户能够操作。
 
@@ -216,4 +217,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ```
 
-管理应用监听 `0.0.0.0:8024` 并提供 HTTPS；Zellij Web 使用同主机的 `8021`，两者复用证书；code-viewer 使用 `8022` 且上游仍只能监听 `127.0.0.1`。管理应用不设置用户或密码，防火墙必须把公开端口限制在 VPN/公司内网。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij 和证书目录，但不能扩大为 root 权限。
+管理应用默认监听 `0.0.0.0:8020` 并提供 HTTPS；Zellij Web 使用同主机的 `8021`，两者复用证书；code-viewer 使用 `8022` 且上游仍只能监听 `127.0.0.1`；独立 OpenVSCode Server 默认使用同主机的 `8023` HTTP 入口并以相同 workspace root 启动。OpenVSCode 固定版本由独立下载脚本安装，端口由 `init.sh` 写入配置。管理应用不设置用户或密码，防火墙必须把公开端口限制在 VPN/公司内网。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij、OpenVSCode 和证书目录，但不能扩大为 root 权限。

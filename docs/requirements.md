@@ -47,6 +47,8 @@ Session 列表至少展示：
 
 管理服务退出或重启时不得删除 Zellij Session。
 
+主页提供统一“重启后台服务”操作。重启会断开当前 Zellij Web、code-viewer 和 OpenVSCode 浏览器连接，必须二次确认；后台应清理本项目管理的相关进程、进程组、PID 状态和配置端口后重新拉起服务，但不得按名称误杀其他项目实例或删除 Zellij Session。
+
 ## 工作目录体验
 
 管理服务启动时必须传入工作目录：
@@ -134,10 +136,11 @@ node dist/server.js --workspace-root /home/lihui/projects
 - 尚无对应 Session 时显示“创建 Zellij Session”，在该 repository 的真实目录创建 Codex Session。
 - 已有对应 Session 时显示“打开 Zellij Web”和“删除 Session”；打开仓库绑定的 Session 时自动复制当前 Zellij Web Token，并显示复制结果；服务重启后仍通过固定名称识别对应关系。
 - “打开 code-viewer”：打开空白标签页，启动或复用该 repository 的 code-viewer，成功后导航到管理服务同源 viewer 地址。
+- “编辑代码”：在“打开 code-viewer”旁边以新标签页打开后端为该 repository 生成的 OpenVSCode Server 地址，默认端口为 `8023`，并通过 `folder` 参数自动打开该 repository。OpenVSCode 由部署侧使用配置的 workspace root 启动；后端重新校验 repository 真实路径和 workspace 边界，前端不提交或拼接目录、绝对路径、命令或环境变量。
 - code-viewer 只监听 localhost，上游端口不对 VPN 网络开放。
 - 写请求执行同源校验。
 - 记录 Session 创建、删除和 viewer 启停审计日志。
-- 主机防火墙只允许 VPN 网段访问公开入口和 Zellij Web。
+- 主机防火墙只允许 VPN 网段访问公开入口、Zellij Web 和配置的 OpenVSCode Server 端口。
 
 ## 与现有脚本的关系
 

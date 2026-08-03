@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getReadiness } from '../src/web/api.js';
+import { getReadiness, restartServices } from '../src/web/api.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -17,5 +17,22 @@ describe('web API', () => {
     })));
 
     await expect(getReadiness()).resolves.toEqual(result);
+  });
+
+  it('requests a fixed same-origin backend service restart', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'restarting' }), {
+      status: 202,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await restartServices();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/services/restart', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
   });
 });

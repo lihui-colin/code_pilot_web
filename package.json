@@ -18,6 +18,7 @@
     "probe:mvp1": "node scripts/probe-mvp1.mjs",
     "probe:zellij-web-attach": "node scripts/probe-zellij-web-attach.mjs",
     "service:start": "scripts/start-service.sh",
+    "service:restart": "scripts/restart-service.sh",
     "service:stop": "scripts/stop-service.sh",
     "start": "node dist/server.js --config config.json",
     "test": "vitest run --config vitest.config.ts",

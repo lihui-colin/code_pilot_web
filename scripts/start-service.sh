@@ -3,7 +3,7 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-config_file="$project_root/config.json"
+config_file="${2:-$project_root/config.json}"
 pid_file="$project_root/data/terminal-web.pid"
 log_file="$project_root/data/terminal-web.log"
 
@@ -14,10 +14,12 @@ print_started() {
     echo "Log: $log_file"
 }
 
-if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 <workspace-root>" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+    echo "Usage: $0 <workspace-root> [config-file]" >&2
     exit 2
 fi
+
+config_file="$(realpath "$config_file")"
 
 access_url="$(node --input-type=module - "$config_file" <<'NODE'
 import { readFileSync } from 'node:fs';
@@ -100,25 +102,7 @@ printf '%s\n' "$service_pid" > "$temporary_pid_file"
 chmod 600 "$temporary_pid_file"
 mv "$temporary_pid_file" "$pid_file"
 
-for _ in {1..50}; do
-    if ! kill -0 "$service_pid" 2>/dev/null; then
-        rm -f "$pid_file"
-        echo "Terminal Web failed to start. Recent log output:" >&2
-        tail -n 20 "$log_file" >&2
-        exit 1
-    fi
-    if grep -q 'Server listening at' "$log_file"; then
-        print_started
-        exit 0
-    fi
-    sleep 0.1
-done
-
-echo "Terminal Web is still starting with PID $service_pid"
-echo "Log: $log_file"
-mv "$temporary_pid_file" "$pid_file"
-
-for _ in {1..50}; do
+for _ in {1..100}; do
     if ! kill -0 "$service_pid" 2>/dev/null; then
         rm -f "$pid_file"
         echo "Terminal Web failed to start. Recent log output:" >&2

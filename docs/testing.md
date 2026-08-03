@@ -132,7 +132,7 @@
 
 ## MVP-3：Viewer 管理
 
-当前首版仓库页面覆盖：点击“打开 code-viewer”会先同步打开空白标签页，再通过 API 启动或复用 localhost:8022 的 code-viewer，并导航到同源 viewer 地址；切换仓库会停止旧实例。repository 没有对应 Session 时显示创建按钮，已有时显示安全打开链接和删除按钮。
+当前首版仓库页面覆盖：点击“打开 code-viewer”会先同步打开空白标签页，再通过 API 启动或复用 localhost:8022 的 code-viewer，并导航到同源 viewer 地址；切换仓库会停止旧实例。repository 没有对应 Session 时显示创建按钮，已有时显示安全打开链接和删除按钮。“打开 code-viewer”旁边显示“编辑代码”链接，安全地在新标签页打开后端为该 repository 生成的 OpenVSCode URL；URL 的 `folder` 参数必须等于重新执行真实路径和 workspace containment 校验后的 repository 目录，前端不得自行拼接路径。
 
 1. 请求额外字段和非法 ID 被拒绝。
 2. 非 repository 或越界目录无法启动 viewer。
@@ -176,6 +176,12 @@
 13. 防火墙规则只允许 VPN/公司内网访问管理端口。
 14. 日志和错误响应不包含 Token、绝对路径或命令输出。
 15. systemd 重启后服务自动恢复 ready 状态。
+16. 停止脚本在 10 秒优雅退出等待期显示百分比和耗时进度，提前退出和升级 `SIGKILL` 都有明确结果提示。
+17. 同源重启请求返回 `202`，额外字段和跨 Origin 请求被拒绝。
+18. 重启先优雅停止管理服务和当前 viewer，再停止 Zellij Web 与 OpenVSCode；Zellij Session 保持存在。
+19. 只有命令路径、固定参数和端口均匹配本项目的遗留进程会被终止；无关进程占用任一配置端口时重启失败且不误杀。
+20. OpenVSCode 和 code-viewer 的独立进程组及子进程被清理，PID 文件以 `0600` 重建，配置端口不残留旧监听者。
+21. 前端二次确认后发送固定空请求，重启期间禁用按钮，并在观察到服务离线后等待恢复再刷新。
 
 ## 完成标准
 

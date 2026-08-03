@@ -34,6 +34,82 @@ afterEach(async () => {
 });
 
 describe('MVP-1 routes', () => {
+  it('accepts a same-origin request to restart the managed backend services', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-restart-route-'));
+    temporaryDirectories.push(root);
+    let restarts = 0;
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      serviceRestarter: { restart: async () => { restarts += 1; } },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/services/restart',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ status: 'restarting' });
+    expect(restarts).toBe(1);
+    await app.close();
+  });
+
+  it('rejects cross-origin service restart requests', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-restart-origin-'));
+    temporaryDirectories.push(root);
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      serviceRestarter: { restart: async () => undefined },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/services/restart',
+      headers: { origin: 'https://attacker.example' },
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('ORIGIN_NOT_ALLOWED');
+    await app.close();
+  });
+
+  it('rejects service restart parameters from the frontend', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-restart-schema-'));
+    temporaryDirectories.push(root);
+    let restarts = 0;
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      serviceRestarter: { restart: async () => { restarts += 1; } },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/services/restart',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { port: 22, command: 'kill -9' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('INVALID_REQUEST');
+    expect(restarts).toBe(0);
+    await app.close();
+  });
+
   it('allows API requests without user credentials', async () => {
     const app = await testApp();
     const response = await app.inject({ method: 'GET', url: '/api/health' });
@@ -111,7 +187,11 @@ describe('MVP-1 routes', () => {
       logger: false,
     });
     const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
-    const repositoryId = listing.json().entries[0].id as string;
+    const repositoryEntry = listing.json().entries[0];
+    const openVsCodeUrl = new URL(repositoryEntry.openVsCodeUrl);
+    expect(openVsCodeUrl.origin).toBe('http://192.0.2.10:8023');
+    expect(openVsCodeUrl.searchParams.get('folder')).toBe(path.join(root, 'repository'));
+    const repositoryId = repositoryEntry.id as string;
     const response = await app.inject({
       method: 'POST',
       url: '/api/sessions',

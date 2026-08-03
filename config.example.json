@@ -1,7 +1,7 @@
 {
   "listenHost": "0.0.0.0",
-  "listenPort": 8024,
-  "publicBaseUrl": "https://192.0.2.10:8024",
+  "listenPort": 8020,
+  "publicBaseUrl": "https://192.0.2.10:8020",
   "zellijWebBaseUrl": "https://192.0.2.10:8021",
   "zellij": {
     "managedBinaryFile": "/home/user/.local/bin/zellij",
@@ -9,6 +9,10 @@
     "webTokenDatabaseFile": "/home/user/.local/share/zellij/tokens.db",
     "webCertificateFile": "data/zellij/certs/cert.pem",
     "webPrivateKeyFile": "data/zellij/certs/key.pem"
+  },
+  "openVsCode": {
+    "executableFile": "data/openvscode/current/bin/openvscode-server",
+    "port": 8023
   },
   "directoryIdSecretFile": "data/directory-id.secret",
   "viewerPortRange": {

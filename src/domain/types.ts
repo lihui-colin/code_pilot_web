@@ -62,6 +62,14 @@ export interface RepositoryListing {
   entries: DirectoryEntry[];
 }
 
+export interface RepositoryEntryResponse extends DirectoryEntry {
+  openVsCodeUrl: string;
+}
+
+export type RepositoryListingResponse = Omit<RepositoryListing, 'entries'> & {
+  entries: RepositoryEntryResponse[];
+};
+
 export interface ReadinessChecks {
   workspaceRoot: boolean;
   directoryIdSecret: boolean;

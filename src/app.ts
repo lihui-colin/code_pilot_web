@@ -9,6 +9,7 @@ import type { AppConfig } from './config.js';
 import type { ReadinessResult } from './domain/types.js';
 import { ApiError } from './errors.js';
 import { RepositoryService } from './services/repository-service.js';
+import type { ServiceRestarter } from './services/service-restarter.js';
 import { SpawnViewerProcessAdapter, ViewerManager } from './services/viewer-manager.js';
 import { proxyViewerRequest, viewerIdFromCookie } from './services/viewer-proxy.js';
 import { ExecFileZellijAdapter, repositorySessionName, ZellijService, type ManagedSessionMetadata } from './services/zellij-service.js';
@@ -25,6 +26,17 @@ const createViewerSchema = z.object({ repositoryId: repositoryIdSchema }).strict
 const emptyBodySchema = z.object({}).strict();
 const noBodySchema = z.undefined();
 
+function openVsCodeWebUrl(config: AppConfig, repositoryRealPath: string): string {
+  const url = new URL(config.publicBaseUrl);
+  url.protocol = 'http:';
+  url.port = String(config.openVsCodePort);
+  url.pathname = '/';
+  url.search = '';
+  url.searchParams.set('folder', repositoryRealPath);
+  url.hash = '';
+  return url.toString();
+}
+
 export interface AppDependencies {
   readiness: ReadinessResult;
   directoryIdSecret: Buffer | null;
@@ -35,6 +47,7 @@ export interface AppDependencies {
   persistManagedSessions?: (sessions: ReadonlyMap<string, ManagedSessionMetadata>) => Promise<void>;
   viewerManager?: ViewerManager;
   zellijTokenService?: ZellijTokenService;
+  serviceRestarter?: ServiceRestarter;
   staticRoot?: string | false;
   https?: false;
   logger?: boolean;
@@ -105,19 +118,22 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       const baseName = repositorySessionName(entry.name, entry.id);
       sessionBaseNameCounts.set(baseName, (sessionBaseNameCounts.get(baseName) ?? 0) + 1);
     }
+    const entries = await Promise.all(listing.entries.map(async entry => {
+      const repository = await repositoryService.resolveRepository(entry.id);
+      const viewer = viewerManager.currentFor(entry.id);
+      const baseName = repositorySessionName(entry.name, entry.id);
+      const sessionName = repositorySessionName(entry.name, entry.id, (sessionBaseNameCounts.get(baseName) ?? 0) > 1);
+      const session = sessionsByName.get(sessionName);
+      return {
+        ...entry,
+        openVsCodeUrl: openVsCodeWebUrl(config, repository.realPath),
+        viewer: viewer ? { id: viewer.id, status: viewer.status, webUrl: viewer.webUrl } : null,
+        session: session ? { name: session.name, status: session.status, webUrl: session.webUrl } : null,
+      };
+    }));
     return {
       ...listing,
-      entries: listing.entries.map(entry => {
-        const viewer = viewerManager.currentFor(entry.id);
-        const baseName = repositorySessionName(entry.name, entry.id);
-        const sessionName = repositorySessionName(entry.name, entry.id, (sessionBaseNameCounts.get(baseName) ?? 0) > 1);
-        const session = sessionsByName.get(sessionName);
-        return {
-          ...entry,
-          viewer: viewer ? { id: viewer.id, status: viewer.status, webUrl: viewer.webUrl } : null,
-          session: session ? { name: session.name, status: session.status, webUrl: session.webUrl } : null,
-        };
-      }),
+      entries,
     };
   });
   app.post('/api/sessions', async (request, reply) => {
@@ -170,6 +186,15 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     }
     const token = await dependencies.zellijTokenService.regenerate();
     await reply.code(201).send({ token });
+  });
+  app.post('/api/services/restart', async (request, reply) => {
+    requireSameOrigin(request.headers.origin);
+    emptyBodySchema.parse(request.body ?? {});
+    if (!dependencies.serviceRestarter) {
+      throw new ApiError(503, 'SERVICE_NOT_READY', 'Service restart is not available');
+    }
+    await dependencies.serviceRestarter.restart();
+    await reply.code(202).send({ status: 'restarting' });
   });
   app.delete('/api/zellij-token', async (request, reply) => {
     requireSameOrigin(request.headers.origin);
