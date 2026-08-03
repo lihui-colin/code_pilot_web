@@ -11,7 +11,7 @@ export const SESSION_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
 
 export interface ZellijAdapter {
   listSessions(): Promise<string>;
-  createSession?(arguments_: string[]): Promise<void>;
+  createSession?(arguments_: string[], cwd: string): Promise<void>;
   deleteSession?(arguments_: string[]): Promise<void>;
 }
 
@@ -40,12 +40,13 @@ export class ExecFileZellijAdapter implements ZellijAdapter {
     return stdout;
   }
 
-  async createSession(arguments_: string[]): Promise<void> {
+  async createSession(arguments_: string[], cwd: string): Promise<void> {
     const env = { ...process.env };
     for (const name of Object.keys(env)) {
       if (name === 'ZELLIJ' || name.startsWith('ZELLIJ_')) delete env[name];
     }
     await execFileAsync(this.executablePath, arguments_, {
+      cwd,
       encoding: 'utf8',
       timeout: 15_000,
       maxBuffer: 1024 * 1024,
@@ -244,7 +245,7 @@ export class ZellijService {
     const temporaryDirectory = await mkdtemp(path.join(this.layoutsDirectory, '.session-'));
     const layoutPath = path.join(temporaryDirectory, 'codex.kdl');
     try {
-      await writeFile(layoutPath, 'layout {\n    pane command="codex" {\n        args "300"\n    }\n}\n', { mode: 0o600 });
+      await writeFile(layoutPath, 'layout {\n    pane command="codex"\n}\n', { mode: 0o600 });
       await this.adapter.createSession([
         '--layout',
         layoutPath,
@@ -254,7 +255,7 @@ export class ZellijService {
         'options',
         '--default-cwd',
         repositoryRealPath,
-      ]);
+      ], repositoryRealPath);
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true });
     }

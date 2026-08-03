@@ -1,5 +1,5 @@
 import pino from 'pino';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -51,13 +51,16 @@ describe('ZellijService', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-zellij-session-'));
     temporaryDirectories.push(root);
     let sessions = '';
-    const createSession = vi.fn(async (arguments_: string[]) => {
+    const createSession = vi.fn(async (arguments_: string[], cwd: string) => {
       sessions = 'repo-session\n';
+      expect(cwd).toBe('/workspace/repository');
       expect(arguments_).toEqual([
         '--layout', expect.stringContaining('codex.kdl'),
         'attach', '--create-background', 'repo-session',
         'options', '--default-cwd', '/workspace/repository',
       ]);
+      const layoutPath = arguments_[1]!;
+      expect(await readFile(layoutPath, 'utf8')).toBe('layout {\n    pane command="codex"\n}\n');
     });
     const adapter: ZellijAdapter = { listSessions: async () => sessions, createSession };
     const service = new ZellijService(
