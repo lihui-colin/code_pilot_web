@@ -19,26 +19,6 @@ if [[ $# -ne 1 ]]; then
     exit 2
 fi
 
-workspace_root="$(realpath "$1")"
-if [[ ! -d "$workspace_root" || ! -r "$workspace_root" ]]; then
-    echo "Workspace root must be an existing readable directory: $workspace_root" >&2
-    exit 2
-fi
-
-if [[ -f "$pid_file" ]]; then
-    existing_pid="$(<"$pid_file")"
-    if [[ "$existing_pid" =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
-        command_line="$(tr '\0' ' ' < "/proc/$existing_pid/cmdline" 2>/dev/null || true)"
-        if [[ "$command_line" == *"$project_root/dist/server.js"* ]]; then
-            echo "Terminal Web is already running with PID $existing_pid" >&2
-        else
-            echo "PID file points to another running process: $existing_pid" >&2
-        fi
-        exit 1
-    fi
-    rm -f "$pid_file"
-fi
-
 service_config="$(node -p "const config = JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')); [config.listenHost, config.listenPort, config.publicBaseUrl].join('\\t')" "$config_file")"
 IFS=$'\t' read -r listen_host listen_port access_url <<< "$service_config"
 
@@ -59,6 +39,26 @@ server.once('error', error => {
 });
 server.listen({ host, port, exclusive: true }, () => server.close());
 NODE
+
+workspace_root="$(realpath "$1")"
+if [[ ! -d "$workspace_root" || ! -r "$workspace_root" ]]; then
+    echo "Workspace root must be an existing readable directory: $workspace_root" >&2
+    exit 2
+fi
+
+if [[ -f "$pid_file" ]]; then
+    existing_pid="$(<"$pid_file")"
+    if [[ "$existing_pid" =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
+        command_line="$(tr '\0' ' ' < "/proc/$existing_pid/cmdline" 2>/dev/null || true)"
+        if [[ "$command_line" == *"$project_root/dist/server.js"* ]]; then
+            echo "Terminal Web is already running with PID $existing_pid" >&2
+        else
+            echo "PID file points to another running process: $existing_pid" >&2
+        fi
+        exit 1
+    fi
+    rm -f "$pid_file"
+fi
 
 cd "$project_root"
 npm run build
