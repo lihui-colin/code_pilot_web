@@ -293,17 +293,17 @@ const configFile = process.env.ZELLIJ_CONFIG_VALUE;
 const originalStat = await stat(configFile);
 let content = await readFile(configFile, 'utf8');
 const settings = new Map([
-  ['mouse_mode', 'mouse_mode true'],
-  ['copy_on_select', 'copy_on_select true'],
-  ['scroll_buffer_size', 'scroll_buffer_size 500000'],
-  ['web_server', 'web_server true'],
-  ['web_sharing', 'web_sharing "on"'],
-  ['show_startup_tips', 'show_startup_tips false'],
-  ['show_release_notes', 'show_release_notes false'],
-  ['web_server_ip', 'web_server_ip "0.0.0.0"'],
-  ['web_server_port', `web_server_port ${process.env.ZELLIJ_PORT_VALUE}`],
-  ['web_server_cert', `web_server_cert "${process.env.CERTIFICATE_FILE_VALUE}"`],
-  ['web_server_key', `web_server_key "${process.env.PRIVATE_KEY_FILE_VALUE}"`],
+    ['mouse_mode', 'mouse_mode true'],
+    ['copy_on_select', 'copy_on_select true'],
+    ['scroll_buffer_size', 'scroll_buffer_size 500000'],
+    ['web_server', 'web_server true'],
+    ['web_sharing', 'web_sharing "on"'],
+    ['show_startup_tips', 'show_startup_tips false'],
+    ['show_release_notes', 'show_release_notes false'],
+    ['web_server_ip', 'web_server_ip "0.0.0.0"'],
+    ['web_server_port', `web_server_port ${process.env.ZELLIJ_PORT_VALUE}`],
+    ['web_server_cert', `web_server_cert "${process.env.CERTIFICATE_FILE_VALUE}"`],
+    ['web_server_key', `web_server_key "${process.env.PRIVATE_KEY_FILE_VALUE}"`],
 ]);
 
 for (const [name, replacement] of settings) {
