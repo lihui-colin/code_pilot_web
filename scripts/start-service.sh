@@ -3,8 +3,16 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+config_file="$project_root/config.json"
 pid_file="$project_root/data/terminal-web.pid"
 log_file="$project_root/data/terminal-web.log"
+
+print_started() {
+    echo "Terminal Web started with PID $service_pid"
+    echo "Access URL: $access_url"
+    echo "Workspace: $workspace_root"
+    echo "Log: $log_file"
+}
 
 if [[ $# -ne 1 ]]; then
     echo "Usage: $0 <workspace-root>" >&2
@@ -28,12 +36,13 @@ fi
 
 cd "$project_root"
 npm run build
+access_url="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).publicBaseUrl" "$config_file")"
 mkdir -p -m 700 data
 : > "$log_file"
 chmod 600 "$log_file"
 
 nohup node "$project_root/dist/server.js" \
---config "$project_root/config.json" \
+--config "$config_file" \
 --workspace-root "$workspace_root" \
 >> "$log_file" 2>&1 &
 service_pid=$!
@@ -51,9 +60,7 @@ for _ in {1..50}; do
         exit 1
     fi
     if grep -q 'Server listening at' "$log_file"; then
-        echo "Terminal Web started with PID $service_pid"
-        echo "Workspace: $workspace_root"
-        echo "Log: $log_file"
+        print_started
         exit 0
     fi
     sleep 0.1
@@ -71,9 +78,7 @@ for _ in {1..50}; do
         exit 1
     fi
     if grep -q 'Server listening at' "$log_file"; then
-        echo "Terminal Web started with PID $service_pid"
-        echo "Workspace: $workspace_root"
-        echo "Log: $log_file"
+        print_started
         exit 0
     fi
     sleep 0.1
