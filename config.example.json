@@ -1,0 +1,29 @@
+{
+  "listenHost": "0.0.0.0",
+  "listenPort": 8024,
+  "publicBaseUrl": "http://192.0.2.10:8024",
+  "zellijWebBaseUrl": "https://192.0.2.10:8021",
+  "zellij": {
+    "managedBinaryFile": "data/bin/zellij",
+    "configFile": "/home/user/.config/zellij/config.kdl",
+    "webTokenDatabaseFile": "/home/user/.local/share/zellij/tokens.db",
+    "webCertificateFile": "data/zellij/certs/cert.pem",
+    "webPrivateKeyFile": "data/zellij/certs/key.pem"
+  },
+  "directoryIdSecretFile": "data/directory-id.secret",
+  "viewerPortRange": {
+    "start": 8022,
+    "end": 8022
+  },
+  "viewerIdleTimeoutMinutes": 60,
+  "viewerMaxInstances": 1,
+  "projectMarkers": [
+    ".git",
+    "package.json",
+    "pyproject.toml",
+    "Cargo.toml",
+    "go.mod",
+    "pom.xml"
+  ],
+  "allowedSessionCommands": ["codex"]
+}
