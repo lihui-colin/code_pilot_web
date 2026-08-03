@@ -23,7 +23,7 @@ Options:
   --host <ip-or-hostname>     Browser-facing IP address or hostname
   --service-port <port>      Terminal Web HTTPS port (default: 8024)
   --zellij-port <port>       Zellij Web HTTPS port (default: 8021)
-  --viewer-port <port>       Local code-viewer port (default: 8022)
+    --viewer-port <port>       Local code-viewer port (default: 8022)
   --listen-host <address>    Terminal Web listen address (default: 0.0.0.0)
   --non-interactive          Fail instead of prompting for missing values
   -h, --help                 Show this help
