@@ -74,7 +74,7 @@ terminal_web/
 {
   "listenHost": "0.0.0.0",
   "listenPort": 8024,
-  "publicBaseUrl": "http://192.0.2.10:8024",
+  "publicBaseUrl": "https://192.0.2.10:8024",
   "zellijWebBaseUrl": "https://192.0.2.10:8021",
   "zellij": {
     "managedBinaryFile": "data/bin/zellij",
@@ -137,14 +137,14 @@ terminal_web/
 
 ## MVP-1：只读管理
 
-当前进度：首版已实现项目脚手架、Node 26 构建、无用户凭据的直接 HTTP/IP 监听、项目托管 Zellij 首次安装、Zellij Web 证书和 Token 初始化、Token 主页管理、健康/就绪、Session 查询、目录浏览和响应式页面。
+当前进度：首版已实现项目脚手架、Node 26 构建、无用户凭据的直接 HTTPS/IP 监听、项目托管 Zellij 首次安装、Zellij Web 证书和 Token 初始化、Token 主页管理、健康/就绪、Session 查询、目录浏览和响应式页面。
 
 实施范围：
 
 - 项目脚手架、构建和配置加载。
 - 默认 Zellij `config.kdl` 的 Web Sharing 初始化。
 - `--workspace-root` 启动校验。
-- 无用户凭据的同源 HTTP 部署入口。
+- 无用户凭据的同源 HTTPS 部署入口。
 - `GET /api/health`。
 - `GET /api/ready`。
 - `GET /api/sessions`。
@@ -216,4 +216,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ```
 
-管理应用监听 `0.0.0.0:8024` 并直接提供 HTTP；Zellij Web 使用 `8021` 和独立 HTTPS 证书；code-viewer 使用 `8022` 且上游仍只能监听 `127.0.0.1`。管理应用不设置用户、密码或 TLS，因此防火墙必须把公开端口限制在 VPN/公司内网。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij 和证书目录，但不能扩大为 root 权限。
+管理应用监听 `0.0.0.0:8024` 并提供 HTTPS；Zellij Web 使用同主机的 `8021`，两者复用证书；code-viewer 使用 `8022` 且上游仍只能监听 `127.0.0.1`。管理应用不设置用户或密码，防火墙必须把公开端口限制在 VPN/公司内网。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij 和证书目录，但不能扩大为 root 权限。

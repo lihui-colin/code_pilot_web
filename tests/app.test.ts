@@ -24,6 +24,7 @@ async function testApp(adapter: ZellijAdapter = { listSessions: async () => '' }
     directoryIdSecret: Buffer.from('route test secret'),
     zellijAdapter: adapter,
     staticRoot: false,
+    https: false,
     logger: false,
   });
 }
@@ -82,6 +83,7 @@ describe('MVP-1 routes', () => {
       readiness: { ...ready, status: 'not_ready', checks: { ...ready.checks, codeViewer: false } },
       directoryIdSecret: null,
       staticRoot: false,
+      https: false,
       logger: false,
     });
     const response = await app.inject({ method: 'GET', url: '/api/ready' });
@@ -105,6 +107,7 @@ describe('MVP-1 routes', () => {
       directoryIdSecret: Buffer.from('route test secret'),
       zellijAdapter: adapter,
       staticRoot: false,
+      https: false,
       logger: false,
     });
     const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
@@ -112,7 +115,7 @@ describe('MVP-1 routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/sessions',
-      headers: { origin: 'http://192.0.2.10:8024' },
+      headers: { origin: 'https://192.0.2.10:8024' },
       payload: { repositoryId, command: 'codex' },
     });
     expect(response.statusCode).toBe(201);
@@ -128,7 +131,7 @@ describe('MVP-1 routes', () => {
     const reused = await app.inject({
       method: 'POST',
       url: '/api/sessions',
-      headers: { origin: 'http://192.0.2.10:8024' },
+      headers: { origin: 'https://192.0.2.10:8024' },
       payload: { repositoryId, command: 'codex' },
     });
     expect(reused.statusCode).toBe(200);
@@ -136,7 +139,7 @@ describe('MVP-1 routes', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: `/api/sessions/${sessionName}`,
-      headers: { origin: 'http://192.0.2.10:8024' },
+      headers: { origin: 'https://192.0.2.10:8024' },
     });
     expect(deleted.statusCode).toBe(204);
     expect(sessions).toBe('');
@@ -160,8 +163,9 @@ describe('MVP-1 routes', () => {
     const app = await createApp(createTestConfig(root), {
       readiness: ready,
       directoryIdSecret: Buffer.from('route test secret'),
-      viewerManager: new ViewerManager(viewerAdapter, 8022, 'http://192.0.2.10:8024'),
+      viewerManager: new ViewerManager(viewerAdapter, 8022, 'https://192.0.2.10:8024'),
       staticRoot: false,
+      https: false,
       logger: false,
     });
     const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
@@ -169,14 +173,14 @@ describe('MVP-1 routes', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/viewers',
-      headers: { origin: 'http://192.0.2.10:8024' },
+      headers: { origin: 'https://192.0.2.10:8024' },
       payload: { repositoryId },
     });
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({
       repositoryId,
       upstreamUrl: 'http://127.0.0.1:8022',
-      webUrl: expect.stringMatching(/^http:\/\/192\.0\.2\.10:8024\/viewer\/viewer_/u),
+      webUrl: expect.stringMatching(/^https:\/\/192\.0\.2\.10:8024\/viewer\/viewer_/u),
     });
     await app.close();
   });
@@ -199,6 +203,7 @@ describe('MVP-1 routes', () => {
       directoryIdSecret: Buffer.from('route test secret'),
       zellijTokenService: tokenService,
       staticRoot: false,
+      https: false,
       logger: false,
     });
 
@@ -207,7 +212,7 @@ describe('MVP-1 routes', () => {
     const regenerated = await app.inject({
       method: 'POST',
       url: '/api/zellij-token/regenerate',
-      headers: { origin: 'http://192.0.2.10:8024' },
+      headers: { origin: 'https://192.0.2.10:8024' },
       payload: {},
     });
     expect(regenerated.statusCode).toBe(201);
@@ -218,7 +223,7 @@ describe('MVP-1 routes', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: '/api/zellij-token',
-      headers: { origin: 'http://192.0.2.10:8024' },
+      headers: { origin: 'https://192.0.2.10:8024' },
     });
     expect(deleted.statusCode).toBe(204);
     expect(tokenService.get()).toBeNull();

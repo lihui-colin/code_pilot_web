@@ -74,9 +74,11 @@ describe('ensureZellij', () => {
 });
 
 describe('ensureZellijWebCertificate', () => {
-  const matchingOpenSsl = async (arguments_: string[]) => arguments_.includes('-pubkey') || arguments_.includes('-pubout')
-    ? 'PUBLIC KEY\n'
-    : '';
+  const matchingOpenSsl = async (arguments_: string[]) => {
+    if (arguments_.includes('-pubkey') || arguments_.includes('-pubout')) return 'PUBLIC KEY\n';
+    if (arguments_.includes('-checkhost')) return 'Certificate is valid for the requested host\n';
+    return '';
+  };
 
   it('reuses an existing valid certificate and private key', async () => {
     const root = await temporaryDirectory('terminal-web-cert-');
@@ -114,6 +116,26 @@ describe('ensureZellijWebCertificate', () => {
     expect(generator).toHaveBeenCalledWith(expect.any(String), expect.any(String), '10.30.0.24');
     expect((await stat(privateKeyFile)).mode & 0o777).toBe(0o600);
     expect((await stat(certificateFile)).mode & 0o777).toBe(0o644);
+  });
+
+  it('rejects an existing certificate that does not cover the configured hostname', async () => {
+    const root = await temporaryDirectory('terminal-web-cert-');
+    const certificateFile = path.join(root, 'cert.pem');
+    const privateKeyFile = path.join(root, 'key.pem');
+    await writeFile(certificateFile, 'certificate', { mode: 0o644 });
+    await writeFile(privateKeyFile, 'private key', { mode: 0o600 });
+
+    await expect(ensureZellijWebCertificate(
+      'https://10.30.0.24:8021',
+      certificateFile,
+      privateKeyFile,
+      {
+        runOpenSsl: async arguments_ => {
+          if (arguments_.includes('-checkhost')) throw new Error('hostname mismatch');
+          return matchingOpenSsl(arguments_);
+        },
+      },
+    )).rejects.toThrow('hostname mismatch');
   });
 
   it('fails without overwriting a partial certificate state', async () => {

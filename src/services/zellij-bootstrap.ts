@@ -74,6 +74,7 @@ async function fileStatus(filePath: string) {
 async function validateCertificatePair(
   certificateFile: string,
   privateKeyFile: string,
+  hostname: string,
   runner: (arguments_: string[]) => Promise<string>,
 ): Promise<void> {
   const [certificateStat, privateKeyStat] = await Promise.all([
@@ -91,6 +92,7 @@ async function validateCertificatePair(
   }
 
   await runner(['x509', '-in', certificateFile, '-noout', '-checkend', '0']);
+  await runner(['x509', '-in', certificateFile, '-noout', '-checkhost', hostname]);
   const [certificatePublicKey, privatePublicKey] = await Promise.all([
     runner(['x509', '-in', certificateFile, '-pubkey', '-noout']),
     runner(['pkey', '-in', privateKeyFile, '-pubout']),
@@ -138,8 +140,9 @@ export async function ensureZellijWebCertificate(
   }
 
   const runner = dependencies.runOpenSsl ?? runOpenSsl;
+  const hostname = new URL(zellijWebBaseUrl).hostname.replace(/^\[|\]$/gu, '');
   if (certificateStat && privateKeyStat) {
-    await validateCertificatePair(certificateFile, privateKeyFile, runner);
+    await validateCertificatePair(certificateFile, privateKeyFile, hostname, runner);
     return false;
   }
 
@@ -156,7 +159,6 @@ export async function ensureZellijWebCertificate(
   const temporaryCertificate = path.join(certificateTemporaryDirectory, 'cert.pem');
   const temporaryPrivateKey = path.join(keyTemporaryDirectory, 'key.pem');
   try {
-    const hostname = new URL(zellijWebBaseUrl).hostname.replace(/^\[|\]$/gu, '');
     await (dependencies.generateCertificate ?? generateCertificate)(
       temporaryCertificate,
       temporaryPrivateKey,
@@ -166,7 +168,7 @@ export async function ensureZellijWebCertificate(
       chmod(temporaryCertificate, 0o644),
       chmod(temporaryPrivateKey, 0o600),
     ]);
-    await validateCertificatePair(temporaryCertificate, temporaryPrivateKey, runner);
+    await validateCertificatePair(temporaryCertificate, temporaryPrivateKey, hostname, runner);
     await rename(temporaryPrivateKey, privateKeyFile);
     await rename(temporaryCertificate, certificateFile);
     return true;

@@ -103,6 +103,7 @@ export class ZellijService {
     private readonly logger: FastifyBaseLogger,
     private readonly managedSessions: Map<string, ManagedSessionMetadata> = new Map(),
     private readonly layoutsDirectory = path.resolve('data/layouts'),
+    private readonly persistManagedSessions: (sessions: ReadonlyMap<string, ManagedSessionMetadata>) => Promise<void> = async () => undefined,
   ) {}
 
   async listSessions(): Promise<SessionInfo[]> {
@@ -222,6 +223,11 @@ export class ZellijService {
     const remaining = parseSessionNames(await this.adapter.listSessions());
     if (remaining.includes(name)) throw new ApiError(502, 'ZELLIJ_DELETE_FAILED', 'Zellij did not delete the Session');
     this.managedSessions.delete(name);
+    try {
+      await this.persistManagedSessions(this.managedSessions);
+    } catch {
+      throw new ApiError(500, 'STATE_WRITE_FAILED', 'Session was deleted but state could not be updated');
+    }
   }
 
   private async createSessionUnlocked(
@@ -261,6 +267,11 @@ export class ZellijService {
       createdAt: new Date().toISOString(),
       command: 'codex',
     });
+    try {
+      await this.persistManagedSessions(this.managedSessions);
+    } catch {
+      throw new ApiError(500, 'STATE_WRITE_FAILED', 'Session was created but state could not be updated');
+    }
     const session = (await this.listSessions()).find(candidate => candidate.name === name);
     if (!session) throw new ApiError(502, 'ZELLIJ_CREATE_FAILED', 'Zellij did not create the requested Session');
     return session;

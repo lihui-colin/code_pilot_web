@@ -119,14 +119,14 @@ node dist/server.js --workspace-root /home/lihui/projects
 
 ## 安全边界
 
-- 页面、API 和 viewer 代理无需应用登录或 TLS，使用同源 HTTP，并由 VPN 和防火墙限制访问网段。
+- 页面、API 和 viewer 代理无需应用登录，使用同源 HTTPS，并由 VPN 和防火墙限制访问网段。
 - Zellij Web 保留自身 Token 验证；管理服务首次启动创建专用 Token，同时保存名称和值并在主页提供复制、删除和重新创建操作。
 - Token 成功写入浏览器剪贴板后，主页显示“已复制”反馈。
 - 只允许访问启动时配置的工作目录。
 - 每次目录相关操作都重新执行真实路径边界校验。
 - 禁止前端提交任意命令、命令参数、环境变量、KDL 或绝对路径。
 - 管理服务和 code-viewer 使用普通用户运行，不使用 root。
-- Zellij 缺失时由项目安装固定版本；Zellij Web 的 HTTPS 证书在管理服务首次启动时初始化并由 Zellij Web 独立使用。
+- Zellij 缺失时由项目安装固定版本；HTTPS 证书在管理服务首次启动时初始化，由管理入口和 Zellij Web 共同使用，且两个入口使用相同主机名或 IP。
 - 项目启动时确保默认 Zellij 配置包含 `web_sharing "on"`，使之后通过 `zellij --session` 创建的 Session 也能从浏览器打开；已运行的旧 Session 不自动删除或重建。
 
 每个 Git repository 条目提供以下操作：

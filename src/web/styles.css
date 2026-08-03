@@ -12,10 +12,13 @@ button { color: #d7fff3; background: #163d34; border: 1px solid #2a6859; border-
 button:hover { background: #1d4c40; }
 button:disabled { cursor: wait; opacity: .55; }
 a { color: #5ce0b6; text-underline-offset: .2em; }
+.button-link { display: inline-flex; align-items: center; justify-content: center; min-height: 2.45rem; color: #d7fff3; background: #163d34; border: 1px solid #2a6859; border-radius: .55rem; padding: .55rem .85rem; text-decoration: none; white-space: nowrap; }
+.button-link:hover { background: #1d4c40; }
 .shell { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 3rem 0 5rem; }
 .hero { display: flex; justify-content: space-between; gap: 2rem; align-items: end; margin-bottom: 1.75rem; }
 h1, h2, p { margin-top: 0; }
 h1 { margin-bottom: .5rem; font-size: clamp(2rem, 6vw, 4.5rem); letter-spacing: -.055em; line-height: .95; }
+.hero-title-subtitle { margin-bottom: .65rem; font-size: 1.25rem; font-weight: 700; line-height: 1.3; }
 h2 { margin-bottom: 0; font-size: 1.35rem; }
 .eyebrow { margin-bottom: .45rem; color: #5ce0b6; font-size: .73rem; font-weight: 800; letter-spacing: .18em; }
 .subtitle { margin-bottom: 0; color: #9db6af; }
@@ -57,6 +60,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .repository-actions button:last-child { color: #06130f; background: #5ce0b6; border-color: #5ce0b6; }
 .repository-actions button:last-child:hover { background: #7ceac8; }
 .token-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .55rem; }
+.session-actions { display: flex; align-items: center; gap: .55rem; white-space: nowrap; }
+.session-actions .button-link, .session-actions button { min-width: 4.25rem; }
 .danger-button { color: #ffd5cf; background: #351b18; border-color: #a6574e; }
 .danger-button:hover { background: #4a2420; }
 .token-content { display: grid; gap: .75rem; padding: 1.1rem 1.25rem 1.3rem; color: #9db6af; }

@@ -193,9 +193,9 @@ export function App() {
     <main className="shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">TERMINAL WEB</p>
-          <h1>会话与代码目录</h1>
-          <p className="subtitle">通过公司内网 HTTP 入口管理 Zellij Session 并浏览代码。</p>
+          <h1>CodePilot Web</h1>
+          <p className="hero-title-subtitle">Zellij管理与代码浏览</p>
+          <p className="subtitle">通过公司内网 HTTPS 入口管理 Zellij Session 并浏览代码。</p>
         </div>
       </header>
 
@@ -261,6 +261,7 @@ export function App() {
                   <td>
                     <div className="session-actions">
                       <a
+                        className="button-link"
                         href={session.webUrl}
                         target="_blank"
                         rel="noopener noreferrer"

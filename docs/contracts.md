@@ -36,13 +36,13 @@ Zellij `0.44.3` 同时作为项目管理的固定二进制依赖：
 
 Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。超时后终止命令进程。
 
-### 1.3 HTTP 监听与访问边界
+### 1.3 HTTPS 监听与访问边界
 
-管理服务提供普通 HTTP，可以把 `listenHost` 配置为具体 IP 或 `0.0.0.0`。使用 `0.0.0.0` 时，`publicBaseUrl` 必须填写浏览器实际访问的 HTTP IP 或域名，不得使用通配地址生成前端 URL。
+管理服务提供 HTTPS，可以把 `listenHost` 配置为具体 IP 或 `0.0.0.0`。使用 `0.0.0.0` 时，`publicBaseUrl` 必须填写浏览器实际访问的 HTTPS IP 或域名，不得使用通配地址生成前端 URL。
 
-管理应用不设置用户名、密码、Basic Auth、Bearer Token、TLS 或登录页面。页面、API 和后续 viewer 代理在 VPN/公司内网边界内直接通过 HTTP 访问。
+管理应用不设置用户名、密码、Basic Auth、Bearer Token 或登录页面。页面、API 和后续 viewer 代理在 VPN/公司内网边界内通过 HTTPS 访问，并复用 Zellij Web 证书和私钥。
 
-`publicBaseUrl` 必须为 HTTP；Zellij Web 在非 localhost 地址监听时自身强制 TLS，因此 `zellijWebBaseUrl` 必须为 HTTPS。两者都不得包含查询参数、片段或应用路径，也不得使用 `0.0.0.0` 或 `[::]` 作为浏览器地址。配置中的文件路径相对配置文件所在目录解析。
+`publicBaseUrl` 和 `zellijWebBaseUrl` 必须为 HTTPS，并使用相同主机名或 IP。Zellij Web 的登录 Cookie 为 `Secure; SameSite=Strict`，同主机 HTTPS 入口确保从管理页面打开 Session 时能够复用 Remember me 登录。两者都不得包含查询参数、片段或应用路径，也不得使用 `0.0.0.0` 或 `[::]` 作为浏览器地址。配置中的文件路径相对配置文件所在目录解析。
 
 配置必须提供项目托管 Zellij 二进制路径、Zellij 默认 `config.kdl` 路径、Zellij Web 证书路径和私钥路径。管理服务启动时先确认 `config.kdl` 是普通文件，并在顶层原子补充或修正 `web_sharing "on"`，同时保留原文件权限。这样之后通过普通 `zellij --session <name>` 创建的新 Session 会允许运行中的 Zellij Web 附加。
 
@@ -447,7 +447,7 @@ Fastify 为请求、查询和响应配置 schema；Zod 定义共享领域类型�
 
 管理应用不提供应用层认证，不要求用户名、密码、Bearer Token 或登录 Cookie，也不提供 `/api/me`。
 
-页面、API 和 viewer 代理必须同源 HTTP。Zellij Web 使用独立的 HTTPS 入口。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
+页面、API 和 viewer 代理必须同源 HTTPS。Zellij Web 使用同主机、不同端口的 HTTPS 入口。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
 
 访问控制由 VPN/公司内网和主机防火墙承担。公开管理端口和 Zellij Web 端口只允许受控网段访问；code-viewer 上游端口只监听 localhost。
 
@@ -489,7 +489,7 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 
 ### 7.3 恢复与退出
 
-启动时通过 Zellij CLI 恢复真实 Session 集合，并合并 managed 元数据。
+启动时通过 Zellij CLI 恢复真实 Session 集合，并合并 managed 元数据。状态文件中存在但真实 Zellij 集合中已不存在的 Session 记录必须删除并原子写回；若启动时无法查询 Zellij，则保留原记录，不得猜测删除。
 
 首版不接管历史 viewer。历史 PID 只在同时验证命令和启动时间属于本服务时终止，随后清空 viewer 和端口记录。用户下次访问时重新创建。
 

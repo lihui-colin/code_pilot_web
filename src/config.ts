@@ -64,9 +64,9 @@ export interface ZellijWebToken {
   value: string;
 }
 
-function validateBaseUrl(value: string, name: string, protocol: 'http:' | 'https:'): string {
+function validateBaseUrl(value: string, name: string): string {
   const url = new URL(value);
-  if (url.protocol !== protocol) throw new Error(`${name} must use ${protocol === 'http:' ? 'HTTP' : 'HTTPS'}`);
+  if (url.protocol !== 'https:') throw new Error(`${name} must use HTTPS`);
   if (url.hostname === '0.0.0.0' || url.hostname === '[::]') {
     throw new Error(`${name} must use the IP address or hostname that browsers access`);
   }
@@ -113,6 +113,11 @@ export async function loadConfiguration(argv = process.argv.slice(2), cwd = proc
   const configPath = path.resolve(cwd, parsed.values.config ?? 'config.json');
   const configDirectory = path.dirname(configPath);
   const raw = FileConfigSchema.parse(JSON.parse(await readFile(configPath, 'utf8')));
+  const publicBaseUrl = validateBaseUrl(raw.publicBaseUrl, 'publicBaseUrl');
+  const zellijWebBaseUrl = validateBaseUrl(raw.zellijWebBaseUrl, 'zellijWebBaseUrl');
+  if (new URL(publicBaseUrl).hostname !== new URL(zellijWebBaseUrl).hostname) {
+    throw new Error('publicBaseUrl and zellijWebBaseUrl must use the same hostname');
+  }
   const resolveConfigPath = (value: string) => path.resolve(configDirectory, value);
   const directoryIdSecretFile = resolveConfigPath(raw.directoryIdSecretFile);
 
@@ -120,8 +125,8 @@ export async function loadConfiguration(argv = process.argv.slice(2), cwd = proc
     config: {
       listenHost: raw.listenHost,
       listenPort: raw.listenPort,
-      publicBaseUrl: validateBaseUrl(raw.publicBaseUrl, 'publicBaseUrl', 'http:'),
-      zellijWebBaseUrl: validateBaseUrl(raw.zellijWebBaseUrl, 'zellijWebBaseUrl', 'https:'),
+      publicBaseUrl,
+      zellijWebBaseUrl,
       zellijManagedBinaryFile: resolveConfigPath(raw.zellij.managedBinaryFile),
       zellijConfigFile: resolveConfigPath(raw.zellij.configFile),
       zellijWebTokenDatabaseFile: resolveConfigPath(raw.zellij.webTokenDatabaseFile),

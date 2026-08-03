@@ -5,7 +5,7 @@ export function createTestConfig(workspaceRootRealPath: string): AppConfig {
   return {
     listenHost: '0.0.0.0',
     listenPort: 8024,
-    publicBaseUrl: 'http://192.0.2.10:8024',
+    publicBaseUrl: 'https://192.0.2.10:8024',
     zellijWebBaseUrl: 'https://192.0.2.10:8021',
     zellijManagedBinaryFile: '/unused/bin/zellij',
     zellijConfigFile: '/unused/config.kdl',

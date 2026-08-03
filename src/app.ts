@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyReplyFrom from '@fastify/reply-from';
@@ -11,7 +11,7 @@ import { ApiError } from './errors.js';
 import { RepositoryService } from './services/repository-service.js';
 import { SpawnViewerProcessAdapter, ViewerManager } from './services/viewer-manager.js';
 import { proxyViewerRequest, viewerIdFromCookie } from './services/viewer-proxy.js';
-import { ExecFileZellijAdapter, repositorySessionName, ZellijService } from './services/zellij-service.js';
+import { ExecFileZellijAdapter, repositorySessionName, ZellijService, type ManagedSessionMetadata } from './services/zellij-service.js';
 import type { ZellijTokenService } from './services/zellij-token-service.js';
 
 const repositoryQuerySchema = z.object({}).strict();
@@ -31,15 +31,24 @@ export interface AppDependencies {
   zellijExecutablePath?: string;
   codeViewerExecutablePath?: string;
   zellijAdapter?: ConstructorParameters<typeof ZellijService>[0];
+  managedSessions?: Map<string, ManagedSessionMetadata>;
+  persistManagedSessions?: (sessions: ReadonlyMap<string, ManagedSessionMetadata>) => Promise<void>;
   viewerManager?: ViewerManager;
   zellijTokenService?: ZellijTokenService;
   staticRoot?: string | false;
+  https?: false;
   logger?: boolean;
 }
 
 export async function createApp(config: AppConfig, dependencies: AppDependencies) {
   const logger = dependencies.logger ?? true;
-  const app = Fastify({ logger }) as FastifyInstance;
+  const https = dependencies.https === false ? undefined : {
+    cert: readFileSync(config.zellijWebCertificateFile),
+    key: readFileSync(config.zellijWebPrivateKeyFile),
+  };
+  const app = (https
+    ? Fastify({ logger, https })
+    : Fastify({ logger })) as unknown as FastifyInstance;
   await app.register(fastifyReplyFrom, {
     base: `http://127.0.0.1:${config.viewerPortRange.start}`,
     disableRequestLogging: true,
@@ -51,8 +60,9 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     dependencies.zellijAdapter ?? new ExecFileZellijAdapter(dependencies.zellijExecutablePath),
     config.zellijWebBaseUrl,
     app.log,
-    new Map(),
+    dependencies.managedSessions ?? new Map(),
     path.join(path.dirname(config.directoryIdSecretFile), 'layouts'),
+    dependencies.persistManagedSessions,
   );
   const viewerManager = dependencies.viewerManager ?? new ViewerManager(
     new SpawnViewerProcessAdapter(dependencies.codeViewerExecutablePath),

@@ -3,7 +3,9 @@ import { createRequire } from 'node:module';
 import { createApp } from './app.js';
 import { loadConfiguration, persistZellijWebToken } from './config.js';
 import { checkToolReadiness } from './services/tool-readiness.js';
+import { StateStore } from './services/state-store.js';
 import { bootstrapZellij } from './services/zellij-bootstrap.js';
+import { ExecFileZellijAdapter, parseSessionNames } from './services/zellij-service.js';
 import { ZellijTokenService } from './services/zellij-token-service.js';
 
 async function main(): Promise<void> {
@@ -12,6 +14,15 @@ async function main(): Promise<void> {
   const codeViewerExecutablePath = path.join(path.dirname(codeViewerPackageFile), 'dist/code-viewer.js');
   const loaded = await loadConfiguration();
   const zellijBootstrap = await bootstrapZellij(loaded.config);
+  const zellijAdapter = new ExecFileZellijAdapter(zellijBootstrap.zellij.executablePath);
+  const stateStore = new StateStore(path.join(path.dirname(loaded.config.directoryIdSecretFile), 'state.json'));
+  let actualSessionNames: string[] | null = null;
+  try {
+    actualSessionNames = parseSessionNames(await zellijAdapter.listSessions());
+  } catch {
+    process.stderr.write('Terminal Web warning: unable to reconcile managed Sessions during startup\n');
+  }
+  const managedSessions = await stateStore.initialize(actualSessionNames);
   const zellijTokenService = new ZellijTokenService(
     zellijBootstrap.zellij.executablePath,
     loaded.config.zellijWebTokenDatabaseFile,
@@ -31,9 +42,12 @@ async function main(): Promise<void> {
   const app = await createApp(loaded.config, {
     readiness,
     directoryIdSecret: loaded.directoryIdSecret,
-    zellijExecutablePath: zellijBootstrap.zellij.executablePath,
+    zellijAdapter,
+    managedSessions,
+    persistManagedSessions: sessions => stateStore.persist(sessions),
     codeViewerExecutablePath,
     zellijTokenService,
+    staticRoot: path.resolve('dist/web'),
   });
 
   app.log.info({

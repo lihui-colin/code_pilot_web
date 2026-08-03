@@ -17,7 +17,7 @@ async function fixture() {
   await writeFile(path.join(root, 'config.json'), JSON.stringify({
     listenHost: '0.0.0.0',
     listenPort: 8024,
-    publicBaseUrl: 'http://192.0.2.10:8024',
+    publicBaseUrl: 'https://192.0.2.10:8024',
     zellijWebBaseUrl: 'https://192.0.2.10:8021',
     zellij: {
       managedBinaryFile: 'bin/zellij',
@@ -90,7 +90,7 @@ describe('loadConfiguration', () => {
     const { root, workspace } = await fixture();
     const configPath = path.join(root, 'config.json');
     const config = JSON.parse(await readFile(configPath, 'utf8'));
-    config.publicBaseUrl = 'http://0.0.0.0:8024';
+    config.publicBaseUrl = 'https://0.0.0.0:8024';
     await writeFile(configPath, JSON.stringify(config));
     await expect(loadConfiguration([
       '--config', 'config.json',
@@ -98,24 +98,31 @@ describe('loadConfiguration', () => {
     ], root)).rejects.toThrow('IP address or hostname that browsers access');
   });
 
-  it('keeps the management URL on HTTP and requires HTTPS for Zellij Web', async () => {
+  it('requires HTTPS and the same hostname for management and Zellij Web', async () => {
     const { root, workspace } = await fixture();
     const configPath = path.join(root, 'config.json');
     const config = JSON.parse(await readFile(configPath, 'utf8'));
-    config.publicBaseUrl = 'https://192.0.2.10:8024';
+    config.publicBaseUrl = 'http://192.0.2.10:8024';
     await writeFile(configPath, JSON.stringify(config));
     await expect(loadConfiguration([
       '--config', 'config.json',
       '--workspace-root', workspace,
-    ], root)).rejects.toThrow('publicBaseUrl must use HTTP');
+    ], root)).rejects.toThrow('publicBaseUrl must use HTTPS');
 
-    config.publicBaseUrl = 'http://192.0.2.10:8024';
+    config.publicBaseUrl = 'https://192.0.2.10:8024';
     config.zellijWebBaseUrl = 'http://192.0.2.10:8021';
     await writeFile(configPath, JSON.stringify(config));
     await expect(loadConfiguration([
       '--config', 'config.json',
       '--workspace-root', workspace,
     ], root)).rejects.toThrow('zellijWebBaseUrl must use HTTPS');
+
+    config.zellijWebBaseUrl = 'https://zellij.example.test:8021';
+    await writeFile(configPath, JSON.stringify(config));
+    await expect(loadConfiguration([
+      '--config', 'config.json',
+      '--workspace-root', workspace,
+    ], root)).rejects.toThrow('must use the same hostname');
   });
 
   it('atomically persists the Zellij Web token name and value with secure permissions', async () => {
