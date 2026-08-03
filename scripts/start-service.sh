@@ -19,26 +19,49 @@ if [[ $# -ne 1 ]]; then
     exit 2
 fi
 
-service_config="$(node -p "const config = JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')); [config.listenHost, config.listenPort, config.publicBaseUrl].join('\\t')" "$config_file")"
-IFS=$'\t' read -r listen_host listen_port access_url <<< "$service_config"
-
-node --input-type=module - "$listen_host" "$listen_port" <<'NODE'
+access_url="$(node --input-type=module - "$config_file" <<'NODE'
+import { readFileSync } from 'node:fs';
 import net from 'node:net';
 
-const host = process.argv[2];
-const port = Number(process.argv[3]);
-const server = net.createServer();
+const config = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+const ports = [
+    { name: 'Terminal Web', host: config.listenHost, port: config.listenPort },
+    { name: 'code-viewer', host: '127.0.0.1', port: config.viewerPortRange.start },
+];
 
-server.once('error', error => {
-    if (error.code === 'EADDRINUSE') {
-        console.error(`Terminal Web port is already in use: ${host}:${port}`);
-    } else {
-        console.error(`Unable to check Terminal Web port ${host}:${port}: ${error.message}`);
+if (config.viewerPortRange.end !== config.viewerPortRange.start) {
+    for (let port = config.viewerPortRange.start + 1; port <= config.viewerPortRange.end; port += 1) {
+        ports.push({ name: 'code-viewer', host: '127.0.0.1', port });
     }
-    process.exitCode = 1;
-});
-server.listen({ host, port, exclusive: true }, () => server.close());
+}
+
+for (const candidate of ports) {
+    await new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.once('error', error => {
+            if (error.code === 'EADDRINUSE') {
+                reject(new Error(`${candidate.name} port is already in use: ${candidate.host}:${candidate.port}`));
+            } else {
+                reject(new Error(`Unable to check ${candidate.name} port ${candidate.host}:${candidate.port}: ${error.message}`));
+            }
+        });
+        server.listen({ host: candidate.host, port: candidate.port, exclusive: true }, () => {
+            server.close(resolve);
+        });
+    }).catch(error => {
+        console.error(error.message);
+        process.exit(1);
+    });
+}
+
+process.stdout.write(`${config.publicBaseUrl}\n`);
 NODE
+)"
+
+if [[ -z "$access_url" ]]; then
+    echo "Unable to determine Terminal Web access URL" >&2
+    exit 1
+fi
 
 workspace_root="$(realpath "$1")"
 if [[ ! -d "$workspace_root" || ! -r "$workspace_root" ]]; then
