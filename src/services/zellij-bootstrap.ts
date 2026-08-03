@@ -29,15 +29,24 @@ export async function ensureZellijWebSharing(configFile: string): Promise<boolea
   if (!configStat.isFile()) throw new Error('Zellij config must be a regular file');
   const original = await readFile(configFile, 'utf8');
   const lines = original.split(/\r?\n/u);
-  const webSharingPattern = /^web_sharing\s+"(on|off|disabled)"\s*(?:\/\/.*)?$/u;
-  const activeLine = lines.findIndex(line => webSharingPattern.test(line));
-  if (activeLine >= 0 && webSharingPattern.exec(lines[activeLine]!)?.[1] === 'on') return false;
+  const settings = [
+    { pattern: /^web_sharing\s+"(?:on|off|disabled)"\s*(?:\/\/.*)?$/u, value: 'web_sharing "on"' },
+    { pattern: /^show_startup_tips\s+(?:true|false)\s*(?:\/\/.*)?$/u, value: 'show_startup_tips false' },
+    { pattern: /^show_release_notes\s+(?:true|false)\s*(?:\/\/.*)?$/u, value: 'show_release_notes false' },
+  ];
+  let changed = false;
 
-  if (activeLine >= 0) lines[activeLine] = 'web_sharing "on"';
-  else {
-    if (lines.at(-1) !== '') lines.push('');
-    lines.push('web_sharing "on"', '');
+  for (const setting of settings) {
+    const activeLine = lines.findIndex(line => setting.pattern.test(line));
+    if (activeLine >= 0 && lines[activeLine] === setting.value) continue;
+    changed = true;
+    if (activeLine >= 0) lines[activeLine] = setting.value;
+    else {
+      if (lines.at(-1) !== '') lines.push('');
+      lines.push(setting.value, '');
+    }
   }
+  if (!changed) return false;
 
   const temporaryFile = `${configFile}.tmp-${process.pid}-${Date.now()}`;
   const file = await open(temporaryFile, 'wx', configStat.mode & 0o777);

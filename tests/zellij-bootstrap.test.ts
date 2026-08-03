@@ -180,18 +180,37 @@ describe('ensureZellijWebSharing', () => {
   it('adds web sharing when the Zellij config only contains the commented default', async () => {
     const root = await temporaryDirectory('terminal-web-zellij-config-');
     const configFile = path.join(root, 'config.kdl');
-    await writeFile(configFile, '// web_sharing "off"\nweb_server true\n', { mode: 0o640 });
+    await writeFile(configFile, [
+      '// web_sharing "off"',
+      '// show_startup_tips false',
+      '// show_release_notes false',
+      'web_server true',
+      '',
+    ].join('\n'), { mode: 0o640 });
     await expect(ensureZellijWebSharing(configFile)).resolves.toBe(true);
-    expect(await readFile(configFile, 'utf8')).toContain('\nweb_sharing "on"\n');
+    const content = await readFile(configFile, 'utf8');
+    expect(content).toContain('\nweb_sharing "on"\n');
+    expect(content).toContain('\nshow_startup_tips false\n');
+    expect(content).toContain('\nshow_release_notes false\n');
     expect((await stat(configFile)).mode & 0o777).toBe(0o640);
   });
 
-  it('replaces an active disabled value and then reuses the enabled config', async () => {
+  it('replaces active startup values and then reuses the corrected config', async () => {
     const root = await temporaryDirectory('terminal-web-zellij-config-');
     const configFile = path.join(root, 'config.kdl');
-    await writeFile(configFile, 'web_sharing "off"\n');
+    await writeFile(configFile, [
+      'web_sharing "off"',
+      'show_startup_tips true',
+      'show_release_notes true',
+      '',
+    ].join('\n'));
     await expect(ensureZellijWebSharing(configFile)).resolves.toBe(true);
     await expect(ensureZellijWebSharing(configFile)).resolves.toBe(false);
-    expect(await readFile(configFile, 'utf8')).toBe('web_sharing "on"\n');
+    expect(await readFile(configFile, 'utf8')).toBe([
+      'web_sharing "on"',
+      'show_startup_tips false',
+      'show_release_notes false',
+      '',
+    ].join('\n'));
   });
 });
