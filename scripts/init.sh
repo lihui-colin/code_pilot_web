@@ -14,6 +14,8 @@ service_port="8024"
 zellij_port="8021"
 viewer_port="8022"
 non_interactive=false
+managed_zellij_file="$HOME/.local/bin/zellij"
+project_zellij_file="$project_root/data/bin/zellij"
 
 usage() {
     cat <<'EOF'
@@ -112,9 +114,92 @@ validate_port "viewer port" "$viewer_port"
 [[ "$service_port" != "$zellij_port" && "$service_port" != "$viewer_port" && "$zellij_port" != "$viewer_port" ]] \
 || die "service, Zellij, and viewer ports must be different"
 
+local_zellij_version=""
+project_zellij_version=""
+system_zellij_version=""
+system_zellij_file=""
+if [[ -x "$managed_zellij_file" ]]; then
+    local_zellij_version="$($managed_zellij_file --version 2>/dev/null || true)"
+fi
+if [[ -x "$project_zellij_file" ]]; then
+    project_zellij_version="$($project_zellij_file --version 2>/dev/null || true)"
+fi
+if command -v zellij >/dev/null 2>&1; then
+    system_zellij_file="$(command -v zellij)"
+    system_zellij_version="$(zellij --version 2>/dev/null || true)"
+fi
+if [[ "$local_zellij_version" == "zellij 0.44.3" ]]; then
+    managed_zellij_file="$HOME/.local/bin/zellij"
+    elif [[ "$project_zellij_version" == "zellij 0.44.3" ]]; then
+    managed_zellij_file="$project_zellij_file"
+    elif [[ "$system_zellij_version" == "zellij 0.44.3" ]]; then
+    managed_zellij_file="$system_zellij_file"
+else
+    if [[ -n "$local_zellij_version" || -n "$project_zellij_version" || -n "$system_zellij_version" ]]; then
+        die "Zellij was found with the wrong version; remove it explicitly, then run scripts/download-zellij.sh"
+    fi
+    echo "Zellij 0.44.3 has not been pre-downloaded."
+    echo "For slow GitHub connections, stop now and run: scripts/download-zellij.sh"
+    if [[ "$non_interactive" == false ]]; then
+        read -r -p "Continue and let npm install download Zellij? [y/N]: " continue_install
+        [[ "$continue_install" =~ ^[Yy]$ ]] || exit 0
+    fi
+fi
+
 for command_name in curl openssl; do
     command -v "$command_name" >/dev/null 2>&1 || die "required command is not installed: $command_name"
 done
+
+mkdir -p -m 700 "$project_root/data" "$project_root/data/zellij/certs"
+certificate_file="$project_root/data/zellij/certs/cert.pem"
+private_key_file="$project_root/data/zellij/certs/key.pem"
+
+if [[ -e "$certificate_file" || -e "$private_key_file" ]]; then
+    [[ -f "$certificate_file" && -s "$certificate_file" && -f "$private_key_file" && -s "$private_key_file" ]] \
+    || die "Zellij Web certificate and private key must either both be non-empty files or both be absent"
+    [[ "$(stat -c '%a' "$private_key_file")" == "600" ]] || die "Zellij Web private key permissions must be 0600"
+    openssl x509 -in "$certificate_file" -noout -checkend 0 >/dev/null \
+    || die "Zellij Web certificate is invalid or expired"
+    certificate_host="${host#[}"
+    certificate_host="${certificate_host%]}"
+    if [[ "$certificate_host" == *:* || "$certificate_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        openssl x509 -in "$certificate_file" -noout -checkip "$certificate_host" >/dev/null \
+        || die "Zellij Web certificate does not cover $certificate_host"
+    else
+        openssl x509 -in "$certificate_file" -noout -checkhost "$certificate_host" >/dev/null \
+        || die "Zellij Web certificate does not cover $certificate_host"
+    fi
+    certificate_public_key="$(openssl x509 -in "$certificate_file" -pubkey -noout)"
+    private_public_key="$(openssl pkey -in "$private_key_file" -pubout)"
+    [[ "$certificate_public_key" == "$private_public_key" ]] \
+    || die "Zellij Web certificate and private key do not match"
+else
+    echo "Creating Zellij Web certificate..."
+    certificate_host="${host#[}"
+    certificate_host="${certificate_host%]}"
+    if [[ "$certificate_host" == *:* ]]; then
+        host_san="IP:$certificate_host"
+        elif [[ "$certificate_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        host_san="IP:$certificate_host"
+    else
+        host_san="DNS:$certificate_host"
+    fi
+    certificate_temporary_directory="$(mktemp -d "$project_root/data/zellij/certs/.init-certificate-XXXXXX")"
+    trap 'rm -rf "$certificate_temporary_directory"' EXIT
+    temporary_certificate="$certificate_temporary_directory/cert.pem"
+    temporary_private_key="$certificate_temporary_directory/key.pem"
+    openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 \
+    -keyout "$temporary_private_key" \
+    -out "$temporary_certificate" \
+    -subj '/CN=Terminal Web Zellij' \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,$host_san"
+    chmod 644 "$temporary_certificate"
+    chmod 600 "$temporary_private_key"
+    mv "$temporary_private_key" "$private_key_file"
+    mv "$temporary_certificate" "$certificate_file"
+    rm -rf "$certificate_temporary_directory"
+    trap - EXIT
+fi
 
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
@@ -140,7 +225,6 @@ try {
 }
 NODE
 
-mkdir -p -m 700 "$project_root/data" "$project_root/data/zellij/certs"
 if [[ ! -s "$project_root/data/directory-id.secret" ]]; then
     umask 077
     openssl rand -base64 32 > "$project_root/data/directory-id.secret"
@@ -153,9 +237,6 @@ if [[ ! -f "$zellij_config_file" ]]; then
     chmod 600 "$zellij_config_file"
 fi
 
-certificate_file="$project_root/data/zellij/certs/cert.pem"
-private_key_file="$project_root/data/zellij/certs/key.pem"
-
 echo "Writing config.json..."
 HOST_VALUE="$host" \
 LISTEN_HOST_VALUE="$listen_host" \
@@ -164,6 +245,7 @@ ZELLIJ_PORT_VALUE="$zellij_port" \
 VIEWER_PORT_VALUE="$viewer_port" \
 ZELLIJ_CONFIG_VALUE="$zellij_config_file" \
 ZELLIJ_TOKEN_DB_VALUE="$zellij_token_database_file" \
+ZELLIJ_BINARY_VALUE="$managed_zellij_file" \
 CERTIFICATE_FILE_VALUE="$certificate_file" \
 PRIVATE_KEY_FILE_VALUE="$private_key_file" \
 PROJECT_ROOT_VALUE="$project_root" \
@@ -177,7 +259,7 @@ const config = {
   publicBaseUrl: `https://${process.env.HOST_VALUE}:${process.env.SERVICE_PORT_VALUE}`,
   zellijWebBaseUrl: `https://${process.env.HOST_VALUE}:${process.env.ZELLIJ_PORT_VALUE}`,
   zellij: {
-    managedBinaryFile: 'data/bin/zellij',
+        managedBinaryFile: process.env.ZELLIJ_BINARY_VALUE,
     configFile: process.env.ZELLIJ_CONFIG_VALUE,
     webTokenDatabaseFile: process.env.ZELLIJ_TOKEN_DB_VALUE,
     webCertificateFile: process.env.CERTIFICATE_FILE_VALUE,

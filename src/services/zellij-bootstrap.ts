@@ -92,7 +92,7 @@ async function validateCertificatePair(
   }
 
   await runner(['x509', '-in', certificateFile, '-noout', '-checkend', '0']);
-  await runner(['x509', '-in', certificateFile, '-noout', '-checkhost', hostname]);
+  await runner(['x509', '-in', certificateFile, '-noout', isIP(hostname) ? '-checkip' : '-checkhost', hostname]);
   const [certificatePublicKey, privatePublicKey] = await Promise.all([
     runner(['x509', '-in', certificateFile, '-pubkey', '-noout']),
     runner(['pkey', '-in', privateKeyFile, '-pubout']),

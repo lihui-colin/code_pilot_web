@@ -76,7 +76,9 @@ describe('ensureZellij', () => {
 describe('ensureZellijWebCertificate', () => {
   const matchingOpenSsl = async (arguments_: string[]) => {
     if (arguments_.includes('-pubkey') || arguments_.includes('-pubout')) return 'PUBLIC KEY\n';
-    if (arguments_.includes('-checkhost')) return 'Certificate is valid for the requested host\n';
+    if (arguments_.includes('-checkhost') || arguments_.includes('-checkip')) {
+      return 'Certificate is valid for the requested host\n';
+    }
     return '';
   };
 
@@ -131,11 +133,31 @@ describe('ensureZellijWebCertificate', () => {
       privateKeyFile,
       {
         runOpenSsl: async arguments_ => {
-          if (arguments_.includes('-checkhost')) throw new Error('hostname mismatch');
+          if (arguments_.includes('-checkip')) throw new Error('hostname mismatch');
           return matchingOpenSsl(arguments_);
         },
       },
     )).rejects.toThrow('hostname mismatch');
+  });
+
+  it('uses hostname validation for DNS names', async () => {
+    const root = await temporaryDirectory('terminal-web-cert-');
+    const certificateFile = path.join(root, 'cert.pem');
+    const privateKeyFile = path.join(root, 'key.pem');
+    await writeFile(certificateFile, 'certificate', { mode: 0o644 });
+    await writeFile(privateKeyFile, 'private key', { mode: 0o600 });
+    const runner = vi.fn(matchingOpenSsl);
+
+    await ensureZellijWebCertificate(
+      'https://terminal.example.test:8021',
+      certificateFile,
+      privateKeyFile,
+      { runOpenSsl: runner },
+    );
+
+    expect(runner).toHaveBeenCalledWith([
+      'x509', '-in', certificateFile, '-noout', '-checkhost', 'terminal.example.test',
+    ]);
   });
 
   it('fails without overwriting a partial certificate state', async () => {

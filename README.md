@@ -26,11 +26,14 @@ chmod 600 data/directory-id.secret
 
 ### 首次准备
 
-推荐使用交互式初始化脚本。它会安装 nvm 和 Node.js 26、安装项目依赖及固定版本 Zellij、创建 `config.json`、配置 Zellij Web，并生成目录 ID secret。脚本只负责初始化配置，不会启动管理服务：
+推荐使用交互式初始化脚本。它会生成 Zellij Web 自签名证书，安装 nvm 和 Node.js 26、安装项目依赖及固定版本 Zellij、创建 `config.json`、配置 Zellij Web，并生成目录 ID secret。证书生成在网络安装步骤之前完成，因此后续下载失败时可以直接重试初始化。脚本只负责初始化配置，不会启动管理服务：
 
 ```bash
+scripts/download-zellij.sh
 scripts/init.sh
 ```
+
+建议在运行 `init.sh` 前先执行 `scripts/download-zellij.sh`。该脚本会显示 GitHub Release 下载进度，将固定版本 `0.44.3` 下载并验证到 `data/zellij/zellij`，然后复制到 `$HOME/.local/bin/zellij`。如果跳过此步骤，`init.sh` 会提示确认，继续后由 `npm install` 自动下载。
 
 也可以传入参数进行无人值守初始化：
 
@@ -46,7 +49,7 @@ scripts/init.sh --host 192.168.1.20 --service-port 8024 --zellij-port 8021 --vie
 npm run service:start -- /实际/workspace/路径
 ```
 
-HTTPS 证书和 Zellij Web Token 会在服务首次启动时初始化。
+初始化脚本会创建 HTTPS 证书；管理服务首次启动时会校验证书并初始化 Zellij Web Token。没有使用初始化脚本时，管理服务仍会在证书和私钥都不存在时创建证书。
 
 如果尚未安装 nvm，先安装并加载 nvm：
 

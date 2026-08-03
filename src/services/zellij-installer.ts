@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 export const ZELLIJ_VERSION = '0.44.3';
 export const ZELLIJ_VERSION_OUTPUT = `zellij ${ZELLIJ_VERSION}`;
 const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
+const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
 
 const releaseAssets: Record<string, string> = {
   'linux-x64': 'zellij-x86_64-unknown-linux-musl.tar.gz',
@@ -63,7 +64,7 @@ function downloadUrl(platform: NodeJS.Platform, architecture: string): string {
 async function downloadFile(url: string, destination: string): Promise<void> {
   const response = await fetch(url, {
     redirect: 'follow',
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
   });
   if (!response.ok || !response.body) throw new Error(`Zellij download failed with HTTP ${response.status}`);
 
@@ -74,6 +75,7 @@ async function downloadFile(url: string, destination: string): Promise<void> {
 
   const file = await open(destination, 'wx', 0o600);
   let received = 0;
+  let reportedPercent = -1;
   try {
     const reader = response.body.getReader();
     while (true) {
@@ -82,10 +84,18 @@ async function downloadFile(url: string, destination: string): Promise<void> {
       received += value.byteLength;
       if (received > MAX_ARCHIVE_BYTES) throw new Error('Zellij download exceeds the allowed size');
       await file.write(value, 0, value.byteLength, null);
+      if (Number.isFinite(contentLength) && contentLength > 0) {
+        const percent = Math.floor(received / contentLength * 100);
+        if (percent !== reportedPercent) {
+          process.stderr.write(`\rDownloading Zellij ${percent}%`);
+          reportedPercent = percent;
+        }
+      }
     }
     await file.sync();
   } finally {
     await file.close();
+    if (reportedPercent >= 0) process.stderr.write('\n');
   }
 }
 
