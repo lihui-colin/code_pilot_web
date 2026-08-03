@@ -40,6 +40,8 @@ Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。
 
 管理服务提供 HTTPS，可以把 `listenHost` 配置为具体 IP 或 `0.0.0.0`。使用 `0.0.0.0` 时，`publicBaseUrl` 必须填写浏览器实际访问的 HTTPS IP 或域名，不得使用通配地址生成前端 URL。
 
+启动脚本必须在构建和拉起进程前检查 PID 文件与配置的 `listenHost:listenPort`。本项目服务已在运行、PID 文件指向其他存活进程，或管理端口已被占用时，启动脚本必须以非零状态退出，且不得覆盖 PID 文件或启动新服务进程。
+
 管理应用不设置用户名、密码、Basic Auth、Bearer Token 或登录页面。页面、API 和后续 viewer 代理在 VPN/公司内网边界内通过 HTTPS 访问，并复用 Zellij Web 证书和私钥。
 
 `publicBaseUrl` 和 `zellijWebBaseUrl` 必须为 HTTPS，并使用相同主机名或 IP。Zellij Web 的登录 Cookie 为 `Secure; SameSite=Strict`，同主机 HTTPS 入口确保从管理页面打开 Session 时能够复用 Remember me 登录。两者都不得包含查询参数、片段或应用路径，也不得使用 `0.0.0.0` 或 `[::]` 作为浏览器地址。配置中的文件路径相对配置文件所在目录解析。
