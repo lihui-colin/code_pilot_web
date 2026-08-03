@@ -24,20 +24,63 @@ chmod 600 data/directory-id.secret
 
 ## 构建与启动
 
-确保使用 Node 26，然后安装项目依赖：
+### 首次准备
+
+进入项目目录，确保使用 Node.js 26，然后安装依赖：
 
 ```bash
-nvm use
+cd /data01/home/lihui/projects/code_pilot_web
+nvm install 26
+nvm use 26
 npm install
-npm run build
-npm start
 ```
 
-项目的默认 workspace 已设置为 `/data01/home/lihui/projects/xhquant_projects/`。直接运行编译入口时仍需显式传入：
+复制配置文件，并根据服务器的实际 IP 或域名修改 `config.json`：
 
 ```bash
-node dist/server.js --config config.json --workspace-root /data01/home/lihui/projects/xhquant_projects/
+cp config.example.json config.json
 ```
+
+- `publicBaseUrl` 必须使用 HTTP，例如 `http://192.168.1.20:8024`。
+- `zellijWebBaseUrl` 必须使用 HTTPS，例如 `https://192.168.1.20:8021`。
+- `zellij.configFile` 和 `zellij.webTokenDatabaseFile` 必须指向运行服务用户的 Zellij 配置及数据目录。
+
+生成权限受限的目录 ID secret：
+
+```bash
+mkdir -p data
+openssl rand -base64 32 > data/directory-id.secret
+chmod 600 data/directory-id.secret
+```
+
+### 开发模式
+
+开发模式会监听源码变化并自动重启服务：
+
+```bash
+npm run dev -- --workspace-root /实际/workspace/路径
+```
+
+`--workspace-root` 是必填参数；未传入时服务会报错退出。该目录必须存在、可读，并且自身是 Git repository 或包含需要管理的 Git repository。
+
+### 正式模式
+
+先构建前端和服务端，再启动编译产物：
+
+```bash
+npm run build
+npm start -- --workspace-root /实际/workspace/路径
+```
+
+也可以直接运行编译入口：
+
+```bash
+node dist/server.js --config config.json --workspace-root /实际/workspace/路径
+```
+
+服务启动后，在浏览器访问 `config.json` 中配置的 `publicBaseUrl`。默认监听端口为 `8024`，例如 `http://192.168.1.20:8024`。管理页面无需登录，但必须通过防火墙限制为仅允许 VPN 或公司内网访问。
+
+在前台运行时按 `Ctrl+C` 停止服务。停止管理服务不会删除已存在的 Zellij Session。
 
 `npm install` 会安装项目依赖 `@youtyan/code-viewer@0.10.0`，服务端直接解析项目本地可执行文件，不要求系统单独安装 code-viewer，也不依赖全局 PATH。安装过程还会检查项目路径和 PATH 中的 Zellij；若都不存在，会把官方固定版本 `0.44.3` 安装到 `data/bin/zellij`。后端启动时会再次执行 Zellij 检查，因而使用 `--ignore-scripts` 安装后仍能自动补齐。
 

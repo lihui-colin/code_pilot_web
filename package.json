@@ -9,12 +9,12 @@
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.server.json && vite build",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
-    "dev": "tsx watch src/server.ts --config config.json --workspace-root /data01/home/lihui/projects/xhquant_projects/",
+    "dev": "tsx watch src/server.ts --config config.json",
     "postinstall": "node src/services/zellij-installer.ts --install-only",
     "probe:mvp0": "node scripts/probe-mvp0.mjs",
     "probe:mvp1": "node scripts/probe-mvp1.mjs",
     "probe:zellij-web-attach": "node scripts/probe-zellij-web-attach.mjs",
-    "start": "node dist/server.js --config config.json --workspace-root /data01/home/lihui/projects/xhquant_projects/",
+    "start": "node dist/server.js --config config.json",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },
