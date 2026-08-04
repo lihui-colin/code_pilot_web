@@ -7,11 +7,14 @@ import { App } from '../src/web/App.js';
 import * as api from '../src/web/api.js';
 
 vi.mock('../src/web/api.js', () => ({
+  addManualRepository: vi.fn(),
   createSession: vi.fn(),
   createViewer: vi.fn(),
+  deleteManualRepository: vi.fn(),
   deleteSession: vi.fn(),
   deleteZellijToken: vi.fn(),
   getReadiness: vi.fn(),
+  getRepositoryFolders: vi.fn(),
   getRepositories: vi.fn(),
   getSessions: vi.fn(),
   getZellijToken: vi.fn(),
@@ -28,12 +31,19 @@ const repositories = {
   breadcrumbs: [{ id: null, name: 'workspace', relativePath: '' }],
   entries: [],
 };
-const openVsCodeUrl = 'http://192.0.2.10:18023/?folder=%2Fworkspace%2Fterminal-web';
+const openVsCodeUrl = 'https://192.0.2.10:8024/openvscode/?folder=%2Fworkspace%2Fterminal-web';
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.getReadiness).mockResolvedValue(readiness);
   vi.mocked(api.getRepositories).mockResolvedValue(repositories);
+  vi.mocked(api.getRepositoryFolders).mockResolvedValue({
+    current: { id: `folder_${'r'.repeat(43)}`, name: '/', gitRepository: false },
+    parentId: null,
+    entries: [],
+  });
+  vi.mocked(api.addManualRepository).mockResolvedValue(`dir_${'m'.repeat(43)}`);
+  vi.mocked(api.deleteManualRepository).mockResolvedValue(undefined);
   vi.mocked(api.getSessions).mockResolvedValue([{
     name: 'alpha',
     status: 'running',
@@ -194,6 +204,7 @@ describe('App', () => {
         name: 'terminal-web',
         relativePath: 'terminal-web',
         kind: 'repository',
+        source: 'workspace',
         markers: ['git', 'node'],
         openVsCodeUrl,
         viewer: null,
@@ -206,8 +217,45 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'Git 仓库' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '进入' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '创建 Zellij Session' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '打开 code-viewer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'code-viewer' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '编辑代码' })).toBeInTheDocument();
+    const codexLink = screen.getByRole('link', { name: '与 Codex 对话' });
+    expect(codexLink).toHaveAttribute('href', `/codex-chat?repositoryId=dir_${'a'.repeat(43)}`);
+    expect(codexLink).toHaveAttribute('target', '_blank');
+  });
+
+  it('opens the server folder picker and adds a selected Git repository', async () => {
+    const folderId = `folder_${'f'.repeat(43)}`;
+    vi.mocked(api.getRepositoryFolders).mockResolvedValue({
+      current: { id: `folder_${'r'.repeat(43)}`, name: '/', gitRepository: false },
+      parentId: null,
+      entries: [{ id: folderId, name: 'external-project', gitRepository: true }],
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加文件夹' }));
+    expect(await screen.findByRole('dialog', { name: '打开服务器 Git 仓库' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '选择 Git 仓库' }));
+
+    await waitFor(() => expect(api.addManualRepository).toHaveBeenCalledWith(folderId));
+    await waitFor(() => expect(api.getRepositories).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', { name: '打开服务器 Git 仓库' })).not.toBeInTheDocument();
+  });
+
+  it('removes a manually added repository without deleting files', async () => {
+    const repositoryId = `dir_${'m'.repeat(43)}`;
+    vi.mocked(api.getRepositories).mockResolvedValue({
+      ...repositories,
+      entries: [{
+        id: repositoryId, name: 'external-project', relativePath: '/srv/external-project',
+        kind: 'repository', source: 'manual', markers: ['git'], openVsCodeUrl, viewer: null, session: null,
+      }],
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '移除仓库' }));
+    await waitFor(() => expect(api.deleteManualRepository).toHaveBeenCalledWith(repositoryId));
   });
 
   it('opens the repository-specific OpenVSCode folder URL', async () => {
@@ -215,7 +263,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
+        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
       }],
     });
     render(<App />);
@@ -230,7 +278,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
+        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
       }],
     });
     render(<App />);
@@ -249,7 +297,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', markers: ['git', 'node'], openVsCodeUrl, viewer: null,
+        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVsCodeUrl, viewer: null,
         session: { name: sessionName, status: 'running', webUrl: `https://192.0.2.10:8021/${sessionName}` },
       }],
     });
@@ -270,7 +318,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
+        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
       }],
     });
     const replace = vi.fn();
@@ -279,7 +327,7 @@ describe('App', () => {
       close: vi.fn(),
     } as unknown as Window);
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: '打开 code-viewer' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'code-viewer' }));
     expect(open).toHaveBeenCalledWith('about:blank', '_blank');
     await waitFor(() => expect(replace).toHaveBeenCalledWith(`http://192.0.2.10:8024/viewer/viewer_${'b'.repeat(22)}/`));
   });

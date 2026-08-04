@@ -19,6 +19,7 @@ export interface CreateSessionRequest {
 
 export type ProjectKind = 'directory' | 'repository';
 export type ProjectMarker = 'git' | 'node' | 'python' | 'rust' | 'go' | 'java';
+export type RepositorySource = 'workspace' | 'manual';
 export type ViewerStatus = 'starting' | 'running' | 'stopping' | 'failed';
 
 export interface ViewerInstance {
@@ -37,6 +38,7 @@ export interface DirectoryEntry {
   name: string;
   relativePath: string;
   kind: ProjectKind;
+  source: RepositorySource;
   markers: ProjectMarker[];
   viewer: {
     id: string;
@@ -70,6 +72,18 @@ export type RepositoryListingResponse = Omit<RepositoryListing, 'entries'> & {
   entries: RepositoryEntryResponse[];
 };
 
+export interface RepositoryFolderEntry {
+  id: string;
+  name: string;
+  gitRepository: boolean;
+}
+
+export interface RepositoryFolderListing {
+  current: { id: string; name: string; gitRepository: boolean };
+  parentId: string | null;
+  entries: RepositoryFolderEntry[];
+}
+
 export interface ReadinessChecks {
   workspaceRoot: boolean;
   directoryIdSecret: boolean;
@@ -87,3 +101,32 @@ export interface ZellijWebTokenInfo {
   name: string;
   value: string;
 }
+
+export interface CodexChatRequest {
+  repositoryId: string;
+  conversationId?: string;
+  contextFileIds?: string[];
+  message: string;
+}
+
+export interface RepositoryContextFile {
+  id: string;
+  relativePath: string;
+  size: number;
+}
+
+export interface RepositoryContextFileListing {
+  files: RepositoryContextFile[];
+  truncated: boolean;
+}
+
+export interface CodexCliStatus {
+  available: boolean;
+  version: string | null;
+}
+
+export type CodexChatStreamEvent =
+  | { type: 'conversation'; conversationId: string }
+  | { type: 'assistant_delta'; delta: string }
+  | { type: 'done' }
+  | { type: 'error'; message: string };

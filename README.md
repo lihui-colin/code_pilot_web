@@ -1,6 +1,6 @@
 # Terminal Web
 
-当前实现覆盖 MVP-0 外部工具验证和 MVP-1 只读管理。管理入口监听 `0.0.0.0`，通过服务器 IP 提供 HTTPS；workspace 自身为 Git repository 时只显示自身，否则递归发现各级子目录中的 Git repository，并以扁平列表展示。code-viewer 上游仍限制在 localhost。
+当前实现覆盖 MVP-0 外部工具验证和 MVP-1 管理功能。管理入口监听 `0.0.0.0`，通过服务器 IP 提供 HTTPS；workspace 自身为 Git repository 时显示自身，否则递归发现各级子目录中的 Git repository，并以扁平列表展示。主页“添加文件夹”还能逐层选择服务器上的其他 Git repository。code-viewer 上游仍限制在 localhost。
 
 ## 环境
 
@@ -45,7 +45,7 @@ OpenVSCode 使用独立的 `scripts/download-openvscode.sh` 下载。该脚本�
 scripts/init.sh --host 192.168.1.20 --service-port 8020 --zellij-port 8021 --viewer-port 8022 --openvscode-port 8023 --non-interactive
 ```
 
-使用 `scripts/init.sh --help` 查看全部参数。脚本不会配置主机防火墙；仍需只允许 VPN 或公司内网访问管理端口、Zellij Web 端口和 OpenVSCode 端口。
+使用 `scripts/init.sh --help` 查看全部参数。脚本不会配置主机防火墙；仍需只允许 VPN 或公司内网访问管理端口和 Zellij Web 端口。OpenVSCode 与 code-viewer 上游端口只监听 localhost，不应加入防火墙允许列表。
 
 初始化完成后，显式启动后台服务：
 
@@ -57,8 +57,9 @@ OpenVSCode Server 是独立进程，使用相同 workspace root 和配置端口�
 
 ```bash
 (cd /实际/workspace/路径 && /项目路径/data/openvscode/current/bin/openvscode-server \
-  --host 0.0.0.0 \
+  --host 127.0.0.1 \
   --port 8023 \
+  --server-base-path /openvscode \
   --without-connection-token \
   --accept-server-license-terms \
   --telemetry-level off)
@@ -95,7 +96,7 @@ cp config.example.json config.json
 - `publicBaseUrl` 必须使用 HTTPS，例如 `https://192.168.1.20:8020`。
 - `zellijWebBaseUrl` 必须使用 HTTPS，并与 `publicBaseUrl` 使用相同主机名或 IP，例如 `https://192.168.1.20:8021`。
 - `zellij.configFile` 和 `zellij.webTokenDatabaseFile` 必须指向运行服务用户的 Zellij 配置及数据目录。
-- `openVsCode.executableFile` 指向独立下载脚本安装的程序，`openVsCode.port` 默认是 `8023`，且不能与管理、Zellij Web 或 code-viewer 端口冲突。
+- `openVsCode.executableFile` 指向独立下载脚本安装的程序，`openVsCode.port` 默认是 localhost 上游端口 `8023`，且不能与管理、Zellij Web 或 code-viewer 端口冲突。浏览器通过管理入口的同源 HTTPS `/openvscode/` 访问，不直接访问该端口。
 
 生成权限受限的目录 ID secret：
 
@@ -115,6 +116,8 @@ npm run dev -- --workspace-root /实际/workspace/路径
 
 `--workspace-root` 是必填参数；未传入时服务会报错退出。该目录必须存在、可读，并且自身是 Git repository 或包含需要管理的 Git repository。
 
+如需打开 workspace 之外的仓库，在主页 Git 仓库区域点击“添加文件夹”，从服务器根目录逐层进入目标目录，然后点击“选择 Git 仓库”。浏览器只提交服务端签发的不透明目录 ID，不提交绝对路径；只有包含 `.git` 的目录可选择。手动仓库会写入 `data/state.json` 并在服务重启后保留。“移除仓库”只从列表移除记录，不删除服务器文件或 Zellij Session。
+
 ### 正式模式
 
 先构建前端和服务端，再启动编译产物：
@@ -131,6 +134,14 @@ node dist/server.js --config config.json --workspace-root /实际/workspace/路�
 ```
 
 服务启动后，在浏览器访问 `config.json` 中配置的 `publicBaseUrl`。默认监听端口为 `8020`，例如 `https://192.168.1.20:8020`。管理页面无需登录，但必须通过防火墙限制为仅允许 VPN 或公司内网访问。
+
+### 浏览器中与 Codex 对话
+
+管理服务会调用其运行用户 `PATH` 中的 `codex` CLI。启动服务前，需要确保同一用户可以在目标 repository 中直接运行 Codex，且认证和 Codex 配置已经准备完成。浏览器不会接收或提交 API Key、命令、路径或环境变量。
+
+在主页的 Git repository 条目中点击“与 Codex 对话”，会在新标签页打开独立对话页面。页面首先通过后台执行 `codex --version` 检测 CLI；检测成功后显示版本并启用输入，检测失败则禁用发送，并提示检查安装、可执行权限和后台服务用户的 `PATH`。输入框中的“Add file”可以搜索并选择当前 repository 内最多 8 个普通 UTF-8 文本文件，作为下一条消息的重点上下文；前端只提交服务端签发的文件 ID，不提交服务器路径。首条消息创建 conversation，后续消息在同一 repository 中继续；“新对话”会开始新的 conversation，“停止”会取消当前 turn。conversation 绑定只保存在管理服务内存中，因此服务重启后需要开始新对话。
+
+Codex 以该 repository 为工作目录，并使用固定的 `workspace-write` 沙箱参数运行，可以阅读和修改仓库文件、执行测试并流式返回助手文本。页面或 HTTP 连接关闭时，服务会停止对应的 Codex 进程组；Codex 响应不会把原始 stderr、工具事件和服务器绝对路径发送到浏览器。
 
 在前台运行时按 `Ctrl+C` 停止服务。停止管理服务不会删除已存在的 Zellij Session。
 
@@ -185,4 +196,4 @@ npm run probe:mvp1
 ZELLIJ_WEB_BASE_URL=https://127.0.0.1:8021 ZELLIJ_WEB_INSECURE=1 npm run probe:mvp0
 ```
 
-每个 Git 仓库固定对应一个服务端命名的 Zellij Session：不存在时可创建，存在时可直接打开或删除。仓库条目同时提供“打开 code-viewer”和“编辑代码”；code-viewer `0.10.0` 使用 `127.0.0.1:8022`，浏览器通过管理服务的同源 viewer URL 访问；当前为单活动实例，切换仓库时会停止旧实例，不会公开 localhost 上游端口。“编辑代码”会打开后端根据当前主机、`openVsCode.port` 和已校验 repository 目录生成的独立 OpenVSCode Server 地址（默认端口 `8023`），并通过 `folder` 参数自动打开该仓库。部署时应以管理服务相同的 workspace root 启动 OpenVSCode，并通过防火墙限制为仅允许 VPN/公司内网访问。
+每个 Git 仓库固定对应一个服务端命名的 Zellij Session：不存在时可创建，存在时可直接打开或删除。仓库条目同时提供“code-viewer”“编辑代码”和“与 Codex 对话”；code-viewer `0.10.0` 使用 `127.0.0.1:8022`，浏览器通过管理服务的同源 viewer URL 访问；当前为单活动实例，切换仓库时会停止旧实例，不会公开 localhost 上游端口。“编辑代码”会打开后端根据管理服务 HTTPS 地址和已校验 repository 目录生成的 `/openvscode/` URL，并通过 `folder` 参数自动打开该仓库。OpenVSCode 使用相同 workspace root、只监听 localhost，Codex Webview 因此可在非 localhost 浏览器地址中运行于安全上下文。“与 Codex 对话”会打开独立的流式对话页面，并在已校验 repository 中使用固定参数运行 Codex CLI。

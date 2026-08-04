@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ReadinessResult, RepositoryListingResponse, SessionInfo, ZellijWebTokenInfo } from '../domain/types.js';
+import type {
+  ReadinessResult,
+  RepositoryFolderListing,
+  RepositoryListingResponse,
+  SessionInfo,
+  ZellijWebTokenInfo,
+} from '../domain/types.js';
 import {
+  addManualRepository,
   createSession,
   createViewer,
+  deleteManualRepository,
   deleteSession,
   deleteZellijToken,
   getReadiness,
+  getRepositoryFolders,
   getRepositories,
   getSessions,
   getZellijToken,
@@ -29,6 +38,9 @@ export function App() {
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [servicesRestarting, setServicesRestarting] = useState(false);
+  const [folderPicker, setFolderPicker] = useState<RepositoryFolderListing | null>(null);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  const [folderPickerBusy, setFolderPickerBusy] = useState(false);
   const copyFeedbackTimer = useRef<number | undefined>(undefined);
 
   const refreshDashboard = useCallback(async () => {
@@ -169,6 +181,52 @@ export function App() {
       setError(caught instanceof Error ? caught.message : '目录加载失败');
     }
   }, []);
+
+  const loadRepositoryFolder = async (directoryId?: string) => {
+    setFolderPickerBusy(true);
+    try {
+      setFolderPicker(await getRepositoryFolders(directoryId));
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '服务器目录加载失败');
+    } finally {
+      setFolderPickerBusy(false);
+    }
+  };
+
+  const openFolderPicker = async () => {
+    setFolderPickerOpen(true);
+    await loadRepositoryFolder();
+  };
+
+  const selectRepositoryFolder = async (directoryId: string) => {
+    setFolderPickerBusy(true);
+    try {
+      await addManualRepository(directoryId);
+      await refreshRepositories();
+      setFolderPickerOpen(false);
+      setFolderPicker(null);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Git 仓库添加失败');
+    } finally {
+      setFolderPickerBusy(false);
+    }
+  };
+
+  const removeManualRepository = async (repositoryId: string) => {
+    if (!window.confirm('从列表移除此手动仓库？这不会删除服务器上的文件或 Zellij Session。')) return;
+    setBusyRepositoryId(repositoryId);
+    try {
+      await deleteManualRepository(repositoryId);
+      await refreshRepositories();
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '手动仓库移除失败');
+    } finally {
+      setBusyRepositoryId(null);
+    }
+  };
 
   const restartAllServices = async () => {
     if (!window.confirm('重启会断开当前 Zellij Web、code-viewer 和 OpenVSCode 连接，但不会删除 Zellij Session。是否继续？')) return;
@@ -325,7 +383,10 @@ export function App() {
       <section className="panel">
         <div className="panel-heading directory-heading">
           <div><p className="eyebrow">WORKSPACE</p><h2>Git 仓库</h2></div>
-          <span className="workspace-root">{repositories?.current.name ?? '—'}</span>
+          <div className="directory-heading-actions">
+            <span className="workspace-root">{repositories?.current.name ?? '—'}</span>
+            <button type="button" onClick={() => void openFolderPicker()}>添加文件夹</button>
+          </div>
         </div>
         <div className="directory-list">
           {repositories?.entries.map(entry => (
@@ -334,6 +395,7 @@ export function App() {
               <div className="directory-copy">
                 <strong>{entry.name}</strong>
                 <span>{entry.relativePath || '.'}</span>
+                {entry.source === 'manual' && <small className="manual-source">手动添加</small>}
                 {entry.markers.length > 0 && <div className="markers">{entry.markers.map(marker => <small key={marker}>{marker}</small>)}</div>}
               </div>
               <div className="repository-actions">
@@ -366,19 +428,79 @@ export function App() {
                   type="button"
                   onClick={() => void browseCode(entry.id)}
                   disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
-                >打开 code-viewer</button>
+                >code-viewer</button>
                 <a
                   className="button-link editor-link"
                   href={entry.openVsCodeUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                 >编辑代码</a>
+                <a
+                  className="button-link codex-chat-link"
+                  href={`/codex-chat?repositoryId=${encodeURIComponent(entry.id)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >与 Codex 对话</a>
+                {entry.source === 'manual' && (
+                  <button
+                    className="danger-button"
+                    type="button"
+                    disabled={busyRepositoryId === entry.id}
+                    onClick={() => void removeManualRepository(entry.id)}
+                  >移除仓库</button>
+                )}
               </div>
             </article>
           ))}
           {repositories?.entries.length === 0 && <p className="empty">Workspace 下没有找到 Git 仓库。</p>}
         </div>
       </section>
+
+      {folderPickerOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folder-dialog-title">
+            <div className="panel-heading">
+              <div><p className="eyebrow">OPEN FOLDER</p><h2 id="folder-dialog-title">打开服务器 Git 仓库</h2></div>
+              <button type="button" onClick={() => setFolderPickerOpen(false)}>关闭</button>
+            </div>
+            <div className="folder-toolbar">
+              <button
+                type="button"
+                disabled={!folderPicker?.parentId || folderPickerBusy}
+                onClick={() => folderPicker?.parentId && void loadRepositoryFolder(folderPicker.parentId)}
+              >上一级</button>
+              <strong className="mono">{folderPicker?.current.name ?? '加载中…'}</strong>
+              {folderPicker?.current.gitRepository && (
+                <button
+                  type="button"
+                  disabled={folderPickerBusy}
+                  onClick={() => void selectRepositoryFolder(folderPicker.current.id)}
+                >选择当前 Git 仓库</button>
+              )}
+            </div>
+            <div className="folder-list" aria-busy={folderPickerBusy}>
+              {folderPicker?.entries.map(folder => (
+                <div className="folder-row" key={folder.id}>
+                  <button
+                    className="folder-name"
+                    type="button"
+                    disabled={folderPickerBusy}
+                    onClick={() => void loadRepositoryFolder(folder.id)}
+                  >📁 {folder.name}</button>
+                  {folder.gitRepository && (
+                    <button
+                      type="button"
+                      disabled={folderPickerBusy}
+                      onClick={() => void selectRepositoryFolder(folder.id)}
+                    >选择 Git 仓库</button>
+                  )}
+                </div>
+              ))}
+              {!folderPickerBusy && folderPicker?.entries.length === 0 && <p className="empty">此目录下没有可浏览的子目录。</p>}
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

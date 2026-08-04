@@ -149,9 +149,11 @@ terminal_web/
 - `GET /api/ready`。
 - `GET /api/sessions`。
 - `GET /api/repositories`。
-- 只读管理页面、目录导航和 Session 打开链接。
+- `GET /api/repository-folders`、`POST /api/repositories` 和 `DELETE /api/repositories/:repositoryId`。
+- 不透明目录 ID 的服务器“添加文件夹”选择器，以及手动 Git repository 状态持久化。
+- 管理页面、扁平 repository 列表和 Session 打开链接。
 
-验收条件：访问管理入口的用户可以查看当前 Zellij Session；workspace 自身为 Git repository 时只显示自身，否则递归发现任意深度的 Git repository 并以扁平列表显示。
+验收条件：访问管理入口的用户可以查看当前 Zellij Session；workspace 自身为 Git repository 时显示自身，否则递归发现任意深度的 Git repository；用户还可以通过不提交绝对路径的服务器目录选择器加入任意可读 Git repository，结果持久化并以扁平列表显示。
 
 ## MVP-2：Session 操作
 
@@ -194,6 +196,22 @@ terminal_web/
 
 验收条件：服务可长期运行并在主机重启后自动启动，不产生失控 viewer，只有 VPN 内授权用户能够操作。
 
+## 当前扩展：Codex Web 对话
+
+实施范围：
+
+- repository 条目中的“与 Codex 对话”新标签页入口和响应式独立页面。
+- `GET /api/codex/status` 固定版本检查，以及页面加载和发送前的可用性保护。
+- repository 文本文件扫描、opaque file ID、大小/UTF-8/containment 校验和“Add file”选择器。
+- `POST /api/codex/messages` NDJSON 流式接口。
+- 通过 RepositoryService 校验 repository ID，不接受前端路径或命令。
+- 固定 `codex exec --json` / `codex exec --json resume` 参数，以及包含服务端校验文件上下文的 stdin prompt。
+- 服务端 conversation ID 到 repository ID 的进程内绑定，以及同一 conversation 并发保护。
+- 助手文本增量解析、绝对路径替换和错误脱敏。
+- 浏览器取消、连接关闭、超时、输出超限和服务关闭时的 Codex 进程组清理。
+
+验收条件：用户可以从任一 Git repository 打开独立页面，连续发送自然语言消息并看到 Codex 流式回答；前端不能改变工作目录或 Codex 启动参数，停止响应后不残留该 turn 的 Codex 子进程。
+
 ## 实施原则
 
 - 每次只实现当前里程碑或其必要前置条件。
@@ -217,4 +235,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ```
 
-管理应用默认监听 `0.0.0.0:8020` 并提供 HTTPS；Zellij Web 使用同主机的 `8021`，两者复用证书；code-viewer 使用 `8022` 且上游仍只能监听 `127.0.0.1`；独立 OpenVSCode Server 默认使用同主机的 `8023` HTTP 入口并以相同 workspace root 启动。OpenVSCode 固定版本由独立下载脚本安装，端口由 `init.sh` 写入配置。管理应用不设置用户或密码，防火墙必须把公开端口限制在 VPN/公司内网。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij、OpenVSCode 和证书目录，但不能扩大为 root 权限。
+管理应用默认监听 `0.0.0.0:8020` 并提供 HTTPS；Zellij Web 使用同主机的 `8021`，两者复用证书；code-viewer 使用 `8022` 且上游仍只能监听 `127.0.0.1`；独立 OpenVSCode Server 使用相同 workspace root 和默认 localhost 上游端口 `8023`，管理服务通过同源 HTTPS `/openvscode` 代理其 HTTP 与 WebSocket 流量。OpenVSCode 固定版本由独立下载脚本安装，上游端口由 `init.sh` 写入配置。管理应用不设置用户或密码，防火墙必须把公开端口限制在 VPN/公司内网。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij、OpenVSCode 和证书目录，但不能扩大为 root 权限。

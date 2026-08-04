@@ -28,7 +28,7 @@ Options:
   --service-port <port>      Terminal Web HTTPS port (default: 8020)
   --zellij-port <port>       Zellij Web HTTPS port (default: 8021)
   --viewer-port <port>       Local code-viewer port (default: 8022)
-  --openvscode-port <port>   OpenVSCode HTTP port (default: 8023)
+  --openvscode-port <port>   Local OpenVSCode upstream port (default: 8023)
   --listen-host <address>    Terminal Web listen address (default: 0.0.0.0)
   --non-interactive          Fail instead of prompting for missing values
   -h, --help                 Show this help
@@ -110,7 +110,7 @@ if [[ "$non_interactive" == false ]]; then
     service_port="$(prompt_with_default "Terminal Web HTTPS port" "$service_port")"
     zellij_port="$(prompt_with_default "Zellij Web HTTPS port" "$zellij_port")"
     viewer_port="$(prompt_with_default "Local code-viewer port" "$viewer_port")"
-    openvscode_port="$(prompt_with_default "OpenVSCode HTTP port" "$openvscode_port")"
+    openvscode_port="$(prompt_with_default "Local OpenVSCode upstream port" "$openvscode_port")"
 fi
 
 [[ -n "$host" ]] || die "--host is required"
@@ -353,5 +353,5 @@ echo
 echo "Configuration initialization complete."
 echo "The management service and OpenVSCode Server were not started."
 echo "OpenVSCode executable: $openvscode_executable_file"
-echo "OpenVSCode port: $openvscode_port"
+echo "OpenVSCode localhost upstream port: $openvscode_port"
 echo "The self-signed certificate and Zellij token will be created when the service is started separately."

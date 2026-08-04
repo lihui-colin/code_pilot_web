@@ -22,7 +22,7 @@ ADR-002 要求 code-viewer 使用同源 `/viewer/<viewer_id>/` 代理，并在�
 
 ## 后果
 
-- 满足仓库页面直接打开 code-viewer 的需求，上游端口仍不对 VPN 网络公开。
+- 满足仓库页面直接code-viewer 的需求，上游端口仍不对 VPN 网络公开。
 - 静态资源和 SSE 可以流式转发，不需要 code-viewer 提供 base path。
 - 当前不能同时使用多个 repository 的 code-viewer；多实例能力仍需上游支持 base path 或另一个新增 ADR。
 - ADR-002 的通用多实例结论仍然有效，本 ADR 只定义固定版本下的单实例兼容路径。

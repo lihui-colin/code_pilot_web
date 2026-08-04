@@ -282,8 +282,9 @@ async function startOpenVsCode(runtime) {
   let child;
   try {
     child = spawn(runtime.openVsCodeExecutable, [
-      '--host', '0.0.0.0',
+      '--host', '127.0.0.1',
       '--port', String(runtime.openVsCodePort),
+      '--server-base-path', '/openvscode',
       '--without-connection-token',
       '--accept-server-license-terms',
       '--telemetry-level', 'off',

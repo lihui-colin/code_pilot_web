@@ -1,4 +1,15 @@
-import type { ReadinessResult, RepositoryListingResponse, SessionInfo, ViewerInstance, ZellijWebTokenInfo } from '../domain/types.js';
+import type {
+  CodexChatRequest,
+  CodexChatStreamEvent,
+  CodexCliStatus,
+  ReadinessResult,
+  RepositoryContextFileListing,
+  RepositoryFolderListing,
+  RepositoryListingResponse,
+  SessionInfo,
+  ViewerInstance,
+  ZellijWebTokenInfo,
+} from '../domain/types.js';
 
 interface ApiErrorBody {
   error?: { message?: string };
@@ -43,6 +54,27 @@ export function getRepositories(): Promise<RepositoryListingResponse> {
   return getJson<RepositoryListingResponse>('/api/repositories');
 }
 
+export function getRepositoryFolders(directoryId?: string): Promise<RepositoryFolderListing> {
+  const query = directoryId ? `?directoryId=${encodeURIComponent(directoryId)}` : '';
+  return getJson<RepositoryFolderListing>(`/api/repository-folders${query}`);
+}
+
+export async function addManualRepository(directoryId: string): Promise<string> {
+  const result = await postJson<{ repositoryId: string }>('/api/repositories', { directoryId });
+  return result.repositoryId;
+}
+
+export async function deleteManualRepository(repositoryId: string): Promise<void> {
+  const response = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({})) as ApiErrorBody;
+    throw new Error(result.error?.message ?? `请求失败（HTTP ${response.status}）`);
+  }
+}
+
 export function createSession(repositoryId: string): Promise<SessionInfo> {
   return postJson<SessionInfo>('/api/sessions', { repositoryId, command: 'codex' });
 }
@@ -85,4 +117,53 @@ export async function deleteZellijToken(): Promise<void> {
 
 export async function restartServices(): Promise<void> {
   await postJson<{ status: 'restarting' }>('/api/services/restart', {});
+}
+
+export function getCodexStatus(): Promise<CodexCliStatus> {
+  return getJson<CodexCliStatus>('/api/codex/status');
+}
+
+export function getRepositoryContextFiles(repositoryId: string): Promise<RepositoryContextFileListing> {
+  return getJson<RepositoryContextFileListing>(`/api/repositories/${encodeURIComponent(repositoryId)}/files`);
+}
+
+export async function streamCodexMessage(
+  request: CodexChatRequest,
+  onEvent: (event: CodexChatStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch('/api/codex/messages', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+    ...(signal ? { signal } : {}),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({})) as ApiErrorBody;
+    throw new Error(result.error?.message ?? `请求失败（HTTP ${response.status}）`);
+  }
+  if (!response.body) throw new Error('浏览器不支持 Codex 流式响应');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  let streamError: string | null = null;
+  const consumeLine = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as CodexChatStreamEvent;
+    onEvent(event);
+    if (event.type === 'error') streamError = event.message;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffered += decoder.decode(value, { stream: !done });
+    const lines = buffered.split('\n');
+    buffered = lines.pop() ?? '';
+    for (const line of lines) consumeLine(line);
+    if (done) break;
+  }
+  consumeLine(buffered);
+  if (streamError) throw new Error(streamError);
 }

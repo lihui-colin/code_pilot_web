@@ -61,7 +61,7 @@ Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。
 
 配置必须提供项目托管 Zellij 二进制路径、Zellij 默认 `config.kdl` 路径、Zellij Web 证书路径和私钥路径。管理服务启动时先确认 `config.kdl` 是普通文件，并在顶层原子补充或修正 `web_sharing "on"`，同时保留原文件权限。这样之后通过普通 `zellij --session <name>` 创建的新 Session 会允许运行中的 Zellij Web 附加。
 
-配置还必须提供 `openVsCode.executableFile` 和 `openVsCode.port`。端口默认 `8023`，且不得与管理端口、Zellij Web 端口或任一 code-viewer 端口冲突。OpenVSCode 路径相对配置文件所在目录解析。
+配置还必须提供 `openVsCode.executableFile` 和 `openVsCode.port`。端口默认 `8023`，作为只监听 `127.0.0.1` 的 OpenVSCode 上游端口，且不得与管理端口、Zellij Web 端口或任一 code-viewer 端口冲突。OpenVSCode 路径相对配置文件所在目录解析。
 
 `web_sharing` 是 Session 创建时读取的选项，不会追溯修改已经运行的 Session。启用前创建且未主动共享的 Session 需要停止后用相同命令重新创建；管理服务不得为此自动删除现有 Session。
 
@@ -199,12 +199,14 @@ new URL(`${encodeURIComponent(name)}`, `${baseUrl}/`).toString()
 ```typescript
 type ProjectKind = "directory" | "repository";
 type ProjectMarker = "git" | "node" | "python" | "rust" | "go" | "java";
+type RepositorySource = "workspace" | "manual";
 
 interface DirectoryEntry {
   id: string;
   name: string;
   relativePath: string;
   kind: ProjectKind;
+  source: RepositorySource;
   markers: ProjectMarker[];
   viewer: {
     id: string;
@@ -231,15 +233,30 @@ interface RepositoryListing {
   }>;
   entries: DirectoryEntry[];
 }
+
+interface RepositoryFolderListing {
+  current: { id: string; name: string; gitRepository: boolean };
+  parentId: string | null;
+  entries: Array<{
+    id: string;
+    name: string;
+    gitRepository: boolean;
+  }>;
+}
 ```
 
 接口为：
 
 ```http
 GET /api/repositories
+GET /api/repository-folders?directoryId=<folder_id>
+POST /api/repositories
+DELETE /api/repositories/:repositoryId
 ```
 
-接口不接受 `parentId`、路径或其他查询参数。服务端递归发现 repository，但前端仍以单一扁平列表展示，不提供目录导航。每个条目的 `session` 通过固定 repository Session 名称与当前 Zellij Session 列表匹配；不存在时为 `null`。
+`GET /api/repositories` 不接受 `parentId`、路径或其他查询参数。服务端把 workspace 扫描结果和手动选择结果合并为单一扁平列表。每个条目的 `source` 表示来自 `workspace` 自动扫描或 `manual` 手动选择；`session` 通过固定 repository Session 名称与当前 Zellij Session 列表匹配，不存在时为 `null`。
+
+“添加文件夹”使用独立的服务器目录选择接口。首次不带查询参数时从服务器文件系统根目录开始；后续请求只允许后端上一响应签发的 `folder_<HMAC>` 不透明 ID，不接受路径。响应只返回当前目录名、父目录 ID、可读子目录名称、子目录 ID，以及该子目录当前是否包含 `.git`。`POST /api/repositories` 请求体严格为 `{ "directoryId": "folder_..." }`，重新校验后将 Git repository 加入手动列表；`DELETE` 只移除手动列表记录，不删除目录、文件、Session 或进程。两个写请求都执行同源 Origin 校验。
 
 ### 3.2 工作目录
 
@@ -247,21 +264,24 @@ GET /api/repositories
 
 保存规范化后的 `workspaceRootRealPath`。不得回退到当前目录、用户主目录或服务器根目录。
 
+服务器文件系统根目录只用于用户主动打开的目录选择器，不替代 workspace root，也不触发递归扫描。选择器每次只读取当前一级目录，并只展示服务进程用户可读取的目录名称；管理入口必须继续受 VPN/公司内网边界保护。
+
 ### 3.3 目录 ID
 
 目录 ID 为：
 
 ```text
-dir_<base64url(HMAC-SHA256(directoryIdSecret, normalizedRelativePath))>
+dir_<base64url(HMAC-SHA256(directoryIdSecret, repository-key))>
+folder_<base64url(HMAC-SHA256(directoryIdSecret, canonical-folder-path))>
 ```
 
 `directoryIdSecret` 从持久化 secret 文件读取。文件缺失、不可读或权限过宽时服务拒绝 ready。重启后 secret 必须保持不变。
 
-API 不从 ID 反解路径。RepositoryService 只为返回的 Git repository 登记 `id -> normalizedRelativePath` 索引。未知或失效 ID 返回 `404 DIRECTORY_NOT_FOUND`。
+workspace repository 的 `repository-key` 保持为规范化相对路径，以维持现有 ID 稳定性；手动 repository 使用带域分隔前缀的规范化真实路径。API 不从 ID 反解路径。RepositoryService 只为本次列出的 repository 和目录选择器已经列出的目录登记 ID 索引。未知或失效 ID 返回 `404 DIRECTORY_NOT_FOUND`。
 
 ### 3.4 真实路径边界
 
-每次列 repository、创建 Session 或启动 viewer 时都必须重新校验：
+每次列 repository、选择目录、创建 Session、启动 viewer、生成 OpenVSCode URL 或启动 Codex 对话时都必须重新校验：
 
 1. 从工作目录和已登记相对路径构造候选路径。
 2. 对候选路径执行 `realpath()`。
@@ -269,6 +289,8 @@ API 不从 ID 反解路径。RepositoryService 只为返回的 Git repository �
 4. 仅当结果不是 `..`、不以 `../` 开头且不是绝对路径时通过。
 
 工作目录自身允许作为根节点。指向根目录外部的符号链接不得出现在结果中。
+
+手动 repository 保存选择时的规范化真实路径。后续操作重新执行 `realpath()`，确认目标仍为目录且仍包含 `.git`；目录选择器则以服务器文件系统根目录作为显式选择边界。浏览器始终只提交不透明 ID，不提交绝对路径。
 
 断链、无权限或扫描期间消失的递归扫描条目跳过并记录 warning。workspace 不存在时返回 `404 DIRECTORY_NOT_FOUND`。
 
@@ -281,6 +303,7 @@ API 不从 ID 反解路径。RepositoryService 只为返回的 Git repository �
 3. 一旦某个目录被识别为 Git repository，将其加入结果并停止深入该 repository；普通容器目录继续递归。
 4. 使用真实路径集合避免符号链接循环；指向 workspace 外部的符号链接跳过。
 5. 结果以扁平列表返回，不提供面包屑导航操作。
+6. 将仍然存在且仍包含 `.git` 的手动 repository 合并到结果中，按真实路径去重；手动条目的 `relativePath` 用规范化绝对路径显示，`source` 为 `manual`。
 
 默认隐藏名称以 `.` 开头的目录，但 `.git` 用于识别 repository。默认忽略：
 
@@ -309,6 +332,8 @@ Git repository 的唯一准入标识为 `.git` 文件或目录。其他 marker �
 返回条目全部为 repository，按 `relativePath` 字节序升序排列。workspace 自身作为 repository 返回时，`relativePath` 为 `""`。
 
 当 workspace 不是 Git repository 时，单次递归扫描最多检查 1000 个可见目录，超过返回 `422 DIRECTORY_TOO_LARGE`，不得静默截断。单次扫描超时 5 秒。
+
+目录选择器单次只列当前一级，最多接受 1000 个目录项，读取超时 5 秒。无权限目录不进入列表；当前目录不可读返回 `403 DIRECTORY_NOT_READABLE`。选择不含 `.git` 的目录返回 `422 NOT_A_REPOSITORY`。手动选择路径写入权限为 `0600` 的状态文件，服务重启后恢复。
 
 ## 4. Viewer 契约
 
@@ -398,21 +423,84 @@ API 和 viewer 代理均不要求应用层登录。上游端口不得监听公�
 
 ### 4.5 OpenVSCode 编辑入口
 
-每个 repository 条目的“打开 code-viewer”旁边显示“编辑代码”链接。链接在新标签页打开，并设置 `rel="noopener noreferrer"`。
+每个 repository 条目的“code-viewer”旁边显示“编辑代码”链接。链接在新标签页打开，并设置 `rel="noopener noreferrer"`。
 
-OpenVSCode Server 是部署侧独立启动的编辑服务。后端必须对每个 repository ID 重新执行真实路径解析、Git repository 检查和 workspace containment 校验，然后根据 `publicBaseUrl` 的主机名、`openVsCode.port` 和校验后的 repository 绝对路径生成 `http://<host>:<port>/?folder=<encoded-absolute-path>`。`GET /api/repositories` 在每个 repository 条目中返回对应的 `openVsCodeUrl`；OpenVSCode 将 `folder` 参数解析为远程目录并自动打开该 repository。
+OpenVSCode Server 是部署侧独立启动的编辑服务，但不得直接暴露其 HTTP 端口。后端必须对每个 repository ID 重新执行真实路径解析、Git repository 检查和对应来源的路径边界校验，然后基于 `publicBaseUrl` 和校验后的 repository 绝对路径生成同源 HTTPS URL：`<publicBaseUrl>/openvscode/?folder=<encoded-absolute-path>`。`GET /api/repositories` 在每个 repository 条目中返回对应的 `openVsCodeUrl`；OpenVSCode 将 `folder` 参数解析为远程目录并自动打开该 repository。
 
-前端必须直接使用条目中的 `openVsCodeUrl`，不得接收用户输入的目录，也不得自行拼接或提交服务器绝对路径、命令、环境变量或任意端口。后端不得为 workspace 之外、已经消失或不再是 Git repository 的目录生成 OpenVSCode URL。
+前端必须直接使用条目中的 `openVsCodeUrl`，不得自行拼接或提交服务器绝对路径、命令、环境变量或任意端口。后端只可为 workspace 扫描结果或已持久化的手动 Git repository 生成 URL；已经消失或不再是 Git repository 的目录不得生成 URL。
+
+管理服务必须把 `/openvscode` 下的普通 HTTP 请求和 WebSocket Upgrade 流式代理到 `http://127.0.0.1:<openVsCode.port>`，保留 `/openvscode` 基路径，并使用 `publicBaseUrl` 的 authority 和 HTTPS Origin 生成上游请求头。这样非 localhost 浏览器仍处于安全上下文，Codex 等依赖 Webview、Worker 或安全浏览器 API 的扩展能够正常渲染。OpenVSCode 上游不得加入防火墙公开端口。
 
 OpenVSCode 进程的工作目录必须设置为配置给管理服务的同一 workspace root。部署命令的参数数组固定为：
 
 ```text
-["--host", "0.0.0.0", "--port", String(openVsCode.port), "--without-connection-token", "--accept-server-license-terms", "--telemetry-level", "off"]
+["--host", "127.0.0.1", "--port", String(openVsCode.port), "--server-base-path", "/openvscode", "--without-connection-token", "--accept-server-license-terms", "--telemetry-level", "off"]
 ```
 
-该入口不由 code-viewer 代理处理，也不改变 code-viewer 只监听 localhost 的约束。OpenVSCode 端口只能由配置和部署侧决定，不能由前端请求修改。
+该入口与 code-viewer 代理相互独立，也不改变 code-viewer 只监听 localhost 的约束。OpenVSCode localhost 上游端口只能由配置和部署侧决定，不能由前端请求修改。
 
 OpenVSCode 平时仍是独立进程，但统一重启脚本负责停止并重新拉起本项目配置的实例。停止时必须校验可执行文件安装目录和固定端口，并终止其独立进程组，以清理 Server、Extension Host 等子进程；不得按进程名全局终止其他 OpenVSCode 实例。
+
+### 4.6 Codex 浏览器对话
+
+repository 条目的“与 Codex 对话”链接必须在新标签页打开 `/codex-chat?repositoryId=<encoded-id>`，并设置 `rel="noopener noreferrer"`。对话页面必须先通过 `GET /api/repositories` 确认 ID 仍对应当前列表中的 Git repository；前端不得把 relative path 转换为服务器路径，也不得提交绝对路径、命令、命令参数、环境变量、KDL、可执行文件或 Codex 配置。
+
+对话页面加载时还必须调用 `GET /api/codex/status`。后端使用 `execFile()`、参数数组 `['--version']`、`shell: false`、5 秒超时和 64 KiB 输出上限检查服务进程实际使用的 Codex 可执行文件。命令成功且 stdout 去除空白后匹配受限的 `codex-cli <version>` 格式时返回 `{ available: true, version: string }`；可执行文件不存在、不可执行、超时、退出非零或版本输出不匹配时返回 `{ available: false, version: null }`。原始错误和未匹配的命令输出不得返回浏览器或写入普通错误响应。
+
+页面只有在 `available` 为 `true` 时才允许发送消息。不可用时必须显示可理解的提示，要求检查 Codex CLI 安装、可执行权限和后台服务用户的 `PATH`。`POST /api/codex/messages` 在解析 repository 后、建立 NDJSON 响应流前必须再次执行同一检查；不可用时返回 `503 CODEX_CLI_UNAVAILABLE`，不得启动 Codex turn。
+
+`POST /api/codex/messages` 请求体严格为：
+
+```typescript
+interface CodexChatRequest {
+  repositoryId: string;
+  conversationId?: string;
+  contextFileIds?: string[];
+  message: string;
+}
+```
+
+`repositoryId` 使用目录 ID 格式；`conversationId` 必须是 UUID；`contextFileIds` 最多包含 8 个互不重复的 `file_` opaque ID；`message` 去除首尾空白后长度为 1 到 20000 个字符。请求拒绝额外字段，并执行与其他写请求相同的严格同源 Origin 校验。后端必须通过 RepositoryService 重新执行真实路径解析、Git repository 检查和对应来源的路径边界校验。
+
+“Add file”只能使用 `GET /api/repositories/:repositoryId/files` 返回的文件。该接口重新校验 repository 后递归扫描普通文件，跳过符号链接、`.git`、依赖目录和构建输出；单文件超过 128 KiB 时不进入列表。响应只返回服务端 HMAC 签发的 `file_` ID、repository 相对路径和字节数，不返回文件内容或服务器绝对路径。最多扫描 2000 个目录、返回 5000 个文件；达到限制时返回 `truncated: true`，前端提示通过相对路径搜索缩小范围。
+
+消息执行前，后端根据进程内文件索引确认每个 ID 属于同一 repository，并对每个文件重新执行 `realpath()`、repository containment 和普通文件检查。单次最多 8 个文件、单文件最多 128 KiB、总计最多 512 KiB，只接受无 NUL 且可严格解码为 UTF-8 的文本；越界符号链接、失效或伪造 ID、二进制文件和超限内容必须在建立 Codex 响应流前拒绝。前端不得提交相对路径或绝对路径代替文件 ID。
+
+经校验的文件以包含 repository 相对路径和内容的 JSON 加入服务端 prompt。prompt 明确把文件内容视为不可信源数据而非指令，并要求 Codex 优先只使用用户为本次 turn 选择的文件；仅在用户明确要求或任务无法完成时才检查其他文件。该限定不改变 Codex CLI 的 repository 工作目录和 `workspace-write` 沙箱边界。
+
+首次对话使用服务器固定参数数组，并通过 stdin 发送由服务端前缀和用户消息组成的 prompt：
+
+```typescript
+[
+  "exec", "--json", "--color", "never", "--sandbox", "workspace-write",
+  "--cd", repositoryRealPath, "-"
+]
+```
+
+继续对话使用：
+
+```typescript
+[
+  "exec", "--json", "--color", "never", "--sandbox", "workspace-write",
+  "resume", conversationId, "-"
+]
+```
+
+两种调用的子进程 `cwd` 都是重新校验后的 repository 真实路径，使用参数数组、`shell: false` 和独立进程组。浏览器不能控制上述参数。Codex CLI 必须返回符合 UUID 格式的 thread ID；服务端只在进程内保存 `conversationId -> repositoryId` 映射。继续请求只能使用服务端已登记且属于同一 repository 的 ID；未知、服务重启后失效或跨 repository 的 ID 产生 `CODEX_CONVERSATION_NOT_FOUND`，同一 conversation 已有请求运行时产生 `CODEX_CONVERSATION_BUSY`。由于响应流在执行 Codex 前已经建立，这些执行期错误通过脱敏 `error` 事件返回。
+
+成功响应状态为 `200`，Content-Type 为 `application/x-ndjson; charset=utf-8`，并禁用响应缓存和代理缓冲。每行只允许以下事件之一：
+
+```typescript
+type CodexChatStreamEvent =
+  | { type: "conversation"; conversationId: string }
+  | { type: "assistant_delta"; delta: string }
+  | { type: "done" }
+  | { type: "error"; message: string };
+```
+
+服务端只从 Codex JSONL 的 `agent_message` 项提取助手文本，不转发原始事件、工具调用、usage、stderr 或原始失败详情。助手文本中出现的当前 repository 绝对路径替换为 `.`。流开始后的失败使用脱敏 `error` 事件表示；流开始前的 schema、Origin、repository 和就绪错误继续使用标准 JSON 错误响应。
+
+每次 Codex turn 最长运行 30 分钟，stdout 上限为 4 MiB，保留的 stderr 诊断上限为 64 KiB且不得返回前端。浏览器取消请求、HTTP 响应关闭、输出超限、超时或管理服务关闭时，必须先向 Codex 独立进程组发送 `SIGTERM`；5 秒后仍未退出则发送 `SIGKILL`。管理服务关闭时取消所有活动 Codex turn，但仍不得删除 Zellij Session。
 
 ## 5. API 契约
 
@@ -426,12 +514,18 @@ OpenVSCode 平时仍是独立进程，但统一重启脚本负责停止并重新
 | `POST` | `/api/sessions` | `200` 或 `201` | 复用或创建 repository 对应 Session |
 | `DELETE` | `/api/sessions/:name` | `204` | 删除 Session |
 | `GET` | `/api/repositories` | `200` | 浏览目录 |
+| `GET` | `/api/repository-folders` | `200` | 通过不透明目录 ID 逐层浏览服务器目录 |
+| `POST` | `/api/repositories` | `201` | 添加手动 Git repository |
+| `DELETE` | `/api/repositories/:repositoryId` | `204` | 从列表移除手动 repository |
 | `GET` | `/api/zellij-token` | `200` | 读取主页展示的 Zellij Web Token 名称和值 |
 | `POST` | `/api/zellij-token/regenerate` | `201` | 创建或重新创建 Zellij Web Token |
 | `DELETE` | `/api/zellij-token` | `204` | 撤销并删除当前 Zellij Web Token |
 | `GET` | `/api/viewers` | `200` | 当前进程的 viewer 列表 |
 | `POST` | `/api/viewers` | `200` 或 `201` | 复用或创建 viewer |
 | `DELETE` | `/api/viewers/:id` | `204` | 停止 viewer |
+| `GET` | `/api/codex/status` | `200` | 检查后台服务能否调用 Codex CLI 并返回版本 |
+| `GET` | `/api/repositories/:repositoryId/files` | `200` | 返回可作为 Codex 上下文的 repository 文件 opaque ID |
+| `POST` | `/api/codex/messages` | `200` 流 | 在已校验 repository 中创建或继续 Codex 对话 |
 | `POST` | `/api/services/restart` | `202` | 重启管理、Zellij Web、code-viewer 和 OpenVSCode 服务 |
 
 `DELETE` 请求不接受请求体。`POST /api/services/restart` 只接受空 JSON 对象并拒绝额外字段。`GET /api/viewers` 按 `createdAt` 升序返回。
@@ -483,11 +577,11 @@ Fastify 为请求、查询和响应配置 schema；Zod 定义共享领域类型�
 
 管理应用不提供应用层认证，不要求用户名、密码、Bearer Token 或登录 Cookie，也不提供 `/api/me`。
 
-页面、API 和 viewer 代理必须同源 HTTPS。Zellij Web 使用同主机、不同端口的 HTTPS 入口。OpenVSCode 是显式例外，使用同主机、配置端口（默认 `8023`）的独立 HTTP 入口。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
+页面、API、Codex 流式响应、viewer 代理和 OpenVSCode 代理必须同源 HTTPS。Zellij Web 使用同主机、不同端口的 HTTPS 入口。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
 
 服务重启接口同样执行严格同源校验。前端不能提交 workspace、配置文件、端口、PID、命令、环境变量或服务列表。
 
-访问控制由 VPN/公司内网和主机防火墙承担。公开管理端口、Zellij Web 端口和配置的 OpenVSCode 端口只允许受控网段访问；code-viewer 上游端口只监听 localhost。
+访问控制由 VPN/公司内网和主机防火墙承担。公开管理端口和 Zellij Web 端口只允许受控网段访问；code-viewer 与 OpenVSCode 上游端口只监听 localhost。
 
 Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理专用 Zellij Web Token，并只通过主页专用接口展示。Token 管理写请求必须执行同源 Origin 校验。
 
@@ -501,9 +595,10 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "sessions": [],
-  "viewers": []
+  "viewers": [],
+  "repositories": []
 }
 ```
 
@@ -523,7 +618,7 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 
 状态写入是写操作成功的一部分。外部操作成功但写入失败时返回 `500 STATE_WRITE_FAILED`，记录高优先级日志，并重新查询真实状态进行补偿。
 
-状态文件保存 managed Session 元数据和 viewer 清理元数据，不保存 Token、命令输出或其他秘密。
+状态文件保存 managed Session 元数据、viewer 清理元数据和用户手动选择的规范化 repository 真实路径，不保存 Token、命令输出或其他秘密。版本 1 文件在读取后迁移为版本 2，已有 Session 元数据必须保留。
 
 ### 7.3 恢复与退出
 

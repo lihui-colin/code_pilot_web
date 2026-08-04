@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -34,6 +34,154 @@ afterEach(async () => {
 });
 
 describe('MVP-1 routes', () => {
+  it('streams a Codex conversation for a validated repository ID', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-route-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
+    let receivedPath = '';
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      codexChatService: {
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0' }),
+        send: async turn => {
+          receivedPath = turn.repositoryRealPath;
+          turn.onEvent({ type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' });
+          turn.onEvent({ type: 'assistant_delta', delta: 'Hello from Codex' });
+          turn.onEvent({ type: 'done' });
+        },
+        close: async () => undefined,
+      },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+    const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
+    const repositoryId = listing.json().entries[0].id as string;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/codex/messages',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { repositoryId, message: 'Hello' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('application/x-ndjson');
+    expect(response.body.trim().split('\n').map(line => JSON.parse(line))).toEqual([
+      { type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' },
+      { type: 'assistant_delta', delta: 'Hello from Codex' },
+      { type: 'done' },
+    ]);
+    expect(receivedPath).toBe(path.join(root, 'repository'));
+    await app.close();
+  });
+
+  it('adds only server-issued repository files to the Codex turn context', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-context-route-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
+    await mkdir(path.join(root, 'repository', 'src'));
+    await writeFile(path.join(root, 'repository', 'src', 'context.ts'), 'export const context = true;\n');
+    let receivedContext: Array<{ relativePath: string; content: string }> | undefined;
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      codexChatService: {
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0' }),
+        send: async turn => {
+          receivedContext = turn.contextFiles;
+          turn.onEvent({ type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' });
+          turn.onEvent({ type: 'done' });
+        },
+        close: async () => undefined,
+      },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+    const repositories = await app.inject({ method: 'GET', url: '/api/repositories' });
+    const repositoryId = repositories.json().entries[0].id as string;
+    const files = await app.inject({ method: 'GET', url: `/api/repositories/${repositoryId}/files` });
+    expect(files.statusCode).toBe(200);
+    expect(files.json().files[0]).toMatchObject({ relativePath: 'src/context.ts' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/codex/messages',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: {
+        repositoryId,
+        contextFileIds: [files.json().files[0].id],
+        message: 'Use the attached file',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(receivedContext).toEqual([{
+      relativePath: 'src/context.ts',
+      content: 'export const context = true;\n',
+    }]);
+    await app.close();
+  });
+
+  it('reports Codex CLI availability and blocks chat when it is unavailable', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-unavailable-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
+    let sends = 0;
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      codexChatService: {
+        status: async () => ({ available: false, version: null }),
+        send: async () => { sends += 1; },
+        close: async () => undefined,
+      },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+
+    const status = await app.inject({ method: 'GET', url: '/api/codex/status' });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toEqual({ available: false, version: null });
+    const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
+    const repositoryId = listing.json().entries[0].id as string;
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/codex/messages',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { repositoryId, message: 'Hello' },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error).toMatchObject({
+      code: 'CODEX_CLI_UNAVAILABLE',
+      message: 'Codex CLI is not available on the server',
+    });
+    expect(sends).toBe(0);
+    await app.close();
+  });
+
+  it('rejects paths, commands, and extra fields in Codex chat requests', async () => {
+    const app = await testApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/codex/messages',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: {
+        repositoryId: `dir_${'a'.repeat(43)}`,
+        message: 'Hello',
+        path: '/etc',
+        command: 'bash',
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('INVALID_REQUEST');
+    await app.close();
+  });
+
   it('accepts a same-origin request to restart the managed backend services', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-restart-route-'));
     temporaryDirectories.push(root);
@@ -152,6 +300,70 @@ describe('MVP-1 routes', () => {
     await app.close();
   });
 
+  it('browses server folders by opaque ID and adds or removes an external Git repository', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-open-folder-route-'));
+    temporaryDirectories.push(root);
+    const workspace = path.join(root, 'workspace');
+    const external = path.join(root, 'external-repository');
+    await mkdir(workspace);
+    await mkdir(path.join(external, '.git'), { recursive: true });
+    const persisted: string[][] = [];
+    const app = await createApp(createTestConfig(workspace), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      persistManualRepositoryPaths: async paths => { persisted.push([...paths]); },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+
+    let folderListing = (await app.inject({ method: 'GET', url: '/api/repository-folders' })).json();
+    for (const segment of external.split(path.sep).filter(Boolean)) {
+      const child = folderListing.entries.find((entry: { name: string }) => entry.name === segment);
+      expect(child).toBeDefined();
+      folderListing = (await app.inject({
+        method: 'GET',
+        url: `/api/repository-folders?directoryId=${encodeURIComponent(child.id)}`,
+      })).json();
+    }
+    const added = await app.inject({
+      method: 'POST',
+      url: '/api/repositories',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { directoryId: folderListing.current.id },
+    });
+    expect(added.statusCode).toBe(201);
+    expect(persisted).toEqual([[external]]);
+
+    const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
+    const manualEntry = listing.json().entries.find((entry: { source: string }) => entry.source === 'manual');
+    expect(manualEntry).toMatchObject({ name: 'external-repository', relativePath: external, markers: ['git'] });
+    expect(new URL(manualEntry.openVsCodeUrl).searchParams.get('folder')).toBe(external);
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/repositories/${manualEntry.id}`,
+      headers: { origin: 'https://192.0.2.10:8024' },
+    });
+    expect(removed.statusCode).toBe(204);
+    expect(persisted.at(-1)).toEqual([]);
+    await app.close();
+  });
+
+  it('does not accept server paths in the folder picker API', async () => {
+    const app = await testApp();
+    const queryResponse = await app.inject({ method: 'GET', url: '/api/repository-folders?path=/etc' });
+    const bodyResponse = await app.inject({
+      method: 'POST',
+      url: '/api/repositories',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { path: '/etc' },
+    });
+    expect(queryResponse.statusCode).toBe(400);
+    expect(bodyResponse.statusCode).toBe(400);
+    await app.close();
+  });
+
   it('returns 503 readiness without leaking details', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-not-ready-'));
     temporaryDirectories.push(root);
@@ -189,7 +401,8 @@ describe('MVP-1 routes', () => {
     const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
     const repositoryEntry = listing.json().entries[0];
     const openVsCodeUrl = new URL(repositoryEntry.openVsCodeUrl);
-    expect(openVsCodeUrl.origin).toBe('http://192.0.2.10:8023');
+    expect(openVsCodeUrl.origin).toBe('https://192.0.2.10:8024');
+    expect(openVsCodeUrl.pathname).toBe('/openvscode/');
     expect(openVsCodeUrl.searchParams.get('folder')).toBe(path.join(root, 'repository'));
     const repositoryId = repositoryEntry.id as string;
     const response = await app.inject({

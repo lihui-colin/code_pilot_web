@@ -21,6 +21,8 @@ Management Web Application
 |
 |-- Repository API ---> configured workspace root
 |
+|-- Codex Chat API ---> codex exec in validated repository
+|
 `-- Viewer API -------> localhost code-viewer processes
                          ^
                          `-- HTTP/WebSocket proxy
@@ -65,7 +67,7 @@ node dist/server.js --workspace-root /home/lihui/projects
 
 未传参数、目录不存在或目录不可读时，服务启动失败，不回退到当前目录、用户主目录或服务器根目录。
 
-页面只展示 Git repository，不提供目录导航：
+主页只展示 Git repository，workspace 自动发现结果保持扁平列表：
 
 - workspace 自身包含 `.git` 文件或目录时，只展示 workspace 本身，不探测子目录。
 - workspace 自身不是 Git repository 时，递归探测其可见子目录并展示任意深度的 Git repository。
@@ -73,7 +75,9 @@ node dist/server.js --workspace-root /home/lihui/projects
 - 所有结果以扁平列表展示，相对路径用于区分不同层级或同名 repository。
 - `package.json`、`pyproject.toml`、`Cargo.toml`、`go.mod` 和 `pom.xml` 只用于补充已识别 Git repository 的技术栈标识，不能单独使目录进入列表。
 
-列表条目至少展示名称、相对路径、Git repository 类型、识别依据和 viewer 状态。前端只使用服务端目录 ID，不提交绝对路径。
+页面同时提供类似 VSCode “Open Folder”的“添加文件夹”操作。用户可以从服务器文件系统根目录逐层进入服务进程可读的目录；目录选择器只交换后端签发的不透明目录 ID，不允许浏览器提交绝对路径。只有当前包含 `.git` 文件或目录的目录可以选择。选中的 workspace 外 Git repository 持久化到状态文件，服务重启后继续显示，并可从列表移除；移除不会删除服务器文件或 Zellij Session。
+
+列表条目至少展示名称、显示路径、workspace/手动来源、Git repository 类型、识别依据和 viewer 状态。所有后续操作仍只使用服务端 repository ID。
 
 ## code-viewer 体验
 
@@ -90,6 +94,16 @@ node dist/server.js --workspace-root /home/lihui/projects
 启动过程中显示稳定的 `starting` 状态并禁止重复提交。用户可以停止不再需要的 viewer。viewer 进程异常退出、启动超时或长时间空闲时，服务清理实例和端口记录。
 
 管理页面不内嵌 code-viewer，不向用户暴露 localhost 上游端口或服务器绝对路径。
+
+## Codex 对话体验
+
+每个 Git repository 条目提供“与 Codex 对话”链接，在新标签页打开独立的 `/codex-chat` 页面。页面加载时先检查后台服务能否调用 Codex CLI；可用时展示版本并启用输入，不可用时禁用发送并提示检查安装、可执行权限和后台服务用户的 `PATH`。用户发送的消息和头像靠右显示，Codex 回复和头像靠左显示。“新对话”、repository 路径、返回首页和运行信息放在默认隐藏的抽屉面板中，通过顶部菜单按钮打开，并支持遮罩和 Esc 关闭；主对话区域始终占满可用宽度。消息输入框提供“Add file”，从服务端列出的当前 repository 普通文本文件中最多选择 8 个作为本次消息的限定上下文；已选文件以可移除标签展示，发送后也显示在用户消息中。页面展示流式响应状态和停止操作；支持 Enter 发送、Shift+Enter 换行，并适配桌面和移动浏览器。
+
+用户只提交 repository ID、自然语言消息和服务端签发的上下文文件 ID。服务端重新解析 repository 和每个文件的真实路径并执行对应来源的路径边界校验，然后在该 repository 中以固定的 `workspace-write` 沙箱参数运行 Codex CLI。用户不能从浏览器提交目录、绝对路径、文件路径、可执行文件、命令参数、环境变量或 Codex 配置。
+
+首条消息创建由 Codex 返回的 conversation ID；后续消息只能继续当前服务进程已经登记、且属于同一 repository 的 conversation。新对话会清空页面消息并重新创建 conversation。页面关闭、用户点击停止、管理服务关闭、30 分钟超时或输出超过限制时，后端必须清理该次 Codex 进程组。
+
+Codex 流式响应只包含 conversation ID、助手文本、完成状态和脱敏错误，不展示原始工具事件、标准错误、服务器绝对路径或异常堆栈。
 
 ## 管理页面
 
@@ -124,8 +138,8 @@ node dist/server.js --workspace-root /home/lihui/projects
 - 页面、API 和 viewer 代理无需应用登录，使用同源 HTTPS，并由 VPN 和防火墙限制访问网段。
 - Zellij Web 保留自身 Token 验证；管理服务首次启动创建专用 Token，同时保存名称和值并在主页提供复制、删除和重新创建操作。
 - Token 成功写入浏览器剪贴板后，主页显示“已复制”反馈。
-- 只允许访问启动时配置的工作目录。
-- 每次目录相关操作都重新执行真实路径边界校验。
+- 自动扫描只允许访问启动时配置的工作目录；workspace 外目录只能通过服务器目录选择器主动加入。
+- 每次目录相关操作都重新执行真实路径和对应来源边界校验。
 - 禁止前端提交任意命令、命令参数、环境变量、KDL 或绝对路径。
 - 管理服务和 code-viewer 使用普通用户运行，不使用 root。
 - Zellij 缺失时由项目安装固定版本；HTTPS 证书在管理服务首次启动时初始化，由管理入口和 Zellij Web 共同使用，且两个入口使用相同主机名或 IP。
@@ -135,12 +149,14 @@ node dist/server.js --workspace-root /home/lihui/projects
 
 - 尚无对应 Session 时显示“创建 Zellij Session”，在该 repository 的真实目录创建 Codex Session。
 - 已有对应 Session 时显示“打开 Zellij Web”和“删除 Session”；打开仓库绑定的 Session 时自动复制当前 Zellij Web Token，并显示复制结果；服务重启后仍通过固定名称识别对应关系。
-- “打开 code-viewer”：打开空白标签页，启动或复用该 repository 的 code-viewer，成功后导航到管理服务同源 viewer 地址。
-- “编辑代码”：在“打开 code-viewer”旁边以新标签页打开后端为该 repository 生成的 OpenVSCode Server 地址，默认端口为 `8023`，并通过 `folder` 参数自动打开该 repository。OpenVSCode 由部署侧使用配置的 workspace root 启动；后端重新校验 repository 真实路径和 workspace 边界，前端不提交或拼接目录、绝对路径、命令或环境变量。
+- “code-viewer”：打开空白标签页，启动或复用该 repository 的 code-viewer，成功后导航到管理服务同源 viewer 地址。
+- “编辑代码”：在“code-viewer”旁边以新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode 地址，并通过 `folder` 参数自动打开该 repository。OpenVSCode 由部署侧使用配置的 workspace root 启动，只监听默认端口 `127.0.0.1:8023`，由管理服务代理 `/openvscode` HTTP 和 WebSocket 流量；后端重新校验 repository 真实路径和对应来源边界，前端不提交或拼接目录、绝对路径、命令或环境变量。
+- “与 Codex 对话”：在新标签页打开该 repository 的独立流式对话页面；服务端校验 repository ID 并固定 Codex CLI 参数，前端只提交自然语言消息和服务端签发的 conversation ID。
+- 手动 repository 显示“移除仓库”；该操作只删除状态记录，不删除文件、Session 或进程。
 - code-viewer 只监听 localhost，上游端口不对 VPN 网络开放。
 - 写请求执行同源校验。
 - 记录 Session 创建、删除和 viewer 启停审计日志。
-- 主机防火墙只允许 VPN 网段访问公开入口、Zellij Web 和配置的 OpenVSCode Server 端口。
+- 主机防火墙只允许 VPN 网段访问管理入口和 Zellij Web；OpenVSCode 与 code-viewer 上游端口不得公开。
 
 ## 与现有脚本的关系
 

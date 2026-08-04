@@ -25,6 +25,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fastify/http-proxy": "^11.6.0",
     "@fastify/reply-from": "^12.6.4",
     "@fastify/static": "^10.1.2",
     "@youtyan/code-viewer": "0.10.0",

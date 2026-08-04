@@ -97,6 +97,11 @@
 13. workspace 非 Git repository 且递归扫描超过 1000 个可见目录时返回 `422 DIRECTORY_TOO_LARGE`，不截断。
 14. 条目按相对路径稳定排序。
 15. API 拒绝 `parentId` 和任意路径查询参数。
+16. “添加文件夹”从文件系统根目录开始，只通过 `folder_` 不透明 ID 逐层浏览，不接受查询或请求体中的绝对路径。
+17. 目录选择器只返回可读子目录，标记其中包含 `.git` 的目录，并拒绝选择非 Git 目录。
+18. workspace 外 Git repository 被持久化、合并到扁平列表并标记为 `manual`，重启后恢复。
+19. 移除手动 repository 只更新状态记录，不删除文件或 Session；workspace 自动扫描条目不能通过该接口移除。
+20. 手动 repository 的 Session、viewer、OpenVSCode 和 Codex 操作前重新执行真实路径、Git 标识和来源边界校验。
 
 ### 访问和页面
 
@@ -132,7 +137,7 @@
 
 ## MVP-3：Viewer 管理
 
-当前首版仓库页面覆盖：点击“打开 code-viewer”会先同步打开空白标签页，再通过 API 启动或复用 localhost:8022 的 code-viewer，并导航到同源 viewer 地址；切换仓库会停止旧实例。repository 没有对应 Session 时显示创建按钮，已有时显示安全打开链接和删除按钮。“打开 code-viewer”旁边显示“编辑代码”链接，安全地在新标签页打开后端为该 repository 生成的 OpenVSCode URL；URL 的 `folder` 参数必须等于重新执行真实路径和 workspace containment 校验后的 repository 目录，前端不得自行拼接路径。
+当前首版仓库页面覆盖：点击“code-viewer”会先同步打开空白标签页，再通过 API 启动或复用 localhost:8022 的 code-viewer，并导航到同源 viewer 地址；切换仓库会停止旧实例。repository 没有对应 Session 时显示创建按钮，已有时显示安全打开链接和删除按钮。“code-viewer”旁边显示“编辑代码”链接，安全地在新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode URL；URL 的 `folder` 参数必须等于重新执行真实路径和对应来源边界校验后的 repository 目录，前端不得自行拼接路径。`/openvscode` 必须保留基路径代理普通 HTTP 和 WebSocket 流量，上游只监听 localhost。
 
 1. 请求额外字段和非法 ID 被拒绝。
 2. 非 repository 或越界目录无法启动 viewer。
@@ -158,6 +163,30 @@
 22. 弹窗被阻止时不发送启动请求。
 23. 启动失败时空白标签页被关闭。
 24. 轮询不覆盖 starting 和 stopping 状态。
+
+## 当前扩展：Codex Web 对话
+
+1. repository 条目的“与 Codex 对话”链接使用新标签页、`noopener noreferrer` 和编码后的 repository ID。
+2. 可用性检查固定执行 `codex --version`，使用参数数组、`shell: false`、5 秒超时和 64 KiB 输出上限。
+3. CLI 可用时状态接口返回脱敏版本并启用输入；不存在、不可执行、超时或退出失败时返回 unavailable，页面显示操作提示并禁用发送。
+4. 消息接口在建立响应流前再次检查 CLI；不可用时返回 `503 CODEX_CLI_UNAVAILABLE` 且不调用 Codex turn。
+5. `/codex-chat` 只接受列表中仍然存在的 repository ID；用户消息和头像靠右，Codex 回复和头像靠左。“新对话”、repository 路径和返回入口默认隐藏在抽屉中，可通过菜单按钮打开，并可通过关闭按钮、遮罩和 Esc 关闭；桌面和移动布局均能完成发送、停止和新对话操作。
+6. “Add file”只列出当前 repository 内普通文件的 opaque ID、相对路径和大小；`.git`、依赖/构建目录、符号链接和超过 128 KiB 的文件不显示。
+7. 前端最多选择 8 个文件，显示可移除附件标签，并只提交 server-issued file ID；发送后的用户消息显示本次附件路径。
+8. 每个文件在读取前重新执行 `realpath()` 和 repository containment 校验；伪造、跨 repository、失效或变成越界符号链接的 ID 被拒绝。
+9. 二进制、非严格 UTF-8、单文件超过 128 KiB、总计超过 512 KiB 和重复文件 ID 被拒绝，错误不包含文件绝对路径或内容。
+10. 请求只允许 `repositoryId`、可选 UUID `conversationId`、可选 `contextFileIds` 和 1 到 20000 字符的 `message`；路径、命令、参数、环境变量和额外字段被拒绝。
+11. 每次发送前通过 RepositoryService 重新执行 repository 真实路径和对应来源边界校验。
+12. 首次消息固定调用 `codex exec --json --color never --sandbox workspace-write --cd <repository> -`，包含校验后文件 JSON 的 prompt 只通过 stdin 发送，且 `shell: false`。
+13. 后续消息固定调用 `codex exec --json --color never --sandbox workspace-write resume <conversationId> -`。
+14. 只有 Codex 返回的合法 UUID 会被登记；conversation 只能由原 repository 继续，服务重启后旧 ID 不可继续。
+15. 同一 conversation 不允许同时运行两个 turn，新对话不复用旧 conversation ID。
+16. NDJSON 客户端可解析跨 chunk 和最后无换行的事件，并依次展示助手增量。
+17. 后端只转发 conversation、assistant delta、done 和脱敏 error，不返回 stderr、工具事件、usage、异常堆栈或原始失败详情。
+18. 助手文本中的当前 repository 绝对路径被替换为相对根标记 `.`。
+19. 浏览器停止或连接关闭会终止整个 Codex 进程组；5 秒后仍未退出时升级为 `SIGKILL`。
+20. 30 分钟超时和 4 MiB stdout 超限会清理进程组并返回脱敏错误，stderr 保留量不超过 64 KiB且不返回浏览器。
+21. 管理服务关闭会取消所有活动 Codex turn，且不删除任何 Zellij Session。
 
 ## MVP-4：生产化
 

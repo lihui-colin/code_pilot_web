@@ -36,12 +36,42 @@ describe('StateStore', () => {
 
     expect([...sessions.keys()]).toEqual(['existing']);
     expect(JSON.parse(await readFile(stateFile, 'utf8'))).toEqual({
-      version: 1,
+      version: 2,
       sessions: [{
         name: 'existing', repositoryId: 'dir_existing', relativePath: 'existing',
         createdAt: '2026-08-03T00:00:00.000Z', command: 'codex',
       }],
       viewers: [],
+      repositories: [],
     });
+  });
+
+  it('persists manual repositories without losing managed Sessions', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-state-'));
+    temporaryDirectories.push(root);
+    const stateFile = path.join(root, 'data/state.json');
+    const store = new StateStore(stateFile);
+    await store.initialize(null);
+    await store.persistRepositoryPaths(['/srv/repository-b', '/srv/repository-a']);
+    await store.persist(new Map([['session-a', {
+      repositoryId: 'dir_test',
+      relativePath: 'repository-a',
+      createdAt: '2026-08-04T00:00:00.000Z',
+      command: 'codex',
+    }]]));
+
+    expect(JSON.parse(await readFile(stateFile, 'utf8'))).toEqual({
+      version: 2,
+      sessions: [{
+        name: 'session-a', repositoryId: 'dir_test', relativePath: 'repository-a',
+        createdAt: '2026-08-04T00:00:00.000Z', command: 'codex',
+      }],
+      viewers: [],
+      repositories: ['/srv/repository-a', '/srv/repository-b'],
+    });
+
+    const reloaded = new StateStore(stateFile);
+    await reloaded.initialize(null);
+    expect(reloaded.repositoryPaths()).toEqual(['/srv/repository-a', '/srv/repository-b']);
   });
 });

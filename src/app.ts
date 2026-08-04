@@ -1,13 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import fastifyHttpProxy from '@fastify/http-proxy';
 import fastifyReplyFrom from '@fastify/reply-from';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError, z } from 'zod';
 import type { AppConfig } from './config.js';
-import type { ReadinessResult } from './domain/types.js';
+import type { CodexChatStreamEvent, ReadinessResult } from './domain/types.js';
 import { ApiError } from './errors.js';
+import { CodexChatService, SpawnCodexProcessAdapter, type CodexChatServiceLike } from './services/codex-chat-service.js';
 import { RepositoryService } from './services/repository-service.js';
 import type { ServiceRestarter } from './services/service-restarter.js';
 import { SpawnViewerProcessAdapter, ViewerManager } from './services/viewer-manager.js';
@@ -17,20 +19,32 @@ import type { ZellijTokenService } from './services/zellij-token-service.js';
 
 const repositoryQuerySchema = z.object({}).strict();
 const repositoryIdSchema = z.string().regex(/^dir_[A-Za-z0-9_-]{43}$/u);
+const folderIdSchema = z.string().regex(/^folder_[A-Za-z0-9_-]{43}$/u);
+const repositoryFolderQuerySchema = z.object({ directoryId: folderIdSchema.optional() }).strict();
+const addManualRepositorySchema = z.object({ directoryId: folderIdSchema }).strict();
+const repositoryParamsSchema = z.object({ repositoryId: repositoryIdSchema }).strict();
+const contextFileIdSchema = z.string().regex(/^file_[A-Za-z0-9_-]{43}$/u);
 const createSessionSchema = z.object({
   repositoryId: repositoryIdSchema,
   command: z.literal('codex'),
 }).strict();
 const sessionParamsSchema = z.object({ name: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u) }).strict();
 const createViewerSchema = z.object({ repositoryId: repositoryIdSchema }).strict();
+const codexChatSchema = z.object({
+  repositoryId: repositoryIdSchema,
+  conversationId: z.uuid().optional(),
+  contextFileIds: z.array(contextFileIdSchema).max(8).refine(
+    fileIds => new Set(fileIds).size === fileIds.length,
+    'context file IDs must be unique',
+  ).optional(),
+  message: z.string().trim().min(1).max(20_000),
+}).strict();
 const emptyBodySchema = z.object({}).strict();
 const noBodySchema = z.undefined();
 
 function openVsCodeWebUrl(config: AppConfig, repositoryRealPath: string): string {
   const url = new URL(config.publicBaseUrl);
-  url.protocol = 'http:';
-  url.port = String(config.openVsCodePort);
-  url.pathname = '/';
+  url.pathname = '/openvscode/';
   url.search = '';
   url.searchParams.set('folder', repositoryRealPath);
   url.hash = '';
@@ -42,12 +56,16 @@ export interface AppDependencies {
   directoryIdSecret: Buffer | null;
   zellijExecutablePath?: string;
   codeViewerExecutablePath?: string;
+  codexExecutablePath?: string;
   zellijAdapter?: ConstructorParameters<typeof ZellijService>[0];
   managedSessions?: Map<string, ManagedSessionMetadata>;
   persistManagedSessions?: (sessions: ReadonlyMap<string, ManagedSessionMetadata>) => Promise<void>;
+  manualRepositoryPaths?: readonly string[];
+  persistManualRepositoryPaths?: (paths: readonly string[]) => Promise<void>;
   viewerManager?: ViewerManager;
   zellijTokenService?: ZellijTokenService;
   serviceRestarter?: ServiceRestarter;
+  codexChatService?: CodexChatServiceLike;
   staticRoot?: string | false;
   https?: false;
   logger?: boolean;
@@ -66,8 +84,37 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     base: `http://127.0.0.1:${config.viewerPortRange.start}`,
     disableRequestLogging: true,
   });
+  const openVsCodePublicUrl = new URL(config.publicBaseUrl);
+  await app.register(fastifyHttpProxy, {
+    upstream: `http://127.0.0.1:${config.openVsCodePort}`,
+    prefix: '/openvscode',
+    rewritePrefix: '/openvscode',
+    websocket: true,
+    disableRequestLogging: true,
+    replyOptions: {
+      rewriteRequestHeaders: (_request, headers) => ({
+        ...headers,
+        host: openVsCodePublicUrl.host,
+        'x-forwarded-host': openVsCodePublicUrl.host,
+        'x-forwarded-proto': 'https',
+      }),
+    },
+    wsClientOptions: {
+      headers: {
+        host: openVsCodePublicUrl.host,
+        origin: config.publicBaseUrl,
+      },
+    },
+  });
   const repositoryService = dependencies.directoryIdSecret
-    ? new RepositoryService(config.workspaceRootRealPath, dependencies.directoryIdSecret, config.projectMarkers, app.log)
+    ? new RepositoryService(
+      config.workspaceRootRealPath,
+      dependencies.directoryIdSecret,
+      config.projectMarkers,
+      app.log,
+      dependencies.manualRepositoryPaths,
+      dependencies.persistManualRepositoryPaths,
+    )
     : null;
   const zellijService = new ZellijService(
     dependencies.zellijAdapter ?? new ExecFileZellijAdapter(dependencies.zellijExecutablePath),
@@ -81,6 +128,9 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     new SpawnViewerProcessAdapter(dependencies.codeViewerExecutablePath),
     config.viewerPortRange.start,
     config.publicBaseUrl,
+  );
+  const codexChatService = dependencies.codexChatService ?? new CodexChatService(
+    new SpawnCodexProcessAdapter(dependencies.codexExecutablePath),
   );
 
   const requireSameOrigin = (origin: string | undefined) => {
@@ -136,6 +186,32 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       entries,
     };
   });
+  app.get('/api/repository-folders', async request => {
+    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Repository browsing is not ready');
+    const query = repositoryFolderQuerySchema.parse(request.query);
+    return repositoryService.listFolders(query.directoryId);
+  });
+  app.get('/api/repositories/:repositoryId/files', async request => {
+    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Repository browsing is not ready');
+    repositoryQuerySchema.parse(request.query);
+    const params = repositoryParamsSchema.parse(request.params);
+    return repositoryService.listContextFiles(params.repositoryId);
+  });
+  app.post('/api/repositories', async (request, reply) => {
+    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Repository browsing is not ready');
+    requireSameOrigin(request.headers.origin);
+    const body = addManualRepositorySchema.parse(request.body);
+    const repositoryId = await repositoryService.addManualRepository(body.directoryId);
+    await reply.code(201).send({ repositoryId });
+  });
+  app.delete('/api/repositories/:repositoryId', async (request, reply) => {
+    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Repository browsing is not ready');
+    requireSameOrigin(request.headers.origin);
+    noBodySchema.parse(request.body);
+    const params = repositoryParamsSchema.parse(request.params);
+    await repositoryService.removeManualRepository(params.repositoryId);
+    await reply.code(204).send();
+  });
   app.post('/api/sessions', async (request, reply) => {
     if (!repositoryService || dependencies.readiness.status !== 'ready') {
       throw new ApiError(503, 'SERVICE_NOT_READY', 'Session creation is not ready');
@@ -177,6 +253,61 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     const repository = await repositoryService.resolveRepository(body.repositoryId);
     const result = await viewerManager.create(body.repositoryId, repository.realPath);
     await reply.code(result.created ? 201 : 200).send(result.instance);
+  });
+  app.get('/api/codex/status', async () => codexChatService.status());
+  app.post('/api/codex/messages', async (request, reply) => {
+    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
+    requireSameOrigin(request.headers.origin);
+    const body = codexChatSchema.parse(request.body);
+    const repository = await repositoryService.resolveRepository(body.repositoryId);
+    const codexStatus = await codexChatService.status();
+    if (!codexStatus.available) {
+      throw new ApiError(503, 'CODEX_CLI_UNAVAILABLE', 'Codex CLI is not available on the server');
+    }
+    const contextFiles = await repositoryService.resolveContextFiles(
+      body.repositoryId,
+      body.contextFileIds ?? [],
+    );
+    const controller = new AbortController();
+    let completed = false;
+    const onClose = () => {
+      if (!completed) controller.abort();
+    };
+
+    reply.hijack();
+    reply.raw.once('close', onClose);
+    reply.raw.writeHead(200, {
+      'cache-control': 'no-store',
+      connection: 'keep-alive',
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'x-accel-buffering': 'no',
+    });
+    reply.raw.flushHeaders();
+    const sendEvent = (event: CodexChatStreamEvent) => {
+      if (!reply.raw.destroyed) reply.raw.write(`${JSON.stringify(event)}\n`);
+    };
+    try {
+      await codexChatService.send({
+        repositoryId: body.repositoryId,
+        repositoryRealPath: repository.realPath,
+        ...(body.conversationId ? { conversationId: body.conversationId } : {}),
+        ...(contextFiles.length > 0 ? { contextFiles } : {}),
+        message: body.message,
+        signal: controller.signal,
+        onEvent: sendEvent,
+      });
+    } catch (error) {
+      if (!(error instanceof Error && error.name === 'AbortError')) {
+        const message = error instanceof ApiError ? error.message : 'Codex request failed';
+        request.log.warn({ code: error instanceof ApiError ? error.code : 'CODEX_UNAVAILABLE' }, 'Codex chat turn failed');
+        sendEvent({ type: 'error', message });
+      }
+    } finally {
+      completed = true;
+      reply.raw.off('close', onClose);
+      if (!reply.raw.destroyed) reply.raw.end();
+    }
+    return reply;
   });
   app.post('/api/zellij-token/regenerate', async (request, reply) => {
     requireSameOrigin(request.headers.origin);
@@ -254,7 +385,9 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     });
   }
 
-  app.addHook('onClose', async () => viewerManager.close());
+  app.addHook('onClose', async () => {
+    await Promise.all([viewerManager.close(), codexChatService.close()]);
+  });
 
   return app;
 }

@@ -48,6 +48,8 @@ async function main(): Promise<void> {
     zellijAdapter,
     managedSessions,
     persistManagedSessions: sessions => stateStore.persist(sessions),
+    manualRepositoryPaths: stateStore.repositoryPaths(),
+    persistManualRepositoryPaths: paths => stateStore.persistRepositoryPaths(paths),
     codeViewerExecutablePath,
     zellijTokenService,
     serviceRestarter: new SpawnServiceRestarter(

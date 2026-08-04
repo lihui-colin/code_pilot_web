@@ -22,6 +22,16 @@ function service(root: string, secret = Buffer.from('stable test secret')) {
   );
 }
 
+async function folderIdFor(serviceInstance: RepositoryService, targetPath: string): Promise<string> {
+  let listing = await serviceInstance.listFolders();
+  for (const segment of targetPath.split(path.sep).filter(Boolean)) {
+    const child = listing.entries.find(entry => entry.name === segment);
+    if (!child) throw new Error(`Folder segment was not listed: ${segment}`);
+    listing = await serviceInstance.listFolders(child.id);
+  }
+  return listing.current.id;
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
 });
@@ -102,5 +112,92 @@ describe('RepositoryService', () => {
     const root = await makeRoot();
     await Promise.all(Array.from({ length: 1_001 }, (_, index) => mkdir(path.join(root, `dir-${index}`))));
     await expect(service(root).list()).rejects.toMatchObject({ code: 'DIRECTORY_TOO_LARGE' });
+  });
+
+  it('browses the server with opaque folder IDs and persists a selected external Git repository', async () => {
+    const root = await makeRoot();
+    const workspace = path.join(root, 'workspace');
+    const external = path.join(root, 'external-repository');
+    await mkdir(workspace);
+    await mkdir(path.join(external, '.git'), { recursive: true });
+    const persisted: string[][] = [];
+    const repositoryService = new RepositoryService(
+      workspace,
+      Buffer.from('stable test secret'),
+      ['.git', 'package.json'],
+      pino({ enabled: false }),
+      [],
+      async paths => { persisted.push([...paths]); },
+    );
+
+    const externalFolderId = await folderIdFor(repositoryService, external);
+    expect(externalFolderId).toMatch(/^folder_[A-Za-z0-9_-]{43}$/u);
+    const repositoryId = await repositoryService.addManualRepository(externalFolderId);
+    const listing = await repositoryService.list();
+
+    expect(persisted).toEqual([[external]]);
+    expect(listing.entries).toContainEqual(expect.objectContaining({
+      id: repositoryId,
+      name: 'external-repository',
+      relativePath: external,
+      source: 'manual',
+      markers: ['git'],
+    }));
+    await expect(repositoryService.resolveRepository(repositoryId)).resolves.toEqual({
+      realPath: external,
+      relativePath: external,
+    });
+
+    await repositoryService.removeManualRepository(repositoryId);
+    expect(persisted.at(-1)).toEqual([]);
+    expect((await repositoryService.list()).entries).toEqual([]);
+  });
+
+  it('does not allow a non-Git folder to be selected', async () => {
+    const root = await makeRoot();
+    const workspace = path.join(root, 'workspace');
+    const plain = path.join(root, 'plain-directory');
+    await mkdir(workspace);
+    await mkdir(plain);
+    const repositoryService = service(workspace);
+    const folderId = await folderIdFor(repositoryService, plain);
+    await expect(repositoryService.addManualRepository(folderId)).rejects.toMatchObject({ code: 'NOT_A_REPOSITORY' });
+  });
+
+  it('lists repository context files with opaque IDs and revalidates containment before reading', async () => {
+    const root = await makeRoot();
+    const outside = await makeRoot();
+    await mkdir(path.join(root, '.git'));
+    await mkdir(path.join(root, 'src'));
+    await writeFile(path.join(root, 'src', 'app.ts'), 'export const answer = 42;\n');
+    await writeFile(path.join(root, 'src', 'changes-later.txt'), 'text for now');
+    await writeFile(path.join(root, 'src', 'binary.dat'), Buffer.from([1, 0, 2]));
+    await writeFile(path.join(root, 'large.txt'), 'x'.repeat((128 * 1024) + 1));
+    await writeFile(path.join(root, '.git', 'config'), 'secret');
+    await writeFile(path.join(outside, 'secret.txt'), 'outside');
+    await symlink(path.join(outside, 'secret.txt'), path.join(root, 'linked-secret.txt'));
+    const repositoryService = service(root);
+    const repositoryId = (await repositoryService.list()).entries[0]!.id;
+
+    const listing = await repositoryService.listContextFiles(repositoryId);
+    expect(listing.truncated).toBe(false);
+    expect(listing.files.map(file => file.relativePath)).toEqual(['src/app.ts', 'src/changes-later.txt']);
+    expect(listing.files.every(file => /^file_[A-Za-z0-9_-]{43}$/u.test(file.id))).toBe(true);
+    const sourceFile = listing.files.find(file => file.relativePath === 'src/app.ts')!;
+    await expect(repositoryService.resolveContextFiles(repositoryId, [sourceFile.id])).resolves.toEqual([{
+      relativePath: 'src/app.ts',
+      content: 'export const answer = 42;\n',
+    }]);
+    const changingFile = listing.files.find(file => file.relativePath === 'src/changes-later.txt')!;
+    await writeFile(path.join(root, 'src', 'changes-later.txt'), Buffer.from([1, 0, 2]));
+    await expect(repositoryService.resolveContextFiles(repositoryId, [changingFile.id]))
+      .rejects.toMatchObject({ code: 'CONTEXT_FILE_BINARY' });
+    await expect(repositoryService.resolveContextFiles(repositoryId, [`file_${'a'.repeat(43)}`]))
+      .rejects.toMatchObject({ code: 'CONTEXT_FILE_NOT_FOUND' });
+
+    await rm(path.join(root, 'src', 'app.ts'));
+    await symlink(path.join(outside, 'secret.txt'), path.join(root, 'src', 'app.ts'));
+    await expect(repositoryService.resolveContextFiles(repositoryId, [sourceFile.id]))
+      .rejects.toMatchObject({ code: 'CONTEXT_FILE_NOT_FOUND' });
   });
 });
