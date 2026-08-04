@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { loadConfiguration, persistZellijWebToken } from './config.js';
 import { checkToolReadiness } from './services/tool-readiness.js';
-import { CodexChatService, SpawnCodexProcessAdapter } from './services/codex-chat-service.js';
+import { CodexChatService, SpawnCodexAppServerAdapter } from './services/codex-chat-service.js';
 import { StateStore } from './services/state-store.js';
 import { SpawnServiceRestarter } from './services/service-restarter.js';
 import { bootstrapZellij } from './services/zellij-bootstrap.js';
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     codeViewerExecutablePath,
   );
   const codexChatService = new CodexChatService(
-    new SpawnCodexProcessAdapter(),
+    new SpawnCodexAppServerAdapter(),
     stateStore.codexConversations(),
     conversations => stateStore.persistCodexConversations(conversations),
   );

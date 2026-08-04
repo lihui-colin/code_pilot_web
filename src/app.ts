@@ -9,9 +9,9 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError, z } from 'zod';
 import type { AppConfig } from './config.js';
-import type { ReadinessResult } from './domain/types.js';
+import type { CodexConversationStreamEvent, ReadinessResult } from './domain/types.js';
 import { ApiError } from './errors.js';
-import { CodexChatService, SpawnCodexProcessAdapter, type CodexChatServiceLike } from './services/codex-chat-service.js';
+import { CodexChatService, SpawnCodexAppServerAdapter, type CodexChatServiceLike } from './services/codex-chat-service.js';
 import { RepositoryService } from './services/repository-service.js';
 import type { ServiceRestarter } from './services/service-restarter.js';
 import { SpawnViewerProcessAdapter, ViewerManager } from './services/viewer-manager.js';
@@ -189,7 +189,7 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     config.publicBaseUrl,
   );
   const codexChatService = dependencies.codexChatService ?? new CodexChatService(
-    new SpawnCodexProcessAdapter(dependencies.codexExecutablePath),
+    new SpawnCodexAppServerAdapter(dependencies.codexExecutablePath),
   );
 
   const requireSameOrigin = (origin: string | undefined) => {
@@ -321,6 +321,36 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     await repositoryService.resolveRepository(params.repositoryId);
     return { conversation: codexChatService.getConversation(params.repositoryId) };
   });
+  app.get('/api/codex/conversations/:repositoryId/events', async (request, reply) => {
+    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
+    const params = repositoryParamsSchema.parse(request.params);
+    await repositoryService.resolveRepository(params.repositoryId);
+    if (!codexChatService.subscribe) {
+      return { conversation: codexChatService.getConversation(params.repositoryId) };
+    }
+
+    reply.hijack();
+    const response = reply.raw;
+    response.writeHead(200, {
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'content-type': 'text/event-stream; charset=utf-8',
+      'x-accel-buffering': 'no',
+    });
+    const send = (event: CodexConversationStreamEvent) => {
+      if (!response.destroyed) response.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+    const unsubscribe = codexChatService.subscribe(params.repositoryId, send);
+    const heartbeat = setInterval(() => {
+      if (!response.destroyed) response.write(': keep-alive\n\n');
+    }, 15_000);
+    heartbeat.unref();
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    };
+    response.once('close', cleanup);
+  });
   app.post('/api/codex/messages', async (request, reply) => {
     if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
     requireSameOrigin(request.headers.origin);
@@ -340,7 +370,6 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       ...(body.conversationId ? { conversationId: body.conversationId } : {}),
       ...(contextFiles.length > 0 ? { contextFiles } : {}),
       message: body.message,
-      onEvent: () => undefined,
     });
     void execution.catch(error => {
       if (!(error instanceof Error && error.name === 'AbortError')) {

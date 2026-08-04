@@ -3,6 +3,7 @@ import { lstat, chmod, mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { withoutZellijEnvironment } from './zellij-environment.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -32,14 +33,6 @@ export interface ZellijInstallerDependencies {
   architecture?: string;
 }
 
-function sanitizedZellijEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const sanitized = { ...environment };
-  for (const name of Object.keys(sanitized)) {
-    if (name === 'ZELLIJ' || name.startsWith('ZELLIJ_')) delete sanitized[name];
-  }
-  return sanitized;
-}
-
 export async function readZellijVersion(executablePath: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(executablePath, ['--version'], {
@@ -47,7 +40,7 @@ export async function readZellijVersion(executablePath: string): Promise<string 
       timeout: 5_000,
       maxBuffer: 64 * 1024,
       shell: false,
-      env: sanitizedZellijEnvironment(process.env),
+      env: withoutZellijEnvironment(process.env),
     });
     return stdout.trim();
   } catch {

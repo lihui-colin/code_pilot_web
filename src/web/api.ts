@@ -16,27 +16,26 @@ interface ApiErrorBody {
   error?: { message?: string };
 }
 
-async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { credentials: 'same-origin' });
+async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(url, { ...init, credentials: 'same-origin' });
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as ApiErrorBody;
     throw new Error(body.error?.message ?? `请求失败（HTTP ${response.status}）`);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const response = await fetch(url, {
+function getJson<T>(url: string): Promise<T> {
+  return requestJson<T>(url);
+}
+
+function postJson<T>(url: string, body: unknown): Promise<T> {
+  return requestJson<T>(url, {
     method: 'POST',
-    credentials: 'same-origin',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({})) as ApiErrorBody;
-    throw new Error(result.error?.message ?? `请求失败（HTTP ${response.status}）`);
-  }
-  return response.json() as Promise<T>;
 }
 
 export async function getReadiness(): Promise<ReadinessResult> {
@@ -66,14 +65,9 @@ export async function addManualRepository(directoryId: string): Promise<string> 
 }
 
 export async function deleteManualRepository(repositoryId: string): Promise<void> {
-  const response = await fetch(`/api/repositories/${encodeURIComponent(repositoryId)}`, {
+  await requestJson<void>(`/api/repositories/${encodeURIComponent(repositoryId)}`, {
     method: 'DELETE',
-    credentials: 'same-origin',
   });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({})) as ApiErrorBody;
-    throw new Error(result.error?.message ?? `请求失败（HTTP ${response.status}）`);
-  }
 }
 
 export function createSession(repositoryId: string): Promise<SessionInfo> {
@@ -81,14 +75,9 @@ export function createSession(repositoryId: string): Promise<SessionInfo> {
 }
 
 export async function deleteSession(name: string): Promise<void> {
-  const response = await fetch(`/api/sessions/${encodeURIComponent(name)}`, {
+  await requestJson<void>(`/api/sessions/${encodeURIComponent(name)}`, {
     method: 'DELETE',
-    credentials: 'same-origin',
   });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({})) as ApiErrorBody;
-    throw new Error(result.error?.message ?? `请求失败（HTTP ${response.status}）`);
-  }
 }
 
 export function createViewer(repositoryId: string): Promise<ViewerInstance> {
@@ -106,14 +95,9 @@ export async function regenerateZellijToken(): Promise<ZellijWebTokenInfo> {
 }
 
 export async function deleteZellijToken(): Promise<void> {
-  const response = await fetch('/api/zellij-token', {
+  await requestJson<void>('/api/zellij-token', {
     method: 'DELETE',
-    credentials: 'same-origin',
   });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({})) as ApiErrorBody;
-    throw new Error(result.error?.message ?? `请求失败（HTTP ${response.status}）`);
-  }
 }
 
 export async function restartServices(): Promise<void> {
@@ -139,6 +123,25 @@ export async function getCodexConversation(repositoryId: string): Promise<CodexC
   return result.conversation;
 }
 
+export function subscribeCodexConversation(
+  repositoryId: string,
+  onSnapshot: (snapshot: CodexConversationSnapshot | null) => void,
+  onError?: () => void,
+): () => void {
+  if (typeof EventSource === 'undefined') return () => undefined;
+  const source = new EventSource(`/api/codex/conversations/${encodeURIComponent(repositoryId)}/events`);
+  source.onmessage = event => {
+    try {
+      const payload = JSON.parse(event.data) as { conversation?: CodexConversationSnapshot | null };
+      if ('conversation' in payload) onSnapshot(payload.conversation ?? null);
+    } catch {
+      onError?.();
+    }
+  };
+  source.onerror = () => onError?.();
+  return () => source.close();
+}
+
 export async function startCodexMessage(request: CodexChatRequest): Promise<CodexConversationSnapshot> {
   const result = await postJson<{ conversation: CodexConversationSnapshot }>('/api/codex/messages', request);
   return result.conversation;
@@ -152,12 +155,7 @@ export async function stopCodexConversation(repositoryId: string): Promise<void>
 }
 
 export async function clearCodexConversation(repositoryId: string): Promise<void> {
-  const response = await fetch(`/api/codex/conversations/${encodeURIComponent(repositoryId)}`, {
+  await requestJson<void>(`/api/codex/conversations/${encodeURIComponent(repositoryId)}`, {
     method: 'DELETE',
-    credentials: 'same-origin',
   });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({})) as ApiErrorBody;
-    throw new Error(result.error?.message ?? `请求失败（HTTP ${response.status}）`);
-  }
 }

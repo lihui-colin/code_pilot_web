@@ -59,9 +59,6 @@ describe('MVP-1 routes', () => {
         status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
         send: async turn => {
           receivedPath = turn.repositoryRealPath;
-          turn.onEvent({ type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' });
-          turn.onEvent({ type: 'assistant_delta', delta: 'Hello from Codex' });
-          turn.onEvent({ type: 'done' });
         },
         getConversation: () => null,
         clearConversation: () => undefined,
@@ -102,8 +99,6 @@ describe('MVP-1 routes', () => {
         status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
         send: async turn => {
           receivedContext = turn.contextFiles;
-          turn.onEvent({ type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' });
-          turn.onEvent({ type: 'done' });
         },
         getConversation: () => null,
         clearConversation: () => undefined,
@@ -190,6 +185,51 @@ describe('MVP-1 routes', () => {
     });
     expect(cleared.statusCode).toBe(204);
     expect(clearedRepositoryId).toBe(repositoryId);
+    await app.close();
+  });
+
+  it('streams sanitized Codex snapshots over the repository SSE endpoint', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-sse-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      codexChatService: {
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
+        send: async () => undefined,
+        getConversation: () => null,
+        subscribe: (repositoryId, listener) => {
+          listener({
+            conversation: {
+              repositoryId,
+              conversationId: '123e4567-e89b-42d3-a456-426614174000',
+              messages: [{ id: 'assistant-live', role: 'assistant', content: '实时输出' }],
+              status: 'running',
+              error: null,
+              updatedAt: '2026-08-04T00:00:00.000Z',
+            },
+          });
+          return () => undefined;
+        },
+        clearConversation: () => undefined,
+        stopConversation: () => undefined,
+        close: async () => undefined,
+      },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+    const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
+    const repositoryId = listing.json().entries[0].id as string;
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+    const response = await fetch(`${address}/api/codex/conversations/${repositoryId}/events`);
+    const reader = response.body!.getReader();
+    const chunk = await reader.read();
+    await reader.cancel();
+
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    expect(new TextDecoder().decode(chunk.value)).toContain('实时输出');
     await app.close();
   });
 

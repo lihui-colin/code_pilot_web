@@ -21,7 +21,7 @@ Management Web Application
 |
 |-- Repository API ---> configured workspace root
 |
-|-- Codex Chat API ---> codex exec in validated repository
+|-- Codex Chat API ---> codex app-server in validated repository
 |
 `-- Viewer API -------> localhost code-viewer processes
                          ^
@@ -97,9 +97,9 @@ node dist/server.js --workspace-root /home/lihui/projects
 
 ## Codex 对话体验
 
-每个 Git repository 条目提供“与 Codex 对话”链接，在新标签页打开独立的 `/codex-chat` 页面。页面加载时先检查后台服务能否调用 Codex CLI；可用时展示版本并启用输入，不可用时禁用发送并提示检查安装、可执行权限和后台服务用户的 `PATH`。用户发送的消息和头像靠右显示，Codex 回复和头像靠左显示；用户显示名默认为 `me`，可以在抽屉面板中修改并保存在当前浏览器。任意 Codex 页面都可以在抽屉的字体下拉列表中选择常用字体，并修改 `12` 到 `24` 像素的字号；偏好在当前浏览器的所有 Codex 页面间共享，并可以恢复为服务器配置的默认值。“新对话”、repository 路径、返回首页和运行信息放在默认隐藏的抽屉面板中，通过顶部菜单按钮打开，并支持遮罩和 Esc 关闭；主对话区域始终占满可用宽度。消息输入框提供“Add file”，从服务端列出的当前 repository 普通文本文件中最多选择 8 个作为本次消息的限定上下文；已选文件以可移除标签展示，发送后也显示在用户消息中。页面展示后台响应状态和停止操作；关闭或刷新页面时未完成的 Codex turn 继续在管理服务后台运行，再次进入同一 repository 时恢复消息、conversation ID 和运行状态。管理服务重启后使用浏览器安全快照恢复历史，并通过 Codex 原生 resume 继续会话。支持 Enter 发送、Shift+Enter 换行，并适配桌面和移动浏览器。
+每个 Git repository 条目提供“与 Codex 对话”链接，在新标签页打开独立的 `/codex-chat` 页面。页面加载时先检查后台服务能否调用 Codex CLI；可用时展示版本并启用输入，不可用时禁用发送并提示检查安装、可执行权限和后台服务用户的 `PATH`。用户发送的消息和头像靠右显示，Codex 回复和头像靠左显示；用户显示名默认为 `me`，可以在抽屉面板中修改并保存在当前浏览器。任意 Codex 页面都可以在抽屉的字体下拉列表中选择常用字体，并修改 `12` 到 `24` 像素的字号；偏好在当前浏览器的所有 Codex 页面间共享，并可以恢复为服务器配置的默认值。“新对话”、repository 路径、返回首页和运行信息放在默认隐藏的抽屉面板中，通过顶部菜单按钮打开，并支持遮罩和 Esc 关闭；主对话区域始终占满可用宽度。消息输入框提供“Add file”，从服务端列出的当前 repository 普通文本文件中最多选择 8 个作为本次消息的限定上下文；已选文件以可移除标签展示，发送后也显示在用户消息中。页面展示后台响应状态和停止操作；等待首段回复时显示等待动画，收到部分助手文本但 turn 尚未结束时在最新回复下持续显示动态“正在继续生成”提示，完成后自动隐藏。用户停留在消息底部时流式内容自动跟随；向上滚动阅读历史后不得被新片段强制拉回，并提供回到最新消息的快捷入口。关闭或刷新页面时未完成的 Codex turn 继续在管理服务后台运行，再次进入同一 repository 时恢复消息、conversation ID 和运行状态。管理服务重启后使用浏览器安全快照恢复历史，并通过 Codex 原生 resume 继续会话。支持 Enter 发送、Shift+Enter 换行，并适配桌面和移动浏览器。
 
-消息输入框默认显示一行文字高度，内容变长或通过 Shift+Enter 换行时随内容自动增高，达到最大高度后在输入框内部滚动。“Add file”弹窗按照 repository 相对路径显示可展开和折叠的目录树，目录优先于文件排列；搜索只保留匹配文件及其父目录并自动展开结果。用户只提交 repository ID、自然语言消息和服务端签发的上下文文件 ID。服务端重新解析 repository 和每个文件的真实路径并执行对应来源的路径边界校验，然后在该 repository 中使用服务端固定的 `--yolo` 参数运行 Codex CLI。`--yolo` 会跳过审批并绕过 Codex 沙箱，因此该入口只适用于受信任的 VPN 用户。用户不能从浏览器提交目录、绝对路径、文件路径、可执行文件、命令参数、环境变量或 Codex 配置。
+消息输入框默认显示一行文字高度，内容变长或通过 Shift+Enter 换行时随内容自动增高，达到最大高度后在输入框内部滚动。“Add file”弹窗按照 repository 相对路径显示可展开和折叠的目录树，目录优先于文件排列；搜索只保留匹配文件及其父目录并自动展开结果。用户只提交 repository ID、自然语言消息和服务端签发的上下文文件 ID。服务端重新解析 repository 和每个文件的真实路径并执行对应来源的路径边界校验，然后在该 repository 中通过 Codex app-server 运行 turn，固定跳过审批并使用仅允许当前 repository 写入的 workspace-write 沙箱，因此该入口只适用于受信任的 VPN 用户。用户不能从浏览器提交目录、绝对路径、文件路径、可执行文件、命令参数、环境变量或 Codex 配置。
 
 首条消息创建由 Codex 返回的 conversation ID；后续消息使用 Codex 原生 resume 继续 conversation。新对话会清空页面和服务端快照并重新创建 conversation。页面关闭不得清理 Codex 进程组；只有用户点击停止、管理服务关闭、30 分钟超时或输出超过限制时，后端才清理该次 Codex 进程组。
 
@@ -153,7 +153,7 @@ Codex 对话快照只包含 conversation ID、用户与助手文本、运行状�
 - 已有对应 Session 时显示“打开 Zellij Web”和“删除 Session”；打开仓库绑定的 Session 时自动复制当前 Zellij Web Token，并显示复制结果；服务重启后仍通过固定名称识别对应关系。
 - “code-viewer”：打开空白标签页，启动或复用该 repository 的 code-viewer，成功后导航到管理服务同源 viewer 地址。
 - “编辑代码”：在“code-viewer”旁边以新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode 地址，并通过 `folder` 参数自动打开该 repository。OpenVSCode 由部署侧使用配置的 workspace root 启动，只监听默认端口 `127.0.0.1:8023`，由管理服务代理 `/openvscode` HTTP 和 WebSocket 流量；后端重新校验 repository 真实路径和对应来源边界，前端不提交或拼接目录、绝对路径、命令或环境变量。
-- “与 Codex 对话”：在新标签页打开该 repository 的独立流式对话页面；服务端校验 repository ID 并固定 Codex CLI 参数，前端只提交自然语言消息和服务端签发的 conversation ID。
+- “与 Codex 对话”：在新标签页打开该 repository 的独立流式对话页面；服务端校验 repository ID 并固定 Codex app-server 的进程参数、工作目录、审批与沙箱策略，前端只提交自然语言消息和服务端签发的 conversation ID。
 - 手动 repository 显示“移除仓库”；该操作只删除状态记录，不删除文件、Session 或进程。
 - code-viewer 只监听 localhost，上游端口不对 VPN 网络开放。
 - 写请求执行同源校验。

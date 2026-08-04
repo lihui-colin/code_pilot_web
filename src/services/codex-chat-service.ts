@@ -3,8 +3,8 @@ import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import type {
   CodexChatMessageSnapshot,
-  CodexChatStreamEvent,
   CodexCliStatus,
+  CodexConversationStreamEvent,
   CodexConversationSnapshot,
 } from '../domain/types.js';
 import { ApiError } from '../errors.js';
@@ -15,19 +15,19 @@ const TURN_TIMEOUT_MS = 30 * 60 * 1_000;
 const TERMINATION_GRACE_MS = 5_000;
 const AVAILABILITY_TIMEOUT_MS = 5_000;
 const MAX_VERSION_OUTPUT_BYTES = 64 * 1024;
+const SNAPSHOT_PUBLISH_INTERVAL_MS = 40;
 const CODEX_VERSION_PATTERN = /^codex-cli [0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u;
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const CODEX_EXEC_ARGUMENTS = ['exec', '--yolo', '--json', '--color', 'never', '--sandbox', 'workspace-write'];
-const CODEX_EXECUTION_MODE: CodexCliStatus['mode'] = CODEX_EXEC_ARGUMENTS.includes('--yolo') ? 'yolo' : 'sandbox';
+const CODEX_EXECUTION_MODE: CodexCliStatus['mode'] = 'yolo';
 const execFileAsync = promisify(execFile);
 
 type CodexCliAvailability = Omit<CodexCliStatus, 'mode'>;
 
 export interface CodexExecutionRequest {
-  arguments_: string[];
   cwd: string;
   input: string;
   signal: AbortSignal;
+  conversationId?: string;
   onStdoutLine(line: string): void;
 }
 
@@ -54,7 +54,40 @@ function abortError(): Error {
   return Object.assign(new Error('Codex turn was stopped'), { name: 'AbortError' });
 }
 
-export class SpawnCodexProcessAdapter implements CodexProcessAdapter {
+async function checkAvailability(executablePath: string, versionRunner: VersionRunner): Promise<CodexCliAvailability> {
+  try {
+    const version = await versionRunner(executablePath);
+    return CODEX_VERSION_PATTERN.test(version)
+      ? { available: true, version }
+      : { available: false, version: null };
+  } catch {
+    return { available: false, version: null };
+  }
+}
+
+interface AppServerMessage {
+  id?: unknown;
+  method?: unknown;
+  result?: unknown;
+  error?: unknown;
+  params?: unknown;
+}
+
+interface AppServerThreadResult {
+  thread?: { id?: unknown };
+}
+
+interface AppServerTurnResult {
+  turn?: { id?: unknown };
+}
+
+/**
+ * Runs one isolated Codex app-server connection for a turn. The app-server
+ * speaks newline-delimited JSON-RPC over stdio and emits incremental
+ * item/agentMessage/delta notifications, which are forwarded to the chat
+ * service without exposing the raw protocol to the browser.
+ */
+export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
   constructor(
     private readonly executablePath = 'codex',
     private readonly spawnProcess: SpawnProcess = spawn,
@@ -63,19 +96,12 @@ export class SpawnCodexProcessAdapter implements CodexProcessAdapter {
   ) {}
 
   async checkAvailability(): Promise<CodexCliAvailability> {
-    try {
-      const version = await this.versionRunner(this.executablePath);
-      return CODEX_VERSION_PATTERN.test(version)
-        ? { available: true, version }
-        : { available: false, version: null };
-    } catch {
-      return { available: false, version: null };
-    }
+    return checkAvailability(this.executablePath, this.versionRunner);
   }
 
   async execute(request: CodexExecutionRequest): Promise<void> {
     if (request.signal.aborted) throw abortError();
-    const child = this.spawnProcess(this.executablePath, request.arguments_, {
+    const child = this.spawnProcess(this.executablePath, ['app-server', '--listen', 'stdio://'], {
       cwd: request.cwd,
       detached: true,
       shell: false,
@@ -90,13 +116,24 @@ export class SpawnCodexProcessAdapter implements CodexProcessAdapter {
     let stdoutBytes = 0;
     let stderr = '';
     let timedOut = false;
-    let outputTooLarge = false;
     let exited = false;
+    let turnCompleted = false;
+    let threadId: string | undefined;
+    let turnId: string | undefined;
+    let turnStartSent = false;
+    let requestId = 1;
     let killTimeout: NodeJS.Timeout | undefined;
+    let resolveTurn: (() => void) | undefined;
+    let rejectTurn: ((error: Error) => void) | undefined;
+    const turnPromise = new Promise<void>((resolve, reject) => {
+      resolveTurn = resolve;
+      rejectTurn = reject;
+    });
+
     const stop = (signal: NodeJS.Signals) => {
-      if (exited) return;
+      if (exited || !child.pid) return;
       try {
-        this.killProcess(-child.pid!, signal);
+        this.killProcess(-child.pid, signal);
       } catch {
         // The process may already have exited.
       }
@@ -108,14 +145,113 @@ export class SpawnCodexProcessAdapter implements CodexProcessAdapter {
         killTimeout.unref();
       }
     };
-    const onAbort = () => terminate();
+    const send = (message: Record<string, unknown>) => {
+      if (exited || child.stdin.destroyed) return;
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+    };
+    const onAbort = () => {
+      if (threadId && turnId) {
+        send({ method: 'turn/interrupt', id: ++requestId, params: { threadId, turnId } });
+      }
+      terminate();
+      rejectTurn?.(abortError());
+    };
     request.signal.addEventListener('abort', onAbort, { once: true });
-    if (request.signal.aborted) terminate();
     const timeout = setTimeout(() => {
       timedOut = true;
       terminate();
+      rejectTurn?.(new ApiError(504, 'CODEX_TURN_TIMEOUT', 'Codex did not finish in time'));
     }, TURN_TIMEOUT_MS);
     timeout.unref();
+
+    const onMessage = (message: AppServerMessage) => {
+      if (message.error) {
+        request.onStdoutLine(JSON.stringify(message));
+        rejectTurn?.(new Error('Codex app-server request failed'));
+        return;
+      }
+      if (message.id === 1 && message.result) {
+        send({ method: 'initialized', params: {} });
+        const id = ++requestId;
+        if (request.conversationId) {
+          send({ method: 'thread/resume', id, params: { threadId: request.conversationId, cwd: request.cwd } });
+        } else {
+          send({
+            method: 'thread/start',
+            id,
+            params: {
+              cwd: request.cwd,
+              approvalPolicy: 'never',
+              sandbox: 'workspace-write',
+            },
+          });
+        }
+        return;
+      }
+      if (message.result && typeof message.id === 'number' && message.id > 1) {
+        const result = message.result as AppServerThreadResult & AppServerTurnResult;
+        const resultThreadId = result.thread?.id;
+        if (typeof resultThreadId === 'string') {
+          if (threadId && threadId !== resultThreadId) {
+            rejectTurn?.(new Error('Codex app-server returned inconsistent thread IDs'));
+            return;
+          }
+          const shouldNotify = !threadId;
+          threadId = resultThreadId;
+          if (shouldNotify) {
+            request.onStdoutLine(JSON.stringify({ method: 'thread/started', params: { thread: { id: threadId } } }));
+          }
+          if (!turnStartSent) {
+            turnStartSent = true;
+            const nextId = ++requestId;
+            send({
+              method: 'turn/start',
+              id: nextId,
+              params: {
+                threadId,
+                input: [{ type: 'text', text: request.input, text_elements: [] }],
+                cwd: request.cwd,
+                approvalPolicy: 'never',
+                sandboxPolicy: {
+                  type: 'workspaceWrite',
+                  writableRoots: [request.cwd],
+                  networkAccess: false,
+                  excludeTmpdirEnvVar: false,
+                  excludeSlashTmp: false,
+                },
+              },
+            });
+          }
+          return;
+        }
+        const resultTurnId = result.turn?.id;
+        if (typeof resultTurnId === 'string' && !turnId) {
+          turnId = resultTurnId;
+          return;
+        }
+        return;
+      }
+      if (message.method === 'thread/started') {
+        const params = message.params as { thread?: { id?: unknown } } | undefined;
+        if (typeof params?.thread?.id === 'string') threadId = params.thread.id;
+      }
+      if (message.method === 'turn/started') {
+        const params = message.params as { threadId?: unknown; turn?: { id?: unknown } } | undefined;
+        if (typeof params?.threadId === 'string') threadId = params.threadId;
+        if (typeof params?.turn?.id === 'string') turnId = params.turn.id;
+      }
+      request.onStdoutLine(JSON.stringify(message));
+      if (message.method === 'turn/completed') {
+        const params = message.params as { threadId?: unknown; turn?: { id?: unknown; status?: unknown } } | undefined;
+        if (typeof params?.threadId === 'string' && threadId && params.threadId !== threadId) return;
+        if (turnId && typeof params?.turn?.id === 'string' && params.turn.id !== turnId) return;
+        turnCompleted = true;
+        if (params?.turn?.status === 'failed') resolveTurn?.();
+        else if (params?.turn?.status === 'interrupted') rejectTurn?.(abortError());
+        else resolveTurn?.();
+      }
+      if (message.method === 'error') rejectTurn?.(new Error('Codex app-server request failed'));
+    };
 
     child.stderr.on('data', (chunk: Buffer) => {
       stderr = `${stderr}${chunk.toString('utf8')}`.slice(-MAX_STDERR_BYTES);
@@ -124,37 +260,43 @@ export class SpawnCodexProcessAdapter implements CodexProcessAdapter {
     lines.on('line', line => {
       stdoutBytes += Buffer.byteLength(line, 'utf8');
       if (stdoutBytes > MAX_STDOUT_BYTES) {
-        outputTooLarge = true;
         terminate();
+        rejectTurn?.(new ApiError(502, 'CODEX_OUTPUT_TOO_LARGE', 'Codex produced too much output'));
         return;
       }
-      request.onStdoutLine(line);
+      let message: AppServerMessage;
+      try {
+        message = JSON.parse(line) as AppServerMessage;
+      } catch {
+        return;
+      }
+      onMessage(message);
     });
-
-    // A process that exits while stdin is being written can report EPIPE here.
-    // Exit status is handled below; suppress the stream's otherwise-unhandled error.
     child.stdin.on('error', () => undefined);
-    child.stdin.end(request.input);
-    const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {
-      child.once('exit', (code, signal) => {
-        exited = true;
-        resolve({ code, signal });
-      });
+    child.once('exit', (code, signal) => {
+      exited = true;
+      if (killTimeout) clearTimeout(killTimeout);
+      if (!turnCompleted && !request.signal.aborted && !timedOut) {
+        rejectTurn?.(new Error(`Codex app-server exited (${code ?? signal ?? 'unknown'})`));
+      }
     });
-    clearTimeout(timeout);
-    if (killTimeout) clearTimeout(killTimeout);
-    request.signal.removeEventListener('abort', onAbort);
-    lines.close();
+    send({
+      method: 'initialize',
+      id: 1,
+      params: {
+        clientInfo: { name: 'codepilot_web', title: 'CodePilot Web', version: '0.1.0' },
+      },
+    });
 
-    if (request.signal.aborted) throw abortError();
-    if (timedOut) throw new ApiError(504, 'CODEX_TURN_TIMEOUT', 'Codex did not finish in time');
-    if (outputTooLarge) {
-      throw new ApiError(502, 'CODEX_OUTPUT_TOO_LARGE', 'Codex produced too much output');
-    }
-    if (result.code !== 0) {
-      const error = new Error(`Codex exited unsuccessfully (${stderr.length} bytes of diagnostic output)`);
-      Object.assign(error, { code: result.code, signal: result.signal });
-      throw error;
+    try {
+      await turnPromise;
+    } finally {
+      clearTimeout(timeout);
+      request.signal.removeEventListener('abort', onAbort);
+      lines.close();
+      if (!exited) terminate();
+      // Keep diagnostics local; never return stderr to the browser.
+      void stderr;
     }
   }
 }
@@ -166,13 +308,13 @@ export interface CodexChatTurn {
   contextFiles?: Array<{ relativePath: string; content: string }>;
   message: string;
   signal?: AbortSignal;
-  onEvent(event: CodexChatStreamEvent): void;
 }
 
 export interface CodexChatServiceLike {
   status(): Promise<CodexCliStatus>;
   send(turn: CodexChatTurn): Promise<void>;
   getConversation(repositoryId: string): CodexConversationSnapshot | null;
+  subscribe?(repositoryId: string, listener: (event: CodexConversationStreamEvent) => void): () => void;
   clearConversation(repositoryId: string): Promise<void> | void;
   stopConversation(repositoryId: string): void;
   close(): Promise<void>;
@@ -184,10 +326,9 @@ interface CodexJsonItem {
   text?: unknown;
 }
 
-interface CodexJsonEvent {
-  type?: unknown;
-  thread_id?: unknown;
-  item?: CodexJsonItem;
+interface CodexAppServerEvent {
+  method?: unknown;
+  params?: unknown;
 }
 
 function promptFor(message: string, contextFiles: CodexChatTurn['contextFiles'] = []): string {
@@ -220,6 +361,8 @@ export class CodexChatService implements CodexChatServiceLike {
   private readonly activeControllers = new Set<AbortController>();
   private readonly controllersByRepository = new Map<string, AbortController>();
   private readonly snapshots = new Map<string, CodexConversationSnapshot>();
+  private readonly subscribers = new Map<string, Set<(event: CodexConversationStreamEvent) => void>>();
+  private readonly publishTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly adapter: CodexProcessAdapter,
@@ -253,6 +396,42 @@ export class CodexChatService implements CodexChatServiceLike {
     } : null;
   }
 
+  subscribe(repositoryId: string, listener: (event: CodexConversationStreamEvent) => void): () => void {
+    const listeners = this.subscribers.get(repositoryId) ?? new Set();
+    listeners.add(listener);
+    this.subscribers.set(repositoryId, listeners);
+    listener({ conversation: this.getConversation(repositoryId) });
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.subscribers.delete(repositoryId);
+    };
+  }
+
+  private publish(repositoryId: string): void {
+    const timer = this.publishTimers.get(repositoryId);
+    if (timer) {
+      clearTimeout(timer);
+      this.publishTimers.delete(repositoryId);
+    }
+    const listeners = this.subscribers.get(repositoryId);
+    if (!listeners) return;
+    const event = { conversation: this.getConversation(repositoryId) } satisfies CodexConversationStreamEvent;
+    for (const listener of listeners) {
+      try {
+        listener(event);
+      } catch {
+        // A disconnected browser must not affect the background turn.
+      }
+    }
+  }
+
+  private schedulePublish(repositoryId: string): void {
+    if (!this.subscribers.has(repositoryId) || this.publishTimers.has(repositoryId)) return;
+    const timer = setTimeout(() => this.publish(repositoryId), SNAPSHOT_PUBLISH_INTERVAL_MS);
+    timer.unref();
+    this.publishTimers.set(repositoryId, timer);
+  }
+
   async clearConversation(repositoryId: string): Promise<void> {
     if (this.controllersByRepository.has(repositoryId)) {
       throw new ApiError(409, 'CODEX_CONVERSATION_BUSY', 'Codex is already responding in this conversation');
@@ -265,6 +444,7 @@ export class CodexChatService implements CodexChatServiceLike {
     if (this.persistedConversations.delete(repositoryId)) {
       await this.persistConversations(this.persistedConversations);
     }
+    this.publish(repositoryId);
   }
 
   stopConversation(repositoryId: string): void {
@@ -319,78 +499,99 @@ export class CodexChatService implements CodexChatServiceLike {
       updatedAt: new Date().toISOString(),
     };
     this.snapshots.set(turn.repositoryId, snapshot);
-    const updateSnapshot = () => {
+    this.publish(turn.repositoryId);
+    const updateSnapshot = (immediate = false) => {
       snapshot.conversationId = conversationId ?? null;
       snapshot.updatedAt = new Date().toISOString();
+      if (immediate) this.publish(turn.repositoryId);
+      else this.schedulePublish(turn.repositoryId);
     };
-    const arguments_ = turn.conversationId
-      ? [
-          ...CODEX_EXEC_ARGUMENTS,
-          'resume', turn.conversationId, '-',
-        ]
-      : [
-          ...CODEX_EXEC_ARGUMENTS,
-          '--cd', turn.repositoryRealPath, '-',
-        ];
+
+    const registerConversation = (id: string) => {
+      if (!THREAD_ID_PATTERN.test(id)) return;
+      if (conversationId && conversationId !== id) {
+        turnFailed = true;
+        return;
+      }
+      conversationId = id;
+      this.conversations.set(id, turn.repositoryId);
+      this.activeConversations.add(id);
+      updateSnapshot(true);
+    };
+
+    const appendAssistantDelta = (itemId: string, delta: string) => {
+      const sanitizedDelta = sanitizedAssistantText(delta, turn.repositoryRealPath);
+      assistantTextByItem.set(itemId, `${assistantTextByItem.get(itemId) ?? ''}${sanitizedDelta}`);
+      assistantMessage.content += sanitizedDelta;
+      updateSnapshot();
+    };
+
+    const completeAssistantItem = (item: CodexJsonItem) => {
+      if (item.type !== 'agentMessage' || typeof item.text !== 'string') return;
+      const itemId = typeof item.id === 'string' ? item.id : 'agent-message';
+      const text = sanitizedAssistantText(item.text, turn.repositoryRealPath);
+      const previous = assistantTextByItem.get(itemId) ?? '';
+      const delta = text.startsWith(previous) ? text.slice(previous.length) : text;
+      assistantTextByItem.set(itemId, text);
+      if (delta) {
+        assistantMessage.content += delta;
+        updateSnapshot();
+      }
+    };
 
     try {
       await this.adapter.execute({
-        arguments_,
         cwd: turn.repositoryRealPath,
         input: promptFor(turn.message, turn.contextFiles),
+        ...(turn.conversationId ? { conversationId: turn.conversationId } : {}),
         signal: controller.signal,
         onStdoutLine: line => {
-          let event: CodexJsonEvent;
+          let event: CodexAppServerEvent;
           try {
-            event = JSON.parse(line) as CodexJsonEvent;
+            event = JSON.parse(line) as CodexAppServerEvent;
           } catch {
             return;
           }
-          if (event.type === 'thread.started' && typeof event.thread_id === 'string'
-            && THREAD_ID_PATTERN.test(event.thread_id)) {
-            if (conversationId && conversationId !== event.thread_id) {
-              turnFailed = true;
-              return;
-            }
-            conversationId = event.thread_id;
-            this.conversations.set(event.thread_id, turn.repositoryId);
-            this.activeConversations.add(event.thread_id);
-            updateSnapshot();
-            turn.onEvent({ type: 'conversation', conversationId: event.thread_id });
+          if (event.method === 'thread/started') {
+            const params = event.params as { thread?: { id?: unknown } } | undefined;
+            if (typeof params?.thread?.id === 'string') registerConversation(params.thread.id);
             return;
           }
-          if (event.type === 'turn.failed') {
-            turnFailed = true;
+          if (event.method === 'item/agentMessage/delta') {
+            const params = event.params as { threadId?: unknown; itemId?: unknown; delta?: unknown } | undefined;
+            if (conversationId && params?.threadId !== conversationId) return;
+            if (typeof params?.delta === 'string' && params.delta) {
+              appendAssistantDelta(
+                typeof params.itemId === 'string' ? params.itemId : 'agent-message',
+                params.delta,
+              );
+            }
             return;
           }
-          const item = event.item;
-          if ((event.type === 'item.updated' || event.type === 'item.completed')
-            && item?.type === 'agent_message' && typeof item.text === 'string') {
-            const itemId = typeof item.id === 'string' ? item.id : 'agent-message';
-            const text = sanitizedAssistantText(item.text, turn.repositoryRealPath);
-            const previous = assistantTextByItem.get(itemId) ?? '';
-            const delta = text.startsWith(previous) ? text.slice(previous.length) : text;
-            assistantTextByItem.set(itemId, text);
-            if (delta) {
-              assistantMessage.content = `${assistantMessage.content}${delta}`;
-              updateSnapshot();
-              turn.onEvent({ type: 'assistant_delta', delta });
-            }
+          if (event.method === 'item/completed') {
+            const params = event.params as { item?: CodexJsonItem; threadId?: unknown } | undefined;
+            if (conversationId && params?.threadId !== conversationId) return;
+            if (params?.item) completeAssistantItem(params.item);
+            return;
+          }
+          if (event.method === 'turn/completed') {
+            const params = event.params as { threadId?: unknown; turn?: { status?: unknown } } | undefined;
+            if (conversationId && params?.threadId !== conversationId) return;
+            if (params?.turn?.status === 'failed') turnFailed = true;
           }
         },
       });
       if (!conversationId) throw new ApiError(502, 'CODEX_PROTOCOL_ERROR', 'Codex did not start a conversation');
       if (turnFailed) throw new ApiError(502, 'CODEX_TURN_FAILED', 'Codex could not complete the request');
       snapshot.status = 'idle';
-      updateSnapshot();
+      updateSnapshot(true);
       this.persistedConversations.set(turn.repositoryId, conversationId);
       await this.persistConversations(this.persistedConversations);
-      turn.onEvent({ type: 'done' });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         snapshot.status = 'stopped';
         if (!assistantMessage.content) assistantMessage.content = '（本次响应已停止）';
-        updateSnapshot();
+        updateSnapshot(true);
         throw error;
       }
       const apiError = error instanceof ApiError
@@ -401,7 +602,7 @@ export class CodexChatService implements CodexChatServiceLike {
       if (!assistantMessage.content) {
         snapshot.messages = snapshot.messages.filter(message => message.id !== assistantMessage.id);
       }
-      updateSnapshot();
+      updateSnapshot(true);
       throw apiError;
     } finally {
       if (conversationId) this.activeConversations.delete(conversationId);

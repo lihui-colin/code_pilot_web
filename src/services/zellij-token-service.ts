@@ -4,6 +4,7 @@ import { chmod } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import type { ZellijWebToken } from '../config.js';
+import { withoutZellijEnvironment } from './zellij-environment.js';
 
 const execFileAsync = promisify(execFile);
 export interface ZellijTokenServiceDependencies {
@@ -13,21 +14,13 @@ export interface ZellijTokenServiceDependencies {
   warn?: (message: string) => void;
 }
 
-function sanitizedZellijEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const sanitized = { ...environment };
-  for (const name of Object.keys(sanitized)) {
-    if (name === 'ZELLIJ' || name.startsWith('ZELLIJ_')) delete sanitized[name];
-  }
-  return sanitized;
-}
-
 async function runZellijWeb(executablePath: string, arguments_: string[]): Promise<string> {
   const { stdout } = await execFileAsync(executablePath, ['web', ...arguments_], {
     encoding: 'utf8',
     timeout: 15_000,
     maxBuffer: 256 * 1024,
     shell: false,
-    env: sanitizedZellijEnvironment(process.env),
+    env: withoutZellijEnvironment(process.env),
   });
   return stdout;
 }

@@ -10,6 +10,7 @@ import {
   restartServices,
   startCodexMessage,
   stopCodexConversation,
+  subscribeCodexConversation,
 } from '../src/web/api.js';
 
 afterEach(() => {
@@ -143,5 +144,30 @@ describe('web API', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(4, `/api/codex/conversations/${repositoryId}`, {
       method: 'DELETE', credentials: 'same-origin',
     });
+  });
+
+  it('subscribes to same-origin Codex SSE snapshots and closes cleanly', () => {
+    let source: { url: string; onmessage?: (event: MessageEvent) => void; onerror?: () => void; close: ReturnType<typeof vi.fn> };
+    class FakeEventSource {
+      onmessage?: (event: MessageEvent) => void;
+      onerror?: () => void;
+      close = vi.fn();
+      constructor(public readonly url: string) {
+        source = this;
+      }
+    }
+    vi.stubGlobal('EventSource', FakeEventSource);
+    const received: unknown[] = [];
+    const unsubscribe = subscribeCodexConversation(
+      `dir_${'a'.repeat(43)}`,
+      snapshot => received.push(snapshot),
+    );
+
+    source!.onmessage?.({ data: JSON.stringify({ conversation: { repositoryId: 'repo', status: 'running' } }) } as MessageEvent);
+    unsubscribe();
+
+    expect(source!.url).toBe(`/api/codex/conversations/dir_${'a'.repeat(43)}/events`);
+    expect(received).toEqual([{ repositoryId: 'repo', status: 'running' }]);
+    expect(source!.close).toHaveBeenCalledOnce();
   });
 });

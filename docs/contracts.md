@@ -453,7 +453,9 @@ OpenVSCode 平时仍是独立进程，但统一重启脚本负责停止并重新
 
 repository 条目的“与 Codex 对话”链接必须在新标签页打开 `/codex-chat?repositoryId=<encoded-id>`，并设置 `rel="noopener noreferrer"`。对话页面必须先通过 `GET /api/repositories` 确认 ID 仍对应当前列表中的 Git repository；前端不得把 relative path 转换为服务器路径，也不得提交绝对路径、命令、命令参数、环境变量、KDL、可执行文件或 Codex 配置。
 
-对话页面加载时还必须调用 `GET /api/codex/status`。后端使用 `execFile()`、参数数组 `['--version']`、`shell: false`、5 秒超时和 64 KiB 输出上限检查服务进程实际使用的 Codex 可执行文件。命令成功且 stdout 去除空白后匹配受限的 `codex-cli <version>` 格式时返回 `{ available: true, version: string, mode: 'yolo' | 'sandbox' }`；可执行文件不存在、不可执行、超时、退出非零或版本输出不匹配时返回 `{ available: false, version: null, mode: 'yolo' | 'sandbox' }`。`mode` 必须由服务端实际固定的 Codex 参数推导：参数包含 `--yolo` 时为 `yolo`，否则为 `sandbox`。原始错误和未匹配的命令输出不得返回浏览器或写入普通错误响应。
+对话页面在运行中的助手消息尚无文本时显示等待动画；一旦收到部分助手文本且快照状态仍为 `running`，最新助手消息必须继续显示动态生成提示，直到快照进入非运行状态后移除。历史助手消息和已经完成的最新消息不得显示该提示。用户位于消息列表底部附近时，新增流式内容自动跟随到底部；用户主动向上滚动后停止自动跟随，不得因后续增量快照强制改变阅读位置，并显示可手动回到最新消息的入口。
+
+对话页面加载时还必须调用 `GET /api/codex/status`。后端使用 `execFile()`、参数数组 `['--version']`、`shell: false`、5 秒超时和 64 KiB 输出上限检查服务进程实际使用的 Codex 可执行文件。命令成功且 stdout 去除空白后匹配受限的 `codex-cli <version>` 格式时返回 `{ available: true, version: string, mode: 'yolo' | 'sandbox' }`；可执行文件不存在、不可执行、超时、退出非零或版本输出不匹配时返回 `{ available: false, version: null, mode: 'yolo' | 'sandbox' }`。当前 app-server 固定 `approvalPolicy: "never"`，因此 `mode` 返回兼容标签 `yolo`；该标签不改变下文的 `workspaceWrite` 沙箱约束。原始错误和未匹配的命令输出不得返回浏览器或写入普通错误响应。
 
 Codex 页面默认字体通过配置中的 `codexChatAppearance` 设置。`fontFamily` 是长度不超过 200 的非空 CSS 字体族字符串，`fontSize` 是 `12` 到 `24` 的整数像素值；未配置时分别使用 `Inter, ui-sans-serif, system-ui, sans-serif` 和 `16`。页面通过 `GET /api/codex/appearance` 只读取 `{ fontFamily, fontSize }`，不得返回完整应用配置、路径、Token 或其他服务端字段。配置在管理服务启动时读取，修改后需要重启服务生效。任意 Codex 页面必须允许用户在抽屉中即时覆盖字体族和字号，并把覆盖值保存到当前浏览器的 `localStorage`，供所有 repository 的 Codex 页面共享；恢复默认操作删除该覆盖值并重新使用服务端配置。
 
@@ -478,41 +480,22 @@ interface CodexChatRequest {
 
 经校验的文件以包含 repository 相对路径和内容的 JSON 加入服务端 prompt。prompt 明确把文件内容视为不可信源数据而非指令，并要求 Codex 优先只使用用户为本次 turn 选择的文件；仅在用户明确要求或任务无法完成时才检查其他文件。该限定不改变 Codex CLI 的 repository 工作目录和 `workspace-write` 沙箱边界。
 
-首次对话使用服务器固定参数数组，并通过 stdin 发送由服务端前缀和用户消息组成的 prompt：
+首次对话使用服务端固定的 Codex app-server JSON-RPC 调用。管理服务以参数数组
+`["app-server", "--listen", "stdio://"]`、`cwd` 为重新校验后的 repository 真实路径、
+`shell: false` 启动独立进程，并先完成 `initialize`/`initialized` 握手，再调用
+`thread/start`。继续对话调用 `thread/resume`。每个 turn 使用 `turn/start`，输入为服务端
+生成的 prompt 文本，固定 `approvalPolicy: "never"`、`sandboxPolicy.type: "workspaceWrite"`，
+可写根目录只包含当前 repository。前端不得提交任意 app-server 方法或字段。
 
-```typescript
-[
-  "exec", "--yolo", "--json", "--color", "never", "--sandbox", "workspace-write",
-  "--cd", repositoryRealPath, "-"
-]
-```
-
-继续对话使用：
-
-```typescript
-[
-  "exec", "--yolo", "--json", "--color", "never", "--sandbox", "workspace-write",
-  "resume", conversationId, "-"
-]
-```
-
-两种调用都固定带 `--yolo`。该选项会跳过 Codex 审批并绕过其沙箱限制，即使参数数组中仍保留 `--sandbox workspace-write`，也不得把运行时视为受 workspace-write 沙箱保护；部署者必须信任能够访问管理页面并发起 Codex 对话的用户。子进程 `cwd` 是重新校验后的 repository 真实路径，使用参数数组、`shell: false` 和独立进程组，浏览器不能控制上述参数。Codex CLI 必须返回符合 UUID 格式的 thread ID。当前安装版本不支持顶层 `codex --resume <id>`；非交互恢复必须使用 `codex exec --yolo --json --color never --sandbox workspace-write resume <conversationId> -`。服务端进程内和状态文件中已知的 conversation ID 必须保持 repository 归属校验。
+app-server 进程使用独立进程组，浏览器不能控制可执行文件、参数、cwd、沙箱或审批策略。服务端进程内和状态文件中已知的 conversation ID 必须保持 repository 归属校验。
 
 服务端按 repository ID 保存进程内对话快照，包括 conversation ID、用户与助手消息、运行状态、脱敏错误和更新时间。浏览器关闭、刷新或网络断开不得取消后台 turn；只有显式停止、30 分钟超时、输出超限或管理服务关闭才终止进程组。同一 repository 同时只能有一个运行中的 turn。只有 Codex turn 成功完成并返回合法 thread ID 后，服务端才把 repository ID 到 conversation ID 的映射原子写入状态文件；运行中、失败、停止或超时的 turn 不得覆盖已持久化 ID。管理服务重启后从状态文件恢复该映射，页面无需依赖浏览器缓存即可获得可继续的 conversation ID。
 
-`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`。页面进入时先读取该快照，运行中每秒轮询一次；浏览器同时把不含服务器路径和文件内容的快照保存到 `localStorage`。管理服务重启后服务端快照为空时，页面使用本地快照恢复消息和 conversation ID；旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 Codex 原生 resume 继续该 conversation。
+`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`。页面进入时先读取该快照，并建立同源 `GET /api/codex/conversations/:repositoryId/events` SSE 连接。服务端在连接建立和状态改变时立即发送当前脱敏快照；密集的 app-server `item/agentMessage/delta` 可以在不超过 40 毫秒的窗口内合并为一次快照发送。连接断开不得取消后台 turn，浏览器自动重连后重新收到当前快照。浏览器以不超过每 100 毫秒一次的频率把运行中快照保存到 `localStorage`，最终状态必须立即保存；快照不含服务器路径和文件内容。管理服务重启后服务端快照为空时，页面使用本地快照恢复消息和 conversation ID；旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 app-server 的 `thread/resume` 继续该 conversation。
 
-`POST /api/codex/messages` 成功启动后台 turn 时返回 `202` 和启动后的对话快照。`POST /api/codex/conversations/:repositoryId/stop` 显式停止当前 turn；`DELETE /api/codex/conversations/:repositoryId` 仅在没有运行中 turn 时清空快照，供“新对话”使用。Codex 原始 JSONL 事件只在服务端用于更新快照，不直接返回浏览器；允许解析的事件形状仍为：
+`POST /api/codex/messages` 成功启动后台 turn 时返回 `202` 和启动后的对话快照。`POST /api/codex/conversations/:repositoryId/stop` 显式停止当前 turn；`DELETE /api/codex/conversations/:repositoryId` 仅在没有运行中 turn 时清空快照，供“新对话”使用。Codex app-server 原始 JSONL/JSON-RPC 事件只在服务端用于更新快照，不直接返回浏览器。
 
-```typescript
-type CodexChatStreamEvent =
-  | { type: "conversation"; conversationId: string }
-  | { type: "assistant_delta"; delta: string }
-  | { type: "done" }
-  | { type: "error"; message: string };
-```
-
-服务端只从 Codex JSONL 的 `agent_message` 项提取助手文本，不转发原始事件、工具调用、usage、stderr 或原始失败详情。助手文本中出现的当前 repository 绝对路径替换为 `.`。流开始后的失败使用脱敏 `error` 事件表示；流开始前的 schema、Origin、repository 和就绪错误继续使用标准 JSON 错误响应。
+服务端只从 app-server 的 `item/agentMessage/delta` 和已完成 `agentMessage` 项提取助手文本，不转发原始事件、工具调用、usage、stderr 或原始失败详情。助手文本中出现的当前 repository 绝对路径替换为 `.`。流开始后的失败写入脱敏的失败快照；流开始前的 schema、Origin、repository 和就绪错误继续使用标准 JSON 错误响应。
 
 每次 Codex turn 最长运行 30 分钟，stdout 上限为 4 MiB，保留的 stderr 诊断上限为 64 KiB且不得返回前端。显式停止、输出超限、超时或管理服务关闭时，必须先向 Codex 独立进程组发送 `SIGTERM`；5 秒后仍未退出则发送 `SIGKILL`。浏览器取消请求或 HTTP 响应关闭不得终止后台 turn。管理服务关闭时取消所有活动 Codex turn，但仍不得删除 Zellij Session。
 
@@ -540,6 +523,7 @@ type CodexChatStreamEvent =
 | `GET` | `/api/codex/status` | `200` | 检查后台服务能否调用 Codex CLI 并返回版本 |
 | `GET` | `/api/codex/appearance` | `200` | 返回 Codex 页面配置的字体族和字号 |
 | `GET` | `/api/codex/conversations/:repositoryId` | `200` | 获取 repository 当前 Codex 对话快照 |
+| `GET` | `/api/codex/conversations/:repositoryId/events` | `200` | 通过同源 SSE 实时推送 Codex 对话快照 |
 | `GET` | `/api/repositories/:repositoryId/files` | `200` | 返回可作为 Codex 上下文的 repository 文件 opaque ID |
 | `POST` | `/api/codex/messages` | `202` | 在后台创建或继续 Codex 对话 |
 | `POST` | `/api/codex/conversations/:repositoryId/stop` | `202` | 停止 repository 当前运行的 Codex turn |

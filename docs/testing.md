@@ -180,8 +180,8 @@
 9. 二进制、非严格 UTF-8、单文件超过 128 KiB、总计超过 512 KiB 和重复文件 ID 被拒绝，错误不包含文件绝对路径或内容。
 10. 请求只允许 `repositoryId`、可选 UUID `conversationId`、可选 `contextFileIds` 和 1 到 20000 字符的 `message`；路径、命令、参数、环境变量和额外字段被拒绝。
 11. 每次发送前通过 RepositoryService 重新执行 repository 真实路径和对应来源边界校验。
-12. 首次消息固定调用 `codex exec --yolo --json --color never --sandbox workspace-write --cd <repository> -`，包含校验后文件 JSON 的 prompt 只通过 stdin 发送，且 `shell: false`。
-13. 后续消息固定调用 `codex exec --yolo --json --color never --sandbox workspace-write resume <conversationId> -`。
+12. 首次消息固定启动 `codex app-server --listen stdio://`，完成 `initialize`/`initialized` 后调用 `thread/start` 和 `turn/start`；包含校验后文件 JSON 的 prompt 只通过 JSON-RPC 文本输入发送，且 `shell: false`。
+13. 后续消息使用 app-server `thread/resume` 恢复 conversation ID，再调用 `turn/start`；审批策略、repository cwd 和 workspace-write 可写根目录全部由服务端固定。
 14. 只有 Codex 返回的合法 UUID 会被登记；进程内已知 conversation 只能由原 repository 继续，服务重启后浏览器保存的合法 UUID 使用 Codex 原生 resume 恢复。
 15. 同一 repository 不允许同时运行两个 turn，新对话不复用旧 conversation ID。
 16. 消息接口返回 `202` 和后台对话快照；快照查询返回消息、conversation ID、状态、脱敏错误和更新时间。
@@ -190,11 +190,11 @@
 19. 浏览器关闭、刷新或连接断开不终止 Codex；显式停止会终止整个进程组，5 秒后仍未退出时升级为 `SIGKILL`。
 20. 30 分钟超时和 4 MiB stdout 超限会清理进程组并返回脱敏错误，stderr 保留量不超过 64 KiB且不返回浏览器。
 21. 管理服务关闭会取消所有活动 Codex turn，且不删除任何 Zellij Session。
-22. 再次进入同一 repository 时恢复服务端快照；运行中每秒轮询，任务完成后恢复完整助手文本。
+22. 再次进入同一 repository 时恢复服务端快照；运行中通过同源 SSE 接收 app-server `item/agentMessage/delta` 对应的脱敏快照，密集 delta 在不超过 40 毫秒的窗口内合并发送且最终状态立即发送，断线重连后恢复完整助手文本；浏览器对运行中快照的持久化不超过每 100 毫秒一次，最终状态立即保存；首段文本到达前显示等待动画，部分文本到达后最新助手消息持续显示动态生成提示，完成后提示消失；停留底部时自动跟随流式输出，向上阅读历史时保持当前滚动位置并提供回到最新消息入口。
 23. 管理服务重启后，本地 `running` 快照转换为已中断状态，保留消息和 conversation ID，下一条消息使用原生 resume。
 24. “新对话”在无运行中 turn 时清空服务端和浏览器快照；运行中请求返回冲突。
 25. Codex turn 成功完成后才持久化 repository ID 到 conversation ID；运行中、失败、停止和超时不写入新 ID。
-26. 管理服务重启后从状态文件恢复 conversation ID，页面无需依赖浏览器缓存即可显示可继续的会话，下一条消息固定使用 `codex exec ... resume <id> -`。
+26. 管理服务重启后从状态文件恢复 conversation ID，页面无需依赖浏览器缓存即可显示可继续的会话，下一条消息固定使用 app-server `thread/resume` 恢复该 ID。
 27. `codexChatAppearance` 只接受非空字体族和 `12` 到 `24` 的整数像素字号；`GET /api/codex/appearance` 只返回这两个字段，页面把配置应用到消息、输入和抽屉文本。任意 Codex 页面抽屉中的字体和字号覆盖立即生效、保存到浏览器并跨 repository 共享，恢复默认后删除覆盖并重新应用服务端配置。
 28. “Add file”按照 repository 相对路径构建可展开目录树，目录优先于文件；路径搜索只显示匹配文件及其父目录并自动展开，文件选择仍提交原服务端签发的 opaque ID。
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type {
   CodexChatAppearance,
   CodexChatMessageSnapshot,
@@ -14,6 +14,7 @@ import {
   getCodexStatus,
   getRepositories,
   getRepositoryContextFiles,
+  subscribeCodexConversation,
   startCodexMessage,
   stopCodexConversation,
 } from './api.js';
@@ -26,6 +27,8 @@ const suggestions = [
 
 const displayNameStorageKey = 'codepilot.codex.displayName';
 const appearanceStorageKey = 'codepilot.codex.appearance';
+const conversationStorageIntervalMs = 100;
+const codexUnavailableMessage = '服务器未检测到可用的 Codex CLI。请确认 codex 已安装、可执行，并已加入后台服务用户的 PATH，然后刷新页面。';
 const defaultAppearance: CodexChatAppearance = {
   fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
   fontSize: 16,
@@ -55,6 +58,74 @@ interface ContextFileTreeFile {
 }
 
 type ContextFileTreeNode = ContextFileTreeDirectory | ContextFileTreeFile;
+
+function sameContextFiles(left: string[] | undefined, right: string[] | undefined): boolean {
+  return left === right || Boolean(left && right
+    && left.length === right.length
+    && left.every((file, index) => file === right[index]));
+}
+
+function reconcileMessages(
+  previous: CodexChatMessageSnapshot[],
+  incoming: CodexChatMessageSnapshot[],
+  preserveHistory: boolean,
+): CodexChatMessageSnapshot[] {
+  const previousById = new Map(previous.map(message => [message.id, message]));
+  const incomingIds = new Set(incoming.map(message => message.id));
+  const next = incoming.map(message => {
+    const current = previousById.get(message.id);
+    return current
+      && current.role === message.role
+      && current.content === message.content
+      && sameContextFiles(current.contextFiles, message.contextFiles)
+      ? current
+      : message;
+  });
+  return preserveHistory
+    ? [...previous.filter(message => !incomingIds.has(message.id)), ...next]
+    : next;
+}
+
+interface ChatMessageProps {
+  message: CodexChatMessageSnapshot;
+  displayName: string;
+  displayAvatar: string;
+  streaming: boolean;
+}
+
+const ChatMessage = memo(function ChatMessage({
+  message,
+  displayName,
+  displayAvatar,
+  streaming,
+}: ChatMessageProps) {
+  return (
+    <article className={`chat-message ${message.role}`}>
+      <div className="chat-avatar">{message.role === 'user' ? displayAvatar : 'C'}</div>
+      <div className="chat-message-body">
+        <strong>{message.role === 'user' ? displayName : 'Codex'}</strong>
+        {message.content
+          ? (
+            <div className="chat-message-content">
+              {message.contextFiles?.length ? (
+                <div className="chat-message-files">
+                  {message.contextFiles.map(file => <span key={file}>📎 {file}</span>)}
+                </div>
+              ) : null}
+              <div className="chat-message-text">{message.content}</div>
+              {streaming && (
+                <div className="chat-streaming-indicator" role="status" aria-label="Codex 正在继续生成">
+                  <i />
+                  <span>正在继续生成…</span>
+                </div>
+              )}
+            </div>
+          )
+          : <div className="chat-thinking"><i /><i /><i /></div>}
+      </div>
+    </article>
+  );
+});
 
 function buildContextFileTree(files: RepositoryContextFile[]): ContextFileTreeNode[] {
   const root: ContextFileTreeDirectory = { type: 'directory', name: '', path: '', children: [] };
@@ -134,12 +205,11 @@ export function CodexChat() {
   const [codexStatus, setCodexStatus] = useState<CodexCliStatus | null>(null);
   const [configuredAppearance, setConfiguredAppearance] = useState(defaultAppearance);
   const [appearanceOverride, setAppearanceOverride] = useState<CodexChatAppearance | null>(readStoredAppearance);
-  const [messages, setMessages] = useState<CodexChatMessageSnapshot[]>([]);
+  const [conversation, setConversation] = useState<CodexConversationSnapshot | null>(null);
   const [displayNameInput, setDisplayNameInput] = useState(readStoredDisplayName);
-  const [conversationId, setConversationId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState(false);
+  const [startingTurn, setStartingTurn] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const [contextFiles, setContextFiles] = useState<RepositoryContextFile[] | null>(null);
@@ -148,16 +218,26 @@ export function CodexChat() {
   const [fileSearch, setFileSearch] = useState('');
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(() => new Set());
   const [filesLoading, setFilesLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const messagesEnd = useRef<HTMLDivElement | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [followingLatest, setFollowingLatest] = useState(true);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const draftInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const messagesRef = useRef<CodexChatMessageSnapshot[]>([]);
-  const conversationIdRef = useRef<string | null>(null);
+  const conversationRef = useRef<CodexConversationSnapshot | null>(null);
+  const storageTimerRef = useRef<number | undefined>(undefined);
+  const pendingStorageRef = useRef<{ key: string; snapshot: CodexConversationSnapshot | null } | null>(null);
+  const scrollTimerRef = useRef<number | undefined>(undefined);
+  const autoScrollRef = useRef(true);
   const filePickerRef = useRef<HTMLElement | null>(null);
   const filePickerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const displayName = displayNameInput.trim() || 'me';
   const displayAvatar = Array.from(displayName)[0]?.toLocaleUpperCase() ?? 'M';
   const appearance = appearanceOverride ?? configuredAppearance;
+  const messages = conversation?.messages ?? [];
+  const conversationId = conversation?.conversationId ?? null;
+  const running = startingTurn || conversation?.status === 'running';
+  const error = requestError
+    ?? conversation?.error
+    ?? (!loading && codexStatus && !codexStatus.available ? codexUnavailableMessage : null);
   const availableFontOptions = fontOptions.some(option => option.value === appearance.fontFamily)
     ? fontOptions
     : [{ label: '当前自定义字体', value: appearance.fontFamily }, ...fontOptions];
@@ -191,38 +271,65 @@ export function CodexChat() {
     }
   };
 
-  const applySnapshot = (snapshot: CodexConversationSnapshot | null, preserveHistory = true) => {
-    const sameConversation = snapshot?.conversationId
-      && conversationIdRef.current
-      && snapshot.conversationId === conversationIdRef.current;
-    const nextMessages = snapshot && preserveHistory && sameConversation
-      ? [
-          ...messagesRef.current.filter(message => !snapshot.messages.some(candidate => candidate.id === message.id)),
-          ...snapshot.messages,
-        ]
-      : snapshot?.messages ?? [];
-    messagesRef.current = nextMessages;
-    conversationIdRef.current = snapshot?.conversationId ?? null;
-    setMessages(nextMessages);
-    setConversationId(conversationIdRef.current);
-    setRunning(snapshot?.status === 'running');
-    setError(snapshot?.error ?? null);
-    if (!repositoryId) return;
+  const flushStoredConversation = () => {
+    if (storageTimerRef.current !== undefined) {
+      window.clearTimeout(storageTimerRef.current);
+      storageTimerRef.current = undefined;
+    }
+    const pending = pendingStorageRef.current;
+    pendingStorageRef.current = null;
+    if (!pending) return;
     try {
-      if (snapshot) window.localStorage?.setItem?.(conversationStorageKey(repositoryId), JSON.stringify({
-        ...snapshot,
-        messages: nextMessages,
-      }));
-      else window.localStorage?.removeItem?.(conversationStorageKey(repositoryId));
+      if (pending.snapshot === null) window.localStorage?.removeItem?.(pending.key);
+      else window.localStorage?.setItem?.(pending.key, JSON.stringify(pending.snapshot));
     } catch {
       // Conversation recovery still works from the server when browser storage is unavailable.
     }
   };
 
+  const storeConversation = (snapshot: CodexConversationSnapshot | null) => {
+    if (!repositoryId) return;
+    pendingStorageRef.current = {
+      key: conversationStorageKey(repositoryId),
+      snapshot,
+    };
+    if (!snapshot || snapshot.status !== 'running') {
+      flushStoredConversation();
+    } else if (storageTimerRef.current === undefined) {
+      storageTimerRef.current = window.setTimeout(flushStoredConversation, conversationStorageIntervalMs);
+    }
+  };
+
+  const applySnapshot = (snapshot: CodexConversationSnapshot | null, preserveHistory = true) => {
+    const previous = conversationRef.current;
+    const sameConversation = snapshot?.conversationId
+      && previous?.conversationId
+      && snapshot.conversationId === previous.conversationId;
+    const nextMessages = snapshot
+      ? reconcileMessages(previous?.messages ?? [], snapshot.messages, preserveHistory && Boolean(sameConversation))
+      : null;
+    const unchanged = snapshot && previous && nextMessages
+      && snapshot.repositoryId === previous.repositoryId
+      && snapshot.conversationId === previous.conversationId
+      && snapshot.status === previous.status
+      && snapshot.error === previous.error
+      && snapshot.updatedAt === previous.updatedAt
+      && nextMessages.length === previous.messages.length
+      && nextMessages.every((message, index) => message === previous.messages[index]);
+    setRequestError(null);
+    if (unchanged) return;
+    const next = snapshot ? { ...snapshot, messages: nextMessages! } : null;
+    conversationRef.current = next;
+    setConversation(next);
+    storeConversation(next);
+  };
+
+  useEffect(() => () => flushStoredConversation(), [repositoryId]);
+
   useEffect(() => {
     document.title = 'Codex 对话 · CodePilot Web';
     if (!repositoryId) {
-      setError('缺少 repository ID，请从管理首页打开 Codex 对话。');
+      setRequestError('缺少 repository ID，请从管理首页打开 Codex 对话。');
       setLoading(false);
       return;
     }
@@ -243,27 +350,53 @@ export function CodexChat() {
         ? { ...serverConversation, messages: storedConversation.messages }
         : serverConversation ?? storedConversation;
       applySnapshot(restoredConversation);
-      if (!status.available) {
-        setError('服务器未检测到可用的 Codex CLI。请确认 codex 已安装、可执行，并已加入后台服务用户的 PATH，然后刷新页面。');
-      }
     }).catch(caught => {
-      setError(caught instanceof Error ? caught.message : '仓库加载失败');
+      setRequestError(caught instanceof Error ? caught.message : '仓库加载失败');
     }).finally(() => setLoading(false));
   }, [repositoryId]);
 
   useEffect(() => {
-    if (!repositoryId || !running) return;
-    const timer = window.setInterval(() => {
-      void getCodexConversation(repositoryId).then(applySnapshot).catch(() => undefined);
-    }, 1_000);
-    return () => window.clearInterval(timer);
-  }, [repositoryId, running]);
+    if (!repositoryId || loading || typeof subscribeCodexConversation !== 'function') return;
+    return subscribeCodexConversation(repositoryId, snapshot => {
+      if (!snapshot && conversationRef.current) return;
+      applySnapshot(snapshot);
+    });
+  }, [repositoryId, loading]);
+
+  const scrollToLatest = (smooth = false) => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    autoScrollRef.current = true;
+    setFollowingLatest(true);
+    if (smooth && typeof container.scrollTo === 'function') {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    } else {
+      container.scrollTop = container.scrollHeight;
+    }
+  };
 
   useEffect(() => {
-    if (typeof messagesEnd.current?.scrollIntoView === 'function') {
-      messagesEnd.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
-  }, [messages]);
+    if (!autoScrollRef.current) return;
+    if (scrollTimerRef.current !== undefined) window.clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = window.setTimeout(() => {
+      scrollTimerRef.current = undefined;
+      if (autoScrollRef.current) scrollToLatest();
+    }, 0);
+    return () => {
+      if (scrollTimerRef.current !== undefined) {
+        window.clearTimeout(scrollTimerRef.current);
+        scrollTimerRef.current = undefined;
+      }
+    };
+  }, [messages, running]);
+
+  const onMessagesScroll = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const pinned = container.scrollHeight - container.scrollTop - container.clientHeight <= 80;
+    autoScrollRef.current = pinned;
+    setFollowingLatest(current => current === pinned ? current : pinned);
+  };
 
   useEffect(() => {
     const input = draftInputRef.current;
@@ -305,7 +438,7 @@ export function CodexChat() {
       setContextFiles(listing.files);
       setContextFilesTruncated(listing.truncated);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '仓库文件加载失败');
+      setRequestError(caught instanceof Error ? caught.message : '仓库文件加载失败');
       setFilePickerOpen(false);
     } finally {
       setFilesLoading(false);
@@ -337,8 +470,10 @@ export function CodexChat() {
     setDraft('');
     setSelectedContextFiles([]);
     setFilePickerOpen(false);
-    setError(null);
-    setRunning(true);
+    setRequestError(null);
+    autoScrollRef.current = true;
+    setFollowingLatest(true);
+    setStartingTurn(true);
     try {
       const snapshot = await startCodexMessage({
         repositoryId,
@@ -348,8 +483,9 @@ export function CodexChat() {
       });
       applySnapshot(snapshot);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Codex 请求失败');
-      setRunning(false);
+      setRequestError(caught instanceof Error ? caught.message : 'Codex 请求失败');
+    } finally {
+      setStartingTurn(false);
     }
   };
 
@@ -373,10 +509,10 @@ export function CodexChat() {
       applySnapshot(null, false);
       setSelectedContextFiles([]);
       setFilePickerOpen(false);
-      setError(null);
+      setRequestError(null);
       setPanelOpen(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '新对话创建失败');
+      setRequestError(caught instanceof Error ? caught.message : '新对话创建失败');
     }
   };
 
@@ -387,14 +523,19 @@ export function CodexChat() {
       const snapshot = await getCodexConversation(repositoryId);
       applySnapshot(snapshot);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Codex 停止失败');
+      setRequestError(caught instanceof Error ? caught.message : 'Codex 停止失败');
     }
   };
 
   const normalizedFileSearch = fileSearch.trim().toLocaleLowerCase();
-  const visibleContextFiles = (contextFiles ?? [])
-    .filter(file => !normalizedFileSearch || file.relativePath.toLocaleLowerCase().includes(normalizedFileSearch));
-  const contextFileTree = buildContextFileTree(visibleContextFiles);
+  const { contextFileTree, visibleContextFileCount } = useMemo(() => {
+    const visibleFiles = (contextFiles ?? [])
+      .filter(file => !normalizedFileSearch || file.relativePath.toLocaleLowerCase().includes(normalizedFileSearch));
+    return {
+      contextFileTree: buildContextFileTree(visibleFiles),
+      visibleContextFileCount: visibleFiles.length,
+    };
+  }, [contextFiles, normalizedFileSearch]);
   const renderContextFileTree = (nodes: ContextFileTreeNode[]): ReactNode => (
     <ul className="chat-file-tree">
       {nodes.map(node => {
@@ -535,41 +676,36 @@ export function CodexChat() {
           </span>
         </header>
 
-        <div className="chat-messages" aria-live="polite">
-          {error && <div className="error" role="alert">{error}</div>}
-          {!loading && repository && codexStatus?.available && messages.length === 0 && (
-            <div className="chat-empty">
-              <div className="chat-orb">&gt;_</div>
-              <h2>向 Codex 提问</h2>
-              <p>可以让 Codex 阅读代码、修改文件、运行测试并解释结果。</p>
-              <div className="chat-suggestions">
-                {suggestions.map(suggestion => (
-                  <button key={suggestion} type="button" onClick={() => void send(suggestion)}>{suggestion}</button>
-                ))}
+        <div className="chat-message-region">
+          <div ref={messagesContainerRef} className="chat-messages" aria-live="polite" onScroll={onMessagesScroll}>
+            {error && <div className="error" role="alert">{error}</div>}
+            {!loading && repository && codexStatus?.available && messages.length === 0 && (
+              <div className="chat-empty">
+                <div className="chat-orb">&gt;_</div>
+                <h2>向 Codex 提问</h2>
+                <p>可以让 Codex 阅读代码、修改文件、运行测试并解释结果。</p>
+                <div className="chat-suggestions">
+                  {suggestions.map(suggestion => (
+                    <button key={suggestion} type="button" onClick={() => void send(suggestion)}>{suggestion}</button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+            {messages.map((message, index) => (
+              <ChatMessage
+                key={message.id}
+                message={message}
+                displayName={displayName}
+                displayAvatar={displayAvatar}
+                streaming={running && message.role === 'assistant' && index === messages.length - 1}
+              />
+            ))}
+          </div>
+          {!followingLatest && messages.length > 0 && (
+            <button className="chat-scroll-latest" type="button" onClick={() => scrollToLatest(true)}>
+              ↓ 回到最新消息
+            </button>
           )}
-          {messages.map(message => (
-            <article className={`chat-message ${message.role}`} key={message.id}>
-              <div className="chat-avatar">{message.role === 'user' ? displayAvatar : 'C'}</div>
-              <div className="chat-message-body">
-                <strong>{message.role === 'user' ? displayName : 'Codex'}</strong>
-                {message.content
-                  ? (
-                    <div className="chat-message-content">
-                      {message.contextFiles && message.contextFiles.length > 0 && (
-                        <div className="chat-message-files">
-                          {message.contextFiles.map(file => <span key={file}>📎 {file}</span>)}
-                        </div>
-                      )}
-                      <div className="chat-message-text">{message.content}</div>
-                    </div>
-                  )
-                  : <div className="chat-thinking"><i /><i /><i /></div>}
-              </div>
-            </article>
-          ))}
-          <div ref={messagesEnd} />
         </div>
 
         <div className="chat-composer-wrap">
@@ -588,7 +724,7 @@ export function CodexChat() {
               <div className="chat-file-list">
                 {filesLoading && <p>正在读取仓库文件…</p>}
                 {!filesLoading && renderContextFileTree(contextFileTree)}
-                {!filesLoading && visibleContextFiles.length === 0 && <p>没有匹配的可附加文本文件。</p>}
+                {!filesLoading && visibleContextFileCount === 0 && <p>没有匹配的可附加文本文件。</p>}
               </div>
               {contextFilesTruncated && (
                 <small className="chat-file-limit-note">文件较多，请通过路径搜索缩小范围。</small>

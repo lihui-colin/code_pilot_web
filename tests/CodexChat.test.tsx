@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CodexChat } from '../src/web/CodexChat.js';
 import * as api from '../src/web/api.js';
@@ -13,6 +13,7 @@ vi.mock('../src/web/api.js', () => ({
   getCodexStatus: vi.fn(),
   getRepositories: vi.fn(),
   getRepositoryContextFiles: vi.fn(),
+  subscribeCodexConversation: vi.fn(() => () => undefined),
   startCodexMessage: vi.fn(),
   stopCodexConversation: vi.fn(),
 }));
@@ -110,6 +111,134 @@ describe('CodexChat', () => {
     expect(await screen.findByText('这是 Codex 的回答。')).toBeInTheDocument();
     expect(screen.getByText('me')).toBeInTheDocument();
     expect(screen.getByText('M')).toBeInTheDocument();
+  });
+
+  it('renders Codex output as SSE snapshots arrive', async () => {
+    let onSnapshot: ((snapshot: import('../src/domain/types.js').CodexConversationSnapshot | null) => void) | undefined;
+    vi.mocked(api.subscribeCodexConversation).mockImplementation((_repositoryId, listener) => {
+      onSnapshot = listener;
+      return () => undefined;
+    });
+    render(<CodexChat />);
+    await screen.findByRole('heading', { name: 'terminal-web' });
+    await waitFor(() => expect(api.subscribeCodexConversation).toHaveBeenCalledWith(repositoryId, expect.any(Function)));
+
+    act(() => onSnapshot?.({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-live', role: 'user', content: '实时输出' },
+        { id: 'assistant-live', role: 'assistant', content: '第一段' },
+      ],
+      status: 'running',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    }));
+    expect(screen.getByText('第一段')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Codex 正在继续生成' })).toBeInTheDocument();
+
+    act(() => onSnapshot?.({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-live', role: 'user', content: '实时输出' },
+        { id: 'assistant-live', role: 'assistant', content: '第一段第二段' },
+      ],
+      status: 'running',
+      error: null,
+      updatedAt: '2026-08-04T00:00:01.000Z',
+    }));
+    expect(screen.getByText('第一段第二段')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Codex 正在继续生成' })).toBeInTheDocument();
+    const conversationWrites = () => vi.mocked(window.localStorage.setItem).mock.calls
+      .filter(([key]) => key === `codepilot.codex.${repositoryId}`);
+    expect(conversationWrites()).toHaveLength(0);
+    await waitFor(() => expect(conversationWrites()).toHaveLength(1));
+
+    act(() => onSnapshot?.({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-live', role: 'user', content: '实时输出' },
+        { id: 'assistant-live', role: 'assistant', content: '第一段第二段' },
+      ],
+      status: 'running',
+      error: null,
+      updatedAt: '2026-08-04T00:00:01.000Z',
+    }));
+    await new Promise(resolve => window.setTimeout(resolve, 120));
+    expect(conversationWrites()).toHaveLength(1);
+
+    act(() => onSnapshot?.({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-live', role: 'user', content: '实时输出' },
+        { id: 'assistant-live', role: 'assistant', content: '第一段第二段' },
+      ],
+      status: 'idle',
+      error: null,
+      updatedAt: '2026-08-04T00:00:02.000Z',
+    }));
+    expect(screen.queryByRole('status', { name: 'Codex 正在继续生成' })).not.toBeInTheDocument();
+    expect(conversationWrites()).toHaveLength(2);
+  });
+
+  it('does not pull the reader away from history while Codex is streaming', async () => {
+    let onSnapshot: ((snapshot: import('../src/domain/types.js').CodexConversationSnapshot | null) => void) | undefined;
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-scroll', role: 'user', content: '分析长对话' },
+        { id: 'assistant-scroll', role: 'assistant', content: '已有内容' },
+      ],
+      status: 'running',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    });
+    vi.mocked(api.subscribeCodexConversation).mockImplementation((_repositoryId, listener) => {
+      onSnapshot = listener;
+      return () => undefined;
+    });
+
+    const { container } = render(<CodexChat />);
+    await screen.findByText('已有内容');
+    await new Promise(resolve => window.setTimeout(resolve, 0));
+    const messageList = container.querySelector('.chat-messages') as HTMLDivElement;
+    let scrollTop = 100;
+    Object.defineProperties(messageList, {
+      scrollHeight: { configurable: true, get: () => 1_000 },
+      clientHeight: { configurable: true, get: () => 300 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => { scrollTop = value; },
+      },
+    });
+    const scrollTo = vi.fn(({ top }: ScrollToOptions) => { scrollTop = Number(top); });
+    Object.defineProperty(messageList, 'scrollTo', { configurable: true, value: scrollTo });
+
+    fireEvent.scroll(messageList);
+    expect(screen.getByRole('button', { name: '↓ 回到最新消息' })).toBeInTheDocument();
+
+    act(() => onSnapshot?.({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-scroll', role: 'user', content: '分析长对话' },
+        { id: 'assistant-scroll', role: 'assistant', content: '已有内容，新增一段' },
+      ],
+      status: 'running',
+      error: null,
+      updatedAt: '2026-08-04T00:00:01.000Z',
+    }));
+    await new Promise(resolve => window.setTimeout(resolve, 0));
+    expect(scrollTop).toBe(100);
+
+    fireEvent.click(screen.getByRole('button', { name: '↓ 回到最新消息' }));
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: 'smooth' });
+    expect(screen.queryByRole('button', { name: '↓ 回到最新消息' })).not.toBeInTheDocument();
   });
 
   it('shows sandbox mode when the server does not use yolo mode', async () => {

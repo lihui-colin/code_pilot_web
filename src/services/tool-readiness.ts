@@ -1,16 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ReadinessChecks, ReadinessResult } from '../domain/types.js';
+import { withoutZellijEnvironment } from './zellij-environment.js';
 
 const execFileAsync = promisify(execFile);
-
-function withoutZellijEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const sanitized = { ...environment };
-  for (const name of Object.keys(sanitized)) {
-    if (name === 'ZELLIJ' || name.startsWith('ZELLIJ_')) delete sanitized[name];
-  }
-  return sanitized;
-}
 
 async function versionMatches(file: string, expected: string, env = process.env): Promise<boolean> {
   try {

@@ -147,8 +147,6 @@ export interface CodexConversationSnapshot {
   updatedAt: string;
 }
 
-export type CodexChatStreamEvent =
-  | { type: 'conversation'; conversationId: string }
-  | { type: 'assistant_delta'; delta: string }
-  | { type: 'done' }
-  | { type: 'error'; message: string };
+export type CodexConversationStreamEvent = {
+  conversation: CodexConversationSnapshot | null;
+};
