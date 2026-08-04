@@ -8,6 +8,7 @@ import * as api from '../src/web/api.js';
 
 vi.mock('../src/web/api.js', () => ({
   clearCodexConversation: vi.fn(),
+  getCodexAppearance: vi.fn(),
   getCodexConversation: vi.fn(),
   getCodexStatus: vi.fn(),
   getRepositories: vi.fn(),
@@ -21,6 +22,13 @@ const conversationId = '123e4567-e89b-42d3-a456-426614174000';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  const storedValues = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: vi.fn((key: string) => storedValues.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => storedValues.set(key, value)),
+    removeItem: vi.fn((key: string) => storedValues.delete(key)),
+    clear: vi.fn(() => storedValues.clear()),
+  });
   window.history.pushState({}, '', `/codex-chat?repositoryId=${repositoryId}`);
   vi.mocked(api.getRepositories).mockResolvedValue({
     current: { id: null, name: 'workspace', relativePath: '' },
@@ -38,6 +46,10 @@ beforeEach(() => {
     }],
   });
   vi.mocked(api.getCodexStatus).mockResolvedValue({ available: true, version: 'codex-cli 0.146.0' });
+  vi.mocked(api.getCodexAppearance).mockResolvedValue({
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+    fontSize: 16,
+  });
   vi.mocked(api.getCodexConversation).mockResolvedValue(null);
   vi.mocked(api.getRepositoryContextFiles).mockResolvedValue({
     files: [{ id: `file_${'b'.repeat(43)}`, relativePath: 'src/app.ts', size: 512 }],
@@ -93,6 +105,79 @@ describe('CodexChat', () => {
     await waitFor(() => expect(api.startCodexMessage).toHaveBeenCalledWith({ repositoryId, message: '分析项目结构' }));
     expect(screen.getByText('分析项目结构')).toBeInTheDocument();
     expect(await screen.findByText('这是 Codex 的回答。')).toBeInTheDocument();
+    expect(screen.getByText('me')).toBeInTheDocument();
+    expect(screen.getByText('M')).toBeInTheDocument();
+  });
+
+  it('uses a locally persisted personalized display name for user messages', async () => {
+    render(<CodexChat />);
+    await screen.findByRole('heading', { name: 'terminal-web' });
+    fireEvent.click(screen.getByRole('button', { name: '打开对话面板' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '我的显示名' }), { target: { value: 'Colin' } });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const input = screen.getByRole('textbox', { name: '发送给 Codex 的消息' });
+    fireEvent.change(input, { target: { value: '分析项目结构' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(await screen.findByText('Colin')).toBeInTheDocument();
+    expect(screen.getByText('C', { selector: '.chat-message.user .chat-avatar' })).toBeInTheDocument();
+    expect(window.localStorage.getItem('codepilot.codex.displayName')).toBe('Colin');
+  });
+
+  it('applies the configured font family and size to the chat page', async () => {
+    vi.mocked(api.getCodexAppearance).mockResolvedValue({
+      fontFamily: '"Noto Sans SC", sans-serif',
+      fontSize: 18,
+    });
+
+    const { container } = render(<CodexChat />);
+    await screen.findByRole('heading', { name: 'terminal-web' });
+
+    expect(container.querySelector('.chat-shell')).toHaveStyle({
+      fontFamily: '"Noto Sans SC", sans-serif',
+      fontSize: '18px',
+    });
+  });
+
+  it('configures and persists typography from any Codex page drawer', async () => {
+    const { container } = render(<CodexChat />);
+    await screen.findByRole('heading', { name: 'terminal-web' });
+    fireEvent.click(screen.getByRole('button', { name: '打开对话面板' }));
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Codex 页面字体' }), {
+      target: { value: '"Noto Sans SC", "Source Han Sans SC", sans-serif' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Codex 页面字号' }), {
+      target: { value: '19' },
+    });
+
+    await waitFor(() => expect(container.querySelector('.chat-shell')).toHaveStyle({
+      fontFamily: '"Noto Sans SC", "Source Han Sans SC", sans-serif',
+      fontSize: '19px',
+    }));
+    expect(JSON.parse(window.localStorage.getItem('codepilot.codex.appearance')!)).toEqual({
+      fontFamily: '"Noto Sans SC", "Source Han Sans SC", sans-serif',
+      fontSize: 19,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复服务器默认' }));
+    expect(container.querySelector('.chat-shell')).toHaveStyle({
+      fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+      fontSize: '16px',
+    });
+    expect(window.localStorage.getItem('codepilot.codex.appearance')).toBeNull();
+  });
+
+  it('starts the message input at one line and grows with wrapped content', async () => {
+    render(<CodexChat />);
+    await screen.findByRole('heading', { name: 'terminal-web' });
+    const input = screen.getByRole('textbox', { name: '发送给 Codex 的消息' });
+    Object.defineProperty(input, 'scrollHeight', { configurable: true, value: 72 });
+
+    expect(input).toHaveAttribute('rows', '1');
+    fireEvent.change(input, { target: { value: '这是一段足够长、会在输入框中自动换行显示的消息内容。' } });
+
+    await waitFor(() => expect(input).toHaveStyle({ height: '72px' }));
   });
 
   it('attaches a server-listed repository file to the next Codex message', async () => {

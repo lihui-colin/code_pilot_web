@@ -34,6 +34,19 @@ afterEach(async () => {
 });
 
 describe('MVP-1 routes', () => {
+  it('returns only the configured Codex chat appearance fields', async () => {
+    const app = await testApp();
+
+    const response = await app.inject({ method: 'GET', url: '/api/codex/appearance' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+      fontSize: 16,
+    });
+    await app.close();
+  });
+
   it('starts a background Codex conversation for a validated repository ID', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-route-'));
     temporaryDirectories.push(root);

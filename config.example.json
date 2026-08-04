@@ -29,5 +29,9 @@
     "go.mod",
     "pom.xml"
   ],
-  "allowedSessionCommands": ["codex"]
+  "allowedSessionCommands": ["codex"],
+  "codexChatAppearance": {
+    "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif",
+    "fontSize": 14
+  }
 }

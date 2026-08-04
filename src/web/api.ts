@@ -1,4 +1,5 @@
 import type {
+  CodexChatAppearance,
   CodexChatRequest,
   CodexCliStatus,
   CodexConversationSnapshot,
@@ -121,6 +122,10 @@ export async function restartServices(): Promise<void> {
 
 export function getCodexStatus(): Promise<CodexCliStatus> {
   return getJson<CodexCliStatus>('/api/codex/status');
+}
+
+export function getCodexAppearance(): Promise<CodexChatAppearance> {
+  return getJson<CodexChatAppearance>('/api/codex/appearance');
 }
 
 export function getRepositoryContextFiles(repositoryId: string): Promise<RepositoryContextFileListing> {

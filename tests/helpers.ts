@@ -24,6 +24,10 @@ export function createTestConfig(workspaceRootRealPath: string): AppConfig {
     viewerMaxInstances: 10,
     projectMarkers: ['.git', 'package.json', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'pom.xml'],
     allowedSessionCommands: ['codex'],
+    codexChatAppearance: {
+      fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+      fontSize: 16,
+    },
     workspaceRootRealPath,
   };
 }

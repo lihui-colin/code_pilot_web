@@ -35,6 +35,13 @@ const FileConfigSchema = z.object({
   viewerMaxInstances: z.number().int().positive().default(10),
   projectMarkers: z.array(z.enum(markerNames)).min(1).default([...markerNames]),
   allowedSessionCommands: z.array(z.literal('codex')).min(1).default(['codex']),
+  codexChatAppearance: z.object({
+    fontFamily: z.string().trim().min(1).max(200).default('Inter, ui-sans-serif, system-ui, sans-serif'),
+    fontSize: z.number().int().min(12).max(24).default(16),
+  }).strict().default({
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+    fontSize: 16,
+  }),
 }).strict();
 
 export interface AppConfig {
@@ -56,6 +63,10 @@ export interface AppConfig {
   viewerMaxInstances: number;
   projectMarkers: Array<(typeof markerNames)[number]>;
   allowedSessionCommands: 'codex'[];
+  codexChatAppearance: {
+    fontFamily: string;
+    fontSize: number;
+  };
   workspaceRootRealPath: string;
 }
 
@@ -148,6 +159,7 @@ export async function loadConfiguration(argv = process.argv.slice(2), cwd = proc
       viewerMaxInstances: raw.viewerMaxInstances,
       projectMarkers: raw.projectMarkers,
       allowedSessionCommands: raw.allowedSessionCommands,
+      codexChatAppearance: raw.codexChatAppearance,
       workspaceRootRealPath,
     },
     configFilePath: configPath,

@@ -97,6 +97,37 @@ describe('loadConfiguration', () => {
     expect(loaded.config.openVSCodePort).toBe(8023);
   });
 
+  it('loads configured Codex chat typography', async () => {
+    const { root, workspace } = await fixture();
+    const configPath = path.join(root, 'config.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    config.codexChatAppearance = { fontFamily: '"Noto Sans SC", sans-serif', fontSize: 18 };
+    await writeFile(configPath, JSON.stringify(config));
+
+    const loaded = await loadConfiguration([
+      '--config', 'config.json',
+      '--workspace-root', workspace,
+    ], root);
+
+    expect(loaded.config.codexChatAppearance).toEqual({
+      fontFamily: '"Noto Sans SC", sans-serif',
+      fontSize: 18,
+    });
+  });
+
+  it('rejects a Codex chat font size outside the supported range', async () => {
+    const { root, workspace } = await fixture();
+    const configPath = path.join(root, 'config.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    config.codexChatAppearance = { fontFamily: 'sans-serif', fontSize: 25 };
+    await writeFile(configPath, JSON.stringify(config));
+
+    await expect(loadConfiguration([
+      '--config', 'config.json',
+      '--workspace-root', workspace,
+    ], root)).rejects.toThrow();
+  });
+
   it('keeps serving possible but marks an unsafe directory secret unavailable', async () => {
     const { root, workspace } = await fixture();
     await chmod(path.join(root, 'directory.secret'), 0o644);

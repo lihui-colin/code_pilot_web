@@ -125,6 +125,11 @@ export interface CodexCliStatus {
   version: string | null;
 }
 
+export interface CodexChatAppearance {
+  fontFamily: string;
+  fontSize: number;
+}
+
 export interface CodexChatMessageSnapshot {
   id: string;
   role: 'user' | 'assistant';

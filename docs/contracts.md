@@ -455,6 +455,8 @@ repository 条目的“与 Codex 对话”链接必须在新标签页打开 `/co
 
 对话页面加载时还必须调用 `GET /api/codex/status`。后端使用 `execFile()`、参数数组 `['--version']`、`shell: false`、5 秒超时和 64 KiB 输出上限检查服务进程实际使用的 Codex 可执行文件。命令成功且 stdout 去除空白后匹配受限的 `codex-cli <version>` 格式时返回 `{ available: true, version: string }`；可执行文件不存在、不可执行、超时、退出非零或版本输出不匹配时返回 `{ available: false, version: null }`。原始错误和未匹配的命令输出不得返回浏览器或写入普通错误响应。
 
+Codex 页面默认字体通过配置中的 `codexChatAppearance` 设置。`fontFamily` 是长度不超过 200 的非空 CSS 字体族字符串，`fontSize` 是 `12` 到 `24` 的整数像素值；未配置时分别使用 `Inter, ui-sans-serif, system-ui, sans-serif` 和 `16`。页面通过 `GET /api/codex/appearance` 只读取 `{ fontFamily, fontSize }`，不得返回完整应用配置、路径、Token 或其他服务端字段。配置在管理服务启动时读取，修改后需要重启服务生效。任意 Codex 页面必须允许用户在抽屉中即时覆盖字体族和字号，并把覆盖值保存到当前浏览器的 `localStorage`，供所有 repository 的 Codex 页面共享；恢复默认操作删除该覆盖值并重新使用服务端配置。
+
 页面只有在 `available` 为 `true` 时才允许发送消息。不可用时必须显示可理解的提示，要求检查 Codex CLI 安装、可执行权限和后台服务用户的 `PATH`。`POST /api/codex/messages` 在解析 repository 后、启动后台 turn 前必须再次执行同一检查；不可用时返回 `503 CODEX_CLI_UNAVAILABLE`，不得启动 Codex turn。
 
 `POST /api/codex/messages` 请求体严格为：
@@ -536,6 +538,7 @@ type CodexChatStreamEvent =
 | `POST` | `/api/viewers` | `200` 或 `201` | 复用或创建 viewer |
 | `DELETE` | `/api/viewers/:id` | `204` | 停止 viewer |
 | `GET` | `/api/codex/status` | `200` | 检查后台服务能否调用 Codex CLI 并返回版本 |
+| `GET` | `/api/codex/appearance` | `200` | 返回 Codex 页面配置的字体族和字号 |
 | `GET` | `/api/codex/conversations/:repositoryId` | `200` | 获取 repository 当前 Codex 对话快照 |
 | `GET` | `/api/repositories/:repositoryId/files` | `200` | 返回可作为 Codex 上下文的 repository 文件 opaque ID |
 | `POST` | `/api/codex/messages` | `202` | 在后台创建或继续 Codex 对话 |

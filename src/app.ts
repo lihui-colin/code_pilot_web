@@ -314,6 +314,7 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     await reply.code(result.created ? 201 : 200).send(result.instance);
   });
   app.get('/api/codex/status', async () => codexChatService.status());
+  app.get('/api/codex/appearance', async () => config.codexChatAppearance);
   app.get('/api/codex/conversations/:repositoryId', async request => {
     if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
     const params = repositoryParamsSchema.parse(request.params);

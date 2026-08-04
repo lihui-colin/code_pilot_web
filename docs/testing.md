@@ -195,6 +195,7 @@
 24. “新对话”在无运行中 turn 时清空服务端和浏览器快照；运行中请求返回冲突。
 25. Codex turn 成功完成后才持久化 repository ID 到 conversation ID；运行中、失败、停止和超时不写入新 ID。
 26. 管理服务重启后从状态文件恢复 conversation ID，页面无需依赖浏览器缓存即可显示可继续的会话，下一条消息固定使用 `codex exec ... resume <id> -`。
+27. `codexChatAppearance` 只接受非空字体族和 `12` 到 `24` 的整数像素字号；`GET /api/codex/appearance` 只返回这两个字段，页面把配置应用到消息、输入和抽屉文本。任意 Codex 页面抽屉中的字体和字号覆盖立即生效、保存到浏览器并跨 repository 共享，恢复默认后删除覆盖并重新应用服务端配置。
 
 ## MVP-4：生产化
 

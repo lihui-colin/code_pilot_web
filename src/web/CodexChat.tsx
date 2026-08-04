@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type {
+  CodexChatAppearance,
   CodexChatMessageSnapshot,
   CodexCliStatus,
   CodexConversationSnapshot,
@@ -8,6 +9,7 @@ import type {
 } from '../domain/types.js';
 import {
   clearCodexConversation,
+  getCodexAppearance,
   getCodexConversation,
   getCodexStatus,
   getRepositories,
@@ -21,6 +23,43 @@ const suggestions = [
   '检查当前代码中可能存在的安全问题',
   '运行相关测试并分析失败原因',
 ];
+
+const displayNameStorageKey = 'codepilot.codex.displayName';
+const appearanceStorageKey = 'codepilot.codex.appearance';
+const defaultAppearance: CodexChatAppearance = {
+  fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+  fontSize: 16,
+};
+const fontOptions = [
+  { label: '系统默认', value: 'Inter, ui-sans-serif, system-ui, sans-serif' },
+  { label: '思源黑体 / Noto Sans SC', value: '"Noto Sans SC", "Source Han Sans SC", sans-serif' },
+  { label: '微软雅黑', value: '"Microsoft YaHei", sans-serif' },
+  { label: '苹方', value: '"PingFang SC", sans-serif' },
+  { label: '宋体', value: 'SimSun, serif' },
+  { label: '系统衬线字体', value: 'ui-serif, Georgia, serif' },
+  { label: '系统等宽字体', value: 'ui-monospace, "SFMono-Regular", Consolas, monospace' },
+];
+
+function readStoredDisplayName(): string {
+  try {
+    return window.localStorage?.getItem?.(displayNameStorageKey) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function readStoredAppearance(): CodexChatAppearance | null {
+  try {
+    const value = window.localStorage?.getItem?.(appearanceStorageKey);
+    if (!value) return null;
+    const stored = JSON.parse(value) as Partial<CodexChatAppearance>;
+    if (typeof stored.fontFamily !== 'string' || !stored.fontFamily.trim()) return null;
+    if (!Number.isInteger(stored.fontSize) || stored.fontSize! < 12 || stored.fontSize! > 24) return null;
+    return { fontFamily: stored.fontFamily.trim(), fontSize: stored.fontSize! };
+  } catch {
+    return null;
+  }
+}
 
 function conversationStorageKey(repositoryId: string): string {
   return `codepilot.codex.${repositoryId}`;
@@ -47,7 +86,10 @@ export function CodexChat() {
   const repositoryId = new URLSearchParams(window.location.search).get('repositoryId');
   const [repository, setRepository] = useState<RepositoryEntryResponse | null>(null);
   const [codexStatus, setCodexStatus] = useState<CodexCliStatus | null>(null);
+  const [configuredAppearance, setConfiguredAppearance] = useState(defaultAppearance);
+  const [appearanceOverride, setAppearanceOverride] = useState<CodexChatAppearance | null>(readStoredAppearance);
   const [messages, setMessages] = useState<CodexChatMessageSnapshot[]>([]);
+  const [displayNameInput, setDisplayNameInput] = useState(readStoredDisplayName);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -61,10 +103,46 @@ export function CodexChat() {
   const [filesLoading, setFilesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEnd = useRef<HTMLDivElement | null>(null);
+  const draftInputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesRef = useRef<CodexChatMessageSnapshot[]>([]);
   const conversationIdRef = useRef<string | null>(null);
   const filePickerRef = useRef<HTMLElement | null>(null);
   const filePickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const displayName = displayNameInput.trim() || 'me';
+  const displayAvatar = Array.from(displayName)[0]?.toLocaleUpperCase() ?? 'M';
+  const appearance = appearanceOverride ?? configuredAppearance;
+  const availableFontOptions = fontOptions.some(option => option.value === appearance.fontFamily)
+    ? fontOptions
+    : [{ label: '当前自定义字体', value: appearance.fontFamily }, ...fontOptions];
+
+  const updateDisplayName = (value: string) => {
+    const nextValue = value.slice(0, 24);
+    setDisplayNameInput(nextValue);
+    try {
+      if (nextValue.trim()) window.localStorage?.setItem?.(displayNameStorageKey, nextValue.trim());
+      else window.localStorage?.removeItem?.(displayNameStorageKey);
+    } catch {
+      // The preference remains active for this page when browser storage is unavailable.
+    }
+  };
+
+  const updateAppearance = (nextAppearance: CodexChatAppearance) => {
+    setAppearanceOverride(nextAppearance);
+    try {
+      window.localStorage?.setItem?.(appearanceStorageKey, JSON.stringify(nextAppearance));
+    } catch {
+      // The preference remains active for this page when browser storage is unavailable.
+    }
+  };
+
+  const resetAppearance = () => {
+    setAppearanceOverride(null);
+    try {
+      window.localStorage?.removeItem?.(appearanceStorageKey);
+    } catch {
+      // The server defaults still apply for this page when browser storage is unavailable.
+    }
+  };
 
   const applySnapshot = (snapshot: CodexConversationSnapshot | null, preserveHistory = true) => {
     const sameConversation = snapshot?.conversationId
@@ -101,11 +179,17 @@ export function CodexChat() {
       setLoading(false);
       return;
     }
-    void Promise.all([getRepositories(), getCodexStatus(), getCodexConversation(repositoryId)]).then(([listing, status, serverConversation]) => {
+    void Promise.all([
+      getRepositories(),
+      getCodexStatus(),
+      getCodexAppearance(),
+      getCodexConversation(repositoryId),
+    ]).then(([listing, status, configuredAppearance, serverConversation]) => {
       const selected = listing.entries.find(entry => entry.id === repositoryId);
       if (!selected) throw new Error('仓库不存在或已经不可用');
       setRepository(selected);
       setCodexStatus(status);
+      setConfiguredAppearance(configuredAppearance);
       const storedConversation = readStoredConversation(repositoryId);
       const restoredConversation = serverConversation && storedConversation
         && serverConversation.conversationId === storedConversation.conversationId
@@ -133,6 +217,13 @@ export function CodexChat() {
       messagesEnd.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [messages]);
+
+  useEffect(() => {
+    const input = draftInputRef.current;
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = `${input.scrollHeight}px`;
+  }, [draft]);
 
   useEffect(() => {
     if (!panelOpen && !filePickerOpen) return;
@@ -250,7 +341,10 @@ export function CodexChat() {
     .slice(0, 100);
 
   return (
-    <main className="chat-shell">
+    <main
+      className="chat-shell"
+      style={{ fontFamily: appearance.fontFamily, fontSize: `${appearance.fontSize}px` }}
+    >
       {panelOpen && (
         <>
           <button
@@ -266,6 +360,47 @@ export function CodexChat() {
             </div>
             <div className="chat-brand"><span>CODEPILOT</span><strong>Codex 对话</strong></div>
             <button type="button" onClick={() => void startNewConversation()} disabled={running}>＋ 新对话</button>
+            <label className="chat-display-name">
+              <span>我的显示名</span>
+              <input
+                value={displayNameInput}
+                onChange={event => updateDisplayName(event.target.value)}
+                placeholder="me"
+                maxLength={24}
+              />
+            </label>
+            <div className="chat-appearance-settings">
+              <label>
+                <span>字体</span>
+                <select
+                  aria-label="Codex 页面字体"
+                  value={appearance.fontFamily}
+                  onChange={event => updateAppearance({ ...appearance, fontFamily: event.target.value })}
+                >
+                  {availableFontOptions.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>字号</span>
+                <input
+                  aria-label="Codex 页面字号"
+                  type="number"
+                  min={12}
+                  max={24}
+                  step={1}
+                  value={appearance.fontSize}
+                  onChange={event => {
+                    const fontSize = Number(event.target.value);
+                    if (Number.isInteger(fontSize) && fontSize >= 12 && fontSize <= 24) {
+                      updateAppearance({ ...appearance, fontSize });
+                    }
+                  }}
+                />
+              </label>
+              <button type="button" onClick={resetAppearance} disabled={!appearanceOverride}>恢复服务器默认</button>
+            </div>
             <div className="chat-repository-card">
               <small>当前仓库</small>
               <strong>{repository?.name ?? (loading ? '加载中…' : '不可用')}</strong>
@@ -313,9 +448,9 @@ export function CodexChat() {
           )}
           {messages.map(message => (
             <article className={`chat-message ${message.role}`} key={message.id}>
-              <div className="chat-avatar">{message.role === 'user' ? '你' : 'C'}</div>
+              <div className="chat-avatar">{message.role === 'user' ? displayAvatar : 'C'}</div>
               <div className="chat-message-body">
-                <strong>{message.role === 'user' ? '你' : 'Codex'}</strong>
+                <strong>{message.role === 'user' ? displayName : 'Codex'}</strong>
                 {message.content
                   ? (
                     <div className="chat-message-content">
@@ -383,12 +518,13 @@ export function CodexChat() {
               </div>
             )}
             <textarea
+              ref={draftInputRef}
               aria-label="发送给 Codex 的消息"
               value={draft}
               onChange={event => setDraft(event.target.value)}
               onKeyDown={onKeyDown}
               placeholder="给 Codex 发送消息…"
-              rows={3}
+              rows={1}
               maxLength={20_000}
               disabled={!repository || !codexStatus?.available || running}
             />
