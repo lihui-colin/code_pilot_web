@@ -144,4 +144,27 @@ describe('ZellijService', () => {
     expect(deleteSession).toHaveBeenCalledTimes(1);
     expect((await service.listSessions()).map(session => session.name)).toEqual(['keep']);
   });
+
+  it('deletes all managed Sessions belonging to a repository', async () => {
+    let sessions = 'keep\nfirst\nsecond\n';
+    const repositoryId = `dir_${'a'.repeat(43)}`;
+    const deleteSession = vi.fn(async (arguments_: string[]) => {
+      const name = arguments_[2];
+      sessions = sessions.split('\n').filter(candidate => candidate && candidate !== name).join('\n');
+    });
+    const service = new ZellijService(
+      { listSessions: async () => sessions, deleteSession },
+      'https://192.0.2.10:8021',
+      pino({ enabled: false }),
+      new Map([
+        ['first', { repositoryId, relativePath: 'one', createdAt: '2026-08-04T00:00:00.000Z', command: 'codex' }],
+        ['second', { repositoryId, relativePath: 'two', createdAt: '2026-08-04T00:00:00.000Z', command: 'codex' }],
+      ]),
+    );
+
+    await service.deleteSessionsForRepository(repositoryId);
+
+    expect(deleteSession).toHaveBeenCalledTimes(2);
+    expect((await service.listSessions()).map(session => session.name)).toEqual(['keep']);
+  });
 });

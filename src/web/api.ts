@@ -55,8 +55,10 @@ export function getRepositories(): Promise<RepositoryListingResponse> {
   return getJson<RepositoryListingResponse>('/api/repositories');
 }
 
-export function getRepositoryFolders(directoryId?: string): Promise<RepositoryFolderListing> {
-  const query = directoryId ? `?directoryId=${encodeURIComponent(directoryId)}` : '';
+export function getRepositoryFolders(directoryId?: string, initialPath?: string): Promise<RepositoryFolderListing> {
+  const query = directoryId
+    ? `?directoryId=${encodeURIComponent(directoryId)}`
+    : initialPath ? `?initialPath=${encodeURIComponent(initialPath)}` : '';
   return getJson<RepositoryFolderListing>(`/api/repository-folders${query}`);
 }
 

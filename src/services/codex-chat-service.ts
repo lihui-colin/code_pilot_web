@@ -125,6 +125,8 @@ export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
     let killTimeout: NodeJS.Timeout | undefined;
     let resolveTurn: (() => void) | undefined;
     let rejectTurn: ((error: Error) => void) | undefined;
+    let resolveExit: (() => void) | undefined;
+    const exitPromise = new Promise<void>(resolve => { resolveExit = resolve; });
     const turnPromise = new Promise<void>((resolve, reject) => {
       resolveTurn = resolve;
       rejectTurn = reject;
@@ -275,6 +277,7 @@ export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
     child.stdin.on('error', () => undefined);
     child.once('exit', (code, signal) => {
       exited = true;
+      resolveExit?.();
       if (killTimeout) clearTimeout(killTimeout);
       if (!turnCompleted && !request.signal.aborted && !timedOut) {
         rejectTurn?.(new Error(`Codex app-server exited (${code ?? signal ?? 'unknown'})`));
@@ -295,6 +298,12 @@ export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
       request.signal.removeEventListener('abort', onAbort);
       lines.close();
       if (!exited) terminate();
+      if (request.signal.aborted || timedOut) {
+        await Promise.race([
+          exitPromise,
+          new Promise<void>(resolve => setTimeout(resolve, TERMINATION_GRACE_MS + 1_000)),
+        ]);
+      }
       // Keep diagnostics local; never return stderr to the browser.
       void stderr;
     }
@@ -317,6 +326,7 @@ export interface CodexChatServiceLike {
   getRunningRepositoryIds?(): string[];
   subscribe?(repositoryId: string, listener: (event: CodexConversationStreamEvent) => void): () => void;
   clearConversation(repositoryId: string): Promise<void> | void;
+  cleanupRepository?(repositoryId: string): Promise<void>;
   stopConversation(repositoryId: string): void;
   close(): Promise<void>;
 }
@@ -452,6 +462,21 @@ export class CodexChatService implements CodexChatServiceLike {
       await this.persistConversations(this.persistedConversations);
     }
     this.publish(repositoryId);
+  }
+
+  async cleanupRepository(repositoryId: string): Promise<void> {
+    const controller = this.controllersByRepository.get(repositoryId);
+    if (controller) {
+      controller.abort();
+      const deadline = Date.now() + TERMINATION_GRACE_MS + 1_000;
+      while (this.controllersByRepository.has(repositoryId) && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (this.controllersByRepository.has(repositoryId)) {
+        throw new ApiError(409, 'CODEX_CONVERSATION_BUSY', 'Codex is still responding in this conversation');
+      }
+    }
+    await this.clearConversation(repositoryId);
   }
 
   stopConversation(repositoryId: string): void {
@@ -627,5 +652,9 @@ export class CodexChatService implements CodexChatServiceLike {
 
   async close(): Promise<void> {
     for (const controller of this.activeControllers) controller.abort();
+    const deadline = Date.now() + TERMINATION_GRACE_MS + 5_000;
+    while (this.activeControllers.size > 0 && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
   }
 }

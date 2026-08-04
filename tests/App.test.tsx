@@ -14,6 +14,7 @@ vi.mock('../src/web/api.js', () => ({
   deleteSession: vi.fn(),
   deleteZellijToken: vi.fn(),
   getCodexActivity: vi.fn(),
+  getCodexStatus: vi.fn(),
   getReadiness: vi.fn(),
   getRepositoryFolders: vi.fn(),
   getRepositories: vi.fn(),
@@ -35,13 +36,14 @@ const repositories = {
 const openVSCodeUrl = 'https://192.0.2.10:8024/openvscode/?folder=%2Fworkspace%2Fterminal-web';
 
 async function openTokenPanel() {
-  fireEvent.click(await screen.findByRole('button', { name: '打开 Token 管理' }));
-  return screen.findByRole('dialog', { name: 'Zellij Web Token 管理' });
+  fireEvent.click(await screen.findByRole('button', { name: '打开系统设置' }));
+  return screen.findByRole('dialog', { name: '系统设置' });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.getReadiness).mockResolvedValue(readiness);
+  vi.mocked(api.getCodexStatus).mockResolvedValue({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' });
   vi.mocked(api.getCodexActivity).mockResolvedValue({ runningRepositoryIds: [] });
   vi.mocked(api.getRepositories).mockResolvedValue(repositories);
   vi.mocked(api.getRepositoryFolders).mockResolvedValue({
@@ -91,15 +93,39 @@ afterEach(() => {
 });
 
 describe('App', () => {
+  it('keeps system health cards inside the System Status page', async () => {
+    render(<App />);
+
+    expect(screen.queryByText('管理服务')).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '打开系统状态' }));
+    const statusPanel = await screen.findByRole('dialog', { name: '系统状态' });
+    expect(within(statusPanel).getByText('管理服务')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('就绪状态')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('Zellij 工具')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('code-viewer')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('OpenVSCode')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('Codex CLI')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('terminal-web 0.1.0')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('zellij 0.44.3')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('0.10.0')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('openvscode-server 1.109.5')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('codex-cli 0.146.0')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: '系统状态' })).not.toBeInTheDocument();
+  });
+
   it('confirms and requests a restart of all managed backend services', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     vi.mocked(api.restartServices).mockReturnValue(new Promise(() => undefined));
     render(<App />);
 
+    fireEvent.click(await screen.findByRole('button', { name: '打开系统设置' }));
     fireEvent.click(await screen.findByRole('button', { name: '重启后台服务' }));
 
     await waitFor(() => expect(api.restartServices).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('button', { name: '服务重启中…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '打开系统状态' })).toHaveTextContent('重启中…');
   });
 
   it('opens Session links safely in a new tab', async () => {
@@ -135,7 +161,9 @@ describe('App', () => {
     const tokenPanel = await openTokenPanel();
     expect(within(tokenPanel).getByText('terminal-web-test')).toBeInTheDocument();
     expect(within(tokenPanel).getByRole('button', { name: '复制 Token' })).toBeInTheDocument();
-    expect(screen.getByText('未就绪')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: '打开系统状态' }));
+    expect(await screen.findByText('未就绪')).toBeInTheDocument();
   });
 
   it('deletes a Session from the Zellij management table after exact-name confirmation', async () => {
@@ -162,26 +190,26 @@ describe('App', () => {
 
   it('keeps Token management hidden until its sidebar is opened', async () => {
     render(<App />);
-    const trigger = await screen.findByRole('button', { name: '打开 Token 管理' });
+    const trigger = await screen.findByRole('button', { name: '打开系统设置' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('terminal-web-test')).not.toBeInTheDocument();
     expect(screen.queryByText('123e4567-e89b-42d3-a456-426614174000')).not.toBeInTheDocument();
 
     fireEvent.click(trigger);
-    const tokenPanel = await screen.findByRole('dialog', { name: 'Zellij Web Token 管理' });
+    const tokenPanel = await screen.findByRole('dialog', { name: '系统设置' });
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(within(tokenPanel).getByText('terminal-web-test')).toBeInTheDocument();
     expect(within(tokenPanel).getByText('123e4567-e89b-42d3-a456-426614174000')).toBeInTheDocument();
     expect(within(tokenPanel).getByRole('button', { name: '复制 Token' })).toBeInTheDocument();
     expect(within(tokenPanel).getByRole('button', { name: '重新创建' })).toBeInTheDocument();
     expect(within(tokenPanel).getByRole('button', { name: '删除 Token' })).toBeInTheDocument();
-    expect(within(tokenPanel).getByRole('button', { name: '关闭 Token 管理' })).toBeInTheDocument();
+    expect(within(tokenPanel).getByRole('button', { name: '关闭系统设置' })).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog', { name: 'Zellij Web Token 管理' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '系统设置' })).not.toBeInTheDocument();
     fireEvent.click(trigger);
     fireEvent.click(document.querySelector('.token-panel-backdrop')!);
-    expect(screen.queryByRole('dialog', { name: 'Zellij Web Token 管理' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '系统设置' })).not.toBeInTheDocument();
   });
 
   it('confirms when the Zellij Web token is copied', async () => {
@@ -258,9 +286,9 @@ describe('App', () => {
       }],
     });
     render(<App />);
-    expect(await screen.findByRole('heading', { name: 'Git 仓库' })).toBeInTheDocument();
+    expect(await screen.findByText('WORKSPACE')).toBeInTheDocument();
     expect((await screen.findAllByText('terminal-web')).length).toBeGreaterThan(0);
-    expect(screen.getByRole('heading', { name: 'Git 仓库' })).toBeInTheDocument();
+    expect(screen.getByText('WORKSPACE')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '进入' })).not.toBeInTheDocument();
     const zellijAction = screen.getByRole('button', { name: '创建 Zellij Session' });
     const moreActions = screen.getByLabelText('terminal-web 更多操作').closest('.repository-more');
@@ -288,9 +316,12 @@ describe('App', () => {
 
     render(<App />);
 
-    const link = await screen.findByRole('link', { name: 'Codex 生成中…' });
+    const link = await screen.findByRole('link', { name: /与 Codex 对话.*生成中/ });
     expect(link).toHaveClass('running');
     expect(link).toHaveAttribute('href', `/codex-chat?repositoryId=${repositoryId}`);
+    expect(within(link).getByText('与 Codex 对话')).toBeInTheDocument();
+    expect(link).toHaveAccessibleName(/生成中/);
+    expect(link.querySelector('.sr-only')).toHaveTextContent('生成中');
   });
 
   it('closes repository more actions on outside click and Escape', async () => {
@@ -332,12 +363,32 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: '添加文件夹' }));
-    expect(await screen.findByRole('dialog', { name: '打开服务器 Git 仓库' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '选择 Git 仓库' }));
+    expect(await screen.findByRole('dialog', { name: '打开服务器目录' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '选择目录' }));
 
     await waitFor(() => expect(api.addManualRepository).toHaveBeenCalledWith(folderId));
     await waitFor(() => expect(api.getRepositories).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole('dialog', { name: '打开服务器 Git 仓库' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '打开服务器目录' })).not.toBeInTheDocument();
+  });
+
+  it('opens a typed relative initial directory in the folder picker', async () => {
+    vi.mocked(api.getRepositoryFolders).mockResolvedValue({
+      current: { id: `folder_${'i'.repeat(43)}`, name: 'projects', gitRepository: false },
+      parentId: null,
+      entries: [],
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加文件夹' }));
+    const input = await screen.findByRole('textbox', { name: '初始目录' });
+    fireEvent.change(input, { target: { value: '/data01/home/lihui/projects' } });
+    fireEvent.click(screen.getByRole('button', { name: '前往' }));
+
+    await waitFor(() => expect(api.getRepositoryFolders).toHaveBeenCalledWith(
+      undefined,
+      'data01/home/lihui/projects',
+    ));
+    expect(await screen.findByText('projects')).toBeInTheDocument();
   });
 
   it('removes a manually added repository without deleting files', async () => {

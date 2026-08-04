@@ -459,6 +459,17 @@ describe('CodexChatService', () => {
     });
   });
 
+  it('cleans persisted conversation state for a removed repository', async () => {
+    const persisted = vi.fn(async () => undefined);
+    const service = new CodexChatService(adapterWith([]), new Map([[repositoryId, threadId]]), persisted);
+
+    await service.cleanupRepository(repositoryId);
+
+    expect(service.getConversation(repositoryId)).toBeNull();
+    expect(persisted).toHaveBeenCalledTimes(1);
+    expect(persisted).toHaveBeenCalledWith(new Map());
+  });
+
   it('does not return raw Codex failure details', async () => {
     const service = new CodexChatService(adapterWith([
       appServerLine('thread/started', { thread: { id: threadId } }),

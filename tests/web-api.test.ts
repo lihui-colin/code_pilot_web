@@ -78,10 +78,13 @@ describe('web API', () => {
     });
   });
 
-  it('browses and selects server folders using only opaque IDs', async () => {
+  it('browses server folders by opaque IDs and relative initial paths', async () => {
     const folderId = `folder_${'f'.repeat(43)}`;
     const repositoryId = `dir_${'r'.repeat(43)}`;
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        current: { id: folderId, name: 'projects', gitRepository: false }, parentId: null, entries: [],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         current: { id: folderId, name: 'projects', gitRepository: false }, parentId: null, entries: [],
       }), { status: 200, headers: { 'content-type': 'application/json' } }))
@@ -92,6 +95,7 @@ describe('web API', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await getRepositoryFolders(folderId);
+    await getRepositoryFolders(undefined, 'data01/home/lihui/projects');
     await expect(addManualRepository(folderId)).resolves.toBe(repositoryId);
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -99,7 +103,12 @@ describe('web API', () => {
       `/api/repository-folders?directoryId=${folderId}`,
       { credentials: 'same-origin' },
     );
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/repositories', {
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/repository-folders?initialPath=data01%2Fhome%2Flihui%2Fprojects',
+      { credentials: 'same-origin' },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/repositories', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },

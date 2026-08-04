@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  CodexCliStatus,
   ReadinessResult,
   RepositoryFolderListing,
   RepositoryListingResponse,
@@ -14,6 +15,7 @@ import {
   deleteSession,
   deleteZellijToken,
   getCodexActivity,
+  getCodexStatus,
   getReadiness,
   getRepositoryFolders,
   getRepositories,
@@ -32,6 +34,7 @@ interface DashboardState {
 
 export function App() {
   const [dashboard, setDashboard] = useState<DashboardState | null>(null);
+  const [codexStatus, setCodexStatus] = useState<CodexCliStatus | null>(null);
   const [repositories, setRepositories] = useState<RepositoryListingResponse | null>(null);
   const [runningCodexRepositoryIds, setRunningCodexRepositoryIds] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
@@ -40,12 +43,15 @@ export function App() {
   const [busySessionName, setBusySessionName] = useState<string | null>(null);
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
-  const [tokenPanelOpen, setTokenPanelOpen] = useState(false);
+  const [systemSettingsOpen, setSystemSettingsOpen] = useState(false);
+  const [systemStatusOpen, setSystemStatusOpen] = useState(false);
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [servicesRestarting, setServicesRestarting] = useState(false);
   const [folderPicker, setFolderPicker] = useState<RepositoryFolderListing | null>(null);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [folderPickerBusy, setFolderPickerBusy] = useState(false);
+  const [folderInitialPath, setFolderInitialPath] = useState('');
+  const [folderPickerError, setFolderPickerError] = useState<string | null>(null);
   const [openRepositoryMenuId, setOpenRepositoryMenuId] = useState<string | null>(null);
   const copyFeedbackTimer = useRef<number | undefined>(undefined);
 
@@ -68,22 +74,24 @@ export function App() {
   }, [openRepositoryMenuId]);
 
   useEffect(() => {
-    if (!tokenPanelOpen && !sessionPanelOpen) return;
+    if (!systemSettingsOpen && !systemStatusOpen && !sessionPanelOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      setTokenPanelOpen(false);
+      setSystemSettingsOpen(false);
+      setSystemStatusOpen(false);
       setSessionPanelOpen(false);
     };
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [sessionPanelOpen, tokenPanelOpen]);
+  }, [sessionPanelOpen, systemSettingsOpen, systemStatusOpen]);
 
   const refreshDashboard = useCallback(async () => {
     try {
-      const [readiness, sessions, zellijToken] = await Promise.all([
-        getReadiness(), getSessions(), getZellijToken(),
+      const [readiness, sessions, zellijToken, codex] = await Promise.all([
+        getReadiness(), getSessions(), getZellijToken(), getCodexStatus(),
       ]);
       setDashboard({ readiness, sessions, zellijToken });
+      setCodexStatus(codex);
       setError(null);
     } catch (caught) {
       setError(errorMessage(caught, '加载失败'));
@@ -227,13 +235,16 @@ export function App() {
     }
   }, []);
 
-  const loadRepositoryFolder = async (directoryId?: string) => {
+  const loadRepositoryFolder = async (directoryId?: string, initialPath?: string) => {
     setFolderPickerBusy(true);
     try {
-      setFolderPicker(await getRepositoryFolders(directoryId));
+      setFolderPicker(await getRepositoryFolders(directoryId, initialPath));
+      setFolderPickerError(null);
       setError(null);
     } catch (caught) {
-      setError(errorMessage(caught, '服务器目录加载失败'));
+      const message = errorMessage(caught, '服务器目录加载失败');
+      setFolderPickerError(message);
+      setError(message);
     } finally {
       setFolderPickerBusy(false);
     }
@@ -241,7 +252,20 @@ export function App() {
 
   const openFolderPicker = async () => {
     setFolderPickerOpen(true);
+    setFolderInitialPath('');
+    setFolderPickerError(null);
     await loadRepositoryFolder();
+  };
+
+  const openInitialFolder = async () => {
+    const enteredPath = folderInitialPath.trim();
+    if (!enteredPath) return;
+    const initialPath = enteredPath.replace(/^[/\\]+/u, '');
+    if (!initialPath || initialPath.split(/[\\/]+/u).some(segment => segment === '..')) {
+      setFolderPickerError('请输入有效的服务器目录，不能包含 .. 路径段。');
+      return;
+    }
+    await loadRepositoryFolder(undefined, initialPath);
   };
 
   const selectRepositoryFolder = async (directoryId: string) => {
@@ -253,14 +277,14 @@ export function App() {
       setFolderPicker(null);
       setError(null);
     } catch (caught) {
-      setError(errorMessage(caught, 'Git 仓库添加失败'));
+      setError(errorMessage(caught, '目录添加失败'));
     } finally {
       setFolderPickerBusy(false);
     }
   };
 
   const removeManualRepository = async (repositoryId: string) => {
-    if (!window.confirm('从列表移除此手动仓库？这不会删除服务器上的文件或 Zellij Session。')) return;
+    if (!window.confirm('移除后将清理该目录关联的 Zellij Session、Codex 对话和 code-viewer 状态，但不会删除服务器上的文件。是否继续？')) return;
     setBusyRepositoryId(repositoryId);
     try {
       await deleteManualRepository(repositoryId);
@@ -341,40 +365,42 @@ export function App() {
         </div>
         <div className="hero-actions">
           <button
-            className="token-panel-trigger"
+            className={`status-trigger${servicesRestarting ? ' restarting' : ''}`}
             type="button"
-            aria-label="打开 Token 管理"
-            aria-expanded={tokenPanelOpen}
-            onClick={() => setTokenPanelOpen(true)}
-          >Token 管理 <span>{dashboard?.zellijToken ? '已配置' : '未配置'}</span></button>
+            aria-label="打开系统状态"
+            aria-expanded={systemStatusOpen}
+            onClick={() => setSystemStatusOpen(true)}
+          ><span className="status-icon" aria-hidden="true">{servicesRestarting ? '⟳' : '◉'}</span> {servicesRestarting ? '重启中…' : '状态'}</button>
           <button
-            className="restart-button"
+            className="settings-trigger"
             type="button"
-            disabled={servicesRestarting}
-            onClick={() => void restartAllServices()}
-          >{servicesRestarting ? '服务重启中…' : '重启后台服务'}</button>
+            aria-label="打开系统设置"
+            aria-expanded={systemSettingsOpen}
+            onClick={() => setSystemSettingsOpen(true)}
+          ><span className="settings-icon" aria-hidden="true">⚙</span> 设置</button>
         </div>
       </header>
 
-      {tokenPanelOpen && (
+      {systemSettingsOpen && (
         <>
           <button
             className="token-panel-backdrop"
             type="button"
-            aria-label="关闭 Token 管理"
-            onClick={() => setTokenPanelOpen(false)}
+            aria-label="关闭系统设置"
+            onClick={() => setSystemSettingsOpen(false)}
           />
-          <aside className="token-sidebar" role="dialog" aria-modal="true" aria-label="Zellij Web Token 管理">
+          <aside className="token-sidebar system-settings-sidebar" role="dialog" aria-modal="true" aria-label="系统设置">
             <div className="token-sidebar-heading">
-              <div><p className="eyebrow">ZELLIJ WEB</p><h2>Token 管理</h2></div>
-              <button type="button" aria-label="关闭 Token 管理" onClick={() => setTokenPanelOpen(false)}>×</button>
+              <div><p className="eyebrow">SYSTEM</p><h2>系统设置</h2></div>
+              <button type="button" aria-label="关闭系统设置" onClick={() => setSystemSettingsOpen(false)}>×</button>
             </div>
-            <div className="token-sidebar-status">
-              <small>当前状态</small>
-              <strong className={dashboard?.zellijToken ? 'status-ok' : 'status-warn'}>
-                {dashboard?.zellijToken ? '已配置' : '未配置'}
-              </strong>
-            </div>
+            <section className="settings-section" aria-labelledby="token-settings-heading">
+              <div className="settings-section-heading">
+                <div><p className="eyebrow">ZELLIJ WEB</p><h3 id="token-settings-heading">Token 管理</h3></div>
+                <strong className={dashboard?.zellijToken ? 'status-ok' : 'status-warn'}>
+                  {dashboard?.zellijToken ? '已配置' : '未配置'}
+                </strong>
+              </div>
             {dashboard?.zellijToken ? (
               <div className="token-content">
                 <span>名称：<strong>{dashboard.zellijToken.name}</strong></span>
@@ -395,6 +421,16 @@ export function App() {
               )}
             </div>
             <p className="token-security-note">Token 仅用于登录同源 Zellij Web，请勿发送给不受信任的人员。</p>
+            </section>
+            <section className="settings-section" aria-labelledby="service-settings-heading">
+              <div className="settings-section-heading">
+                <div><p className="eyebrow">SERVICE</p><h3 id="service-settings-heading">后台服务</h3></div>
+              </div>
+              <p className="settings-description">重启会暂时断开 Web、编辑器和代码浏览连接，但不会删除 Zellij Session。</p>
+              <button className="restart-button settings-restart-button" type="button" disabled={servicesRestarting} onClick={() => void restartAllServices()}>
+                {servicesRestarting ? '服务重启中…' : '重启后台服务'}
+              </button>
+            </section>
           </aside>
         </>
       )}
@@ -459,31 +495,69 @@ export function App() {
         </div>
       )}
 
+      {systemStatusOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setSystemStatusOpen(false);
+          }}
+        >
+          <section className="system-status-dialog" role="dialog" aria-modal="true" aria-label="系统状态">
+            <div className="panel-heading">
+              <div><p className="eyebrow">SYSTEM STATUS</p><h2>系统状态</h2></div>
+              <button type="button" aria-label="关闭系统状态" onClick={() => setSystemStatusOpen(false)}>×</button>
+            </div>
+            <section className="status-grid" aria-label="服务状态">
+              <article className="status-card">
+                <span>管理服务</span>
+                <strong className="status-ok">在线</strong>
+                <small className="status-detail">terminal-web 0.1.0</small>
+              </article>
+              <article className="status-card">
+                <span>就绪状态</span>
+                <strong className={dashboard?.readiness.status === 'ready' ? 'status-ok' : 'status-warn'}>
+                  {dashboard?.readiness.status === 'ready' ? '已就绪' : '未就绪'}
+                </strong>
+                <small className="status-detail">workspace / runtime checks</small>
+              </article>
+              <article className="status-card">
+                <span>Zellij 工具</span>
+                <strong className={dashboard?.readiness.checks.zellij ? 'status-ok' : 'status-warn'}>
+                  {dashboard?.readiness.checks.zellij ? '可用' : '版本异常'}
+                </strong>
+                <small className="status-detail">{dashboard?.readiness.checks.zellij ? 'zellij 0.44.3' : '要求 zellij 0.44.3'}</small>
+              </article>
+              <article className="status-card">
+                <span>code-viewer</span>
+                <strong className={dashboard?.readiness.checks.codeViewer ? 'status-ok' : 'status-warn'}>
+                  {dashboard?.readiness.checks.codeViewer ? '可用' : '不可用'}
+                </strong>
+                <small className="status-detail">{dashboard?.readiness.checks.codeViewer ? '0.10.0' : '要求 0.10.0'}</small>
+              </article>
+              <article className="status-card">
+                <span>OpenVSCode</span>
+                <strong className="status-ok">已配置</strong>
+                <small className="status-detail">openvscode-server 1.109.5</small>
+              </article>
+              <article className="status-card">
+                <span>Codex CLI</span>
+                <strong className={codexStatus?.available ? 'status-ok' : 'status-warn'}>
+                  {codexStatus?.available ? '可用' : '不可用'}
+                </strong>
+                {codexStatus?.version && <small className="status-detail">{codexStatus.version}</small>}
+              </article>
+            </section>
+          </section>
+        </div>
+      )}
+
       {error && <div className="error" role="alert">{error}</div>}
-      <section className="status-grid" aria-label="服务状态">
-        <article className="status-card">
-          <span>管理服务</span>
-          <strong className="status-ok">在线</strong>
-        </article>
-        <article className="status-card">
-          <span>就绪状态</span>
-          <strong className={dashboard?.readiness.status === 'ready' ? 'status-ok' : 'status-warn'}>
-            {dashboard?.readiness.status === 'ready' ? '已就绪' : '未就绪'}
-          </strong>
-        </article>
-        <article className="status-card">
-          <span>Zellij 工具</span>
-          <strong className={dashboard?.readiness.checks.zellij ? 'status-ok' : 'status-warn'}>
-            {dashboard?.readiness.checks.zellij ? '可用' : '版本异常'}
-          </strong>
-        </article>
-      </section>
 
       <section className="panel repository-panel">
         <div className="panel-heading directory-heading">
           <div className="workspace-heading-copy">
             <p className="eyebrow">WORKSPACE</p>
-            <h2>Git 仓库</h2>
             <span className="workspace-root">{repositories?.current.name ?? '—'}</span>
           </div>
           <div className="directory-heading-actions">
@@ -493,7 +567,7 @@ export function App() {
               aria-expanded={sessionPanelOpen}
               onClick={() => setSessionPanelOpen(true)}
             >会话列表 <span className="action-count">{dashboard?.sessions.length ?? 0}</span></button>
-            <button type="button" onClick={() => void openFolderPicker()}>添加文件夹</button>
+            <button type="button" onClick={() => void openFolderPicker()}><span className="folder-action-icon" aria-hidden="true">＋</span> 添加文件夹</button>
           </div>
         </div>
         <div className="directory-list">
@@ -501,11 +575,13 @@ export function App() {
             const codexRunning = runningCodexRepositoryIds.has(entry.id);
             return (
             <article className="directory-row" key={entry.id}>
-              <div className="kind-icon repository">&lt;/&gt;</div>
+              <div className={`kind-icon ${entry.kind}`}>{entry.kind === 'repository' ? '</>' : 'DIR'}</div>
               <div className="directory-copy">
                 <strong>{entry.name}</strong>
                 <span>{entry.relativePath || '.'}</span>
-                {entry.source === 'manual' && <small className="manual-source">手动添加</small>}
+                {(entry.source === 'manual' || entry.kind === 'directory') && (
+                  <small className="manual-source">{entry.kind === 'directory' ? '目录' : '手动添加'}</small>
+                )}
                 {entry.markers.length > 0 && <div className="markers">{entry.markers.map(marker => <small key={marker}>{marker}</small>)}</div>}
               </div>
               <div className="repository-actions">
@@ -532,7 +608,12 @@ export function App() {
                   href={`/codex-chat?repositoryId=${encodeURIComponent(entry.id)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                >{codexRunning ? <><span className="codex-running-dot" aria-hidden="true" />Codex 生成中…</> : '与 Codex 对话'}</a>
+                >{codexRunning ? (
+                  <>
+                    <span className="codex-link-main">与 Codex 对话</span>
+                    <span className="sr-only">，生成中</span>
+                  </>
+                ) : '与 Codex 对话'}</a>
                 <div
                   className="repository-more"
                   data-repository-menu-id={entry.id}
@@ -590,7 +671,7 @@ export function App() {
             </article>
             );
           })}
-          {repositories?.entries.length === 0 && <p className="empty">Workspace 下没有找到 Git 仓库。</p>}
+          {repositories?.entries.length === 0 && <p className="empty">Workspace 下没有找到可显示的目录。</p>}
         </div>
       </section>
 
@@ -598,23 +679,35 @@ export function App() {
         <div className="modal-backdrop" role="presentation">
           <section className="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folder-dialog-title">
             <div className="panel-heading">
-              <div><p className="eyebrow">OPEN FOLDER</p><h2 id="folder-dialog-title">打开服务器 Git 仓库</h2></div>
+              <div><p className="eyebrow">OPEN FOLDER</p><h2 id="folder-dialog-title">打开服务器目录</h2></div>
               <button type="button" onClick={() => setFolderPickerOpen(false)}>关闭</button>
             </div>
+            <form className="folder-initial-path" onSubmit={event => { event.preventDefault(); void openInitialFolder(); }}>
+              <input
+                aria-label="初始目录"
+                value={folderInitialPath}
+                onChange={event => setFolderInitialPath(event.target.value)}
+                placeholder="输入初始目录，例如 /data01/home/lihui/projects"
+                spellCheck={false}
+                disabled={folderPickerBusy}
+              />
+              <button type="submit" disabled={folderPickerBusy || !folderInitialPath.trim()}>前往</button>
+            </form>
+            {folderPickerError && <p className="error folder-picker-error" role="alert">{folderPickerError}</p>}
             <div className="folder-toolbar">
               <button
                 type="button"
                 disabled={!folderPicker?.parentId || folderPickerBusy}
                 onClick={() => folderPicker?.parentId && void loadRepositoryFolder(folderPicker.parentId)}
-              >上一级</button>
+              ><span className="folder-action-icon" aria-hidden="true">↑</span> 上一级</button>
               <strong className="mono">{folderPicker?.current.name ?? '加载中…'}</strong>
-              {folderPicker?.current.gitRepository && (
-                <button
-                  type="button"
-                  disabled={folderPickerBusy}
-                  onClick={() => void selectRepositoryFolder(folderPicker.current.id)}
-                >选择当前 Git 仓库</button>
-              )}
+              <button
+                type="button"
+                aria-label="选择当前目录"
+                title="选择当前目录"
+                disabled={folderPickerBusy}
+                onClick={() => folderPicker?.current.id && void selectRepositoryFolder(folderPicker.current.id)}
+              ><span className="folder-action-icon" aria-hidden="true">✓</span></button>
             </div>
             <div className="folder-list" aria-busy={folderPickerBusy}>
               {folderPicker?.entries.map(folder => (
@@ -625,13 +718,13 @@ export function App() {
                     disabled={folderPickerBusy}
                     onClick={() => void loadRepositoryFolder(folder.id)}
                   >📁 {folder.name}</button>
-                  {folder.gitRepository && (
-                    <button
-                      type="button"
-                      disabled={folderPickerBusy}
-                      onClick={() => void selectRepositoryFolder(folder.id)}
-                    >选择 Git 仓库</button>
-                  )}
+                  <button
+                    type="button"
+                    aria-label="选择目录"
+                    title="选择目录"
+                    disabled={folderPickerBusy}
+                    onClick={() => void selectRepositoryFolder(folder.id)}
+                  ><span className="folder-action-icon" aria-hidden="true">✓</span></button>
                 </div>
               ))}
               {!folderPickerBusy && folderPicker?.entries.length === 0 && <p className="empty">此目录下没有可浏览的子目录。</p>}

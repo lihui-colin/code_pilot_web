@@ -298,6 +298,7 @@ export function CodexChat() {
       && snapshot.repositoryId === previous.repositoryId
       && snapshot.conversationId === previous.conversationId
       && snapshot.status === previous.status
+      && snapshot.phase === previous.phase
       && snapshot.error === previous.error
       && snapshot.updatedAt === previous.updatedAt
       && nextMessages.length === previous.messages.length

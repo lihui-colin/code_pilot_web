@@ -53,4 +53,15 @@ describe('ViewerManager', () => {
     expect(adapter.stop).toHaveBeenCalledTimes(1);
     expect(adapter.start).toHaveBeenCalledTimes(2);
   });
+
+  it('stops the active viewer for a removed repository', async () => {
+    const { adapter, manager } = fixture();
+    const repositoryId = `dir_${'a'.repeat(43)}`;
+    await manager.create(repositoryId, '/workspace/one');
+
+    await manager.stopFor(repositoryId);
+
+    expect(adapter.stop).toHaveBeenCalledTimes(1);
+    expect(manager.currentFor(repositoryId)).toBeNull();
+  });
 });

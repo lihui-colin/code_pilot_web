@@ -175,6 +175,18 @@ export class ViewerManager {
     if (this.active === active) this.active = null;
   }
 
+  async stopFor(repositoryId: string): Promise<void> {
+    if (this.starting) {
+      try {
+        const instance = await this.starting;
+        if (instance.repositoryId !== repositoryId) return;
+      } catch {
+        // A failed start cannot leave a running viewer for this repository.
+      }
+    }
+    if (this.active?.instance.repositoryId === repositoryId) await this.stopActive();
+  }
+
   async close(): Promise<void> {
     await this.stopActive();
   }

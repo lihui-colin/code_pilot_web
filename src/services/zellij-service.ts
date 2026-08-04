@@ -226,6 +226,14 @@ export class ZellijService {
     }
   }
 
+  async deleteSessionsForRepository(repositoryId: string): Promise<void> {
+    const sessions = await this.listSessions();
+    const repositorySessions = sessions
+      .filter(session => session.repositoryId === repositoryId)
+      .map(session => session.name);
+    for (const sessionName of repositorySessions) await this.deleteSession(sessionName);
+  }
+
   private async deleteSessionUnlocked(name: string): Promise<void> {
     if (!this.adapter.deleteSession) throw new ApiError(503, 'SERVICE_NOT_READY', 'Session deletion is not ready');
     const existing = parseSessionNames(await this.adapter.listSessions());

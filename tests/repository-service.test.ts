@@ -153,15 +153,30 @@ describe('RepositoryService', () => {
     expect((await repositoryService.list()).entries).toEqual([]);
   });
 
-  it('does not allow a non-Git folder to be selected', async () => {
+  it('allows a non-Git folder to be selected and persisted', async () => {
     const root = await makeRoot();
     const workspace = path.join(root, 'workspace');
     const plain = path.join(root, 'plain-directory');
     await mkdir(workspace);
     await mkdir(plain);
-    const repositoryService = service(workspace);
+    const persisted: string[][] = [];
+    const repositoryService = new RepositoryService(
+      workspace,
+      Buffer.from('stable test secret'),
+      ['.git', 'package.json'],
+      pino({ enabled: false }),
+      [],
+      async paths => { persisted.push([...paths]); },
+    );
     const folderId = await folderIdFor(repositoryService, plain);
-    await expect(repositoryService.addManualRepository(folderId)).rejects.toMatchObject({ code: 'NOT_A_REPOSITORY' });
+    const directoryId = await repositoryService.addManualRepository(folderId);
+    expect((await repositoryService.list()).entries).toContainEqual(expect.objectContaining({
+      id: directoryId,
+      kind: 'directory',
+      source: 'manual',
+      markers: [],
+    }));
+    expect(persisted).toEqual([[plain]]);
   });
 
   it('lists repository context files with opaque IDs and revalidates containment before reading', async () => {

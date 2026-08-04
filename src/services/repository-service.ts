@@ -179,8 +179,6 @@ export class RepositoryService {
     if (!(await stat(realPath)).isDirectory()) {
       throw new ApiError(404, 'DIRECTORY_NOT_FOUND', 'Directory was not found');
     }
-    const markers = await this.detectMarkers(realPath);
-    if (!markers.includes('git')) throw new ApiError(422, 'NOT_A_REPOSITORY', 'Directory is not a Git repository');
     return { realPath, relativePath: registered.relativePath };
   }
 
@@ -228,8 +226,8 @@ export class RepositoryService {
     return resolved;
   }
 
-  async listFolders(directoryId?: string): Promise<RepositoryFolderListing> {
-    return withTimeout(this.readFolder(directoryId), 5_000);
+  async listFolders(directoryId?: string, initialPath?: string): Promise<RepositoryFolderListing> {
+    return withTimeout(this.readFolder(directoryId, initialPath), 5_000);
   }
 
   async addManualRepository(directoryId: string): Promise<string> {
@@ -237,9 +235,6 @@ export class RepositoryService {
     if (!configuredPath) throw new ApiError(404, 'DIRECTORY_NOT_FOUND', 'Directory was not found');
     const realPath = await this.resolveFileSystem(configuredPath);
     if (!(await stat(realPath)).isDirectory()) throw new ApiError(404, 'DIRECTORY_NOT_FOUND', 'Directory was not found');
-    if (!(await this.detectMarkers(realPath)).includes('git')) {
-      throw new ApiError(422, 'NOT_A_REPOSITORY', 'Directory is not a Git repository');
-    }
     await this.list();
     const existing = [...this.repositoryIndex.entries()].find(([, repository]) => repository.configuredPath === realPath);
     if (existing) return existing[0];
@@ -266,10 +261,12 @@ export class RepositoryService {
     this.repositoryIndex.delete(repositoryId);
   }
 
-  private async readFolder(directoryId?: string): Promise<RepositoryFolderListing> {
-    const configuredPath = directoryId === undefined
-      ? this.fileSystemRoot
-      : this.folderIndex.get(directoryId);
+  private async readFolder(directoryId?: string, initialPath?: string): Promise<RepositoryFolderListing> {
+    const configuredPath = initialPath !== undefined
+      ? path.resolve(this.fileSystemRoot, initialPath)
+      : directoryId === undefined
+        ? this.fileSystemRoot
+        : this.folderIndex.get(directoryId);
     if (!configuredPath) throw new ApiError(404, 'DIRECTORY_NOT_FOUND', 'Directory was not found');
     const currentRealPath = await this.resolveFileSystem(configuredPath);
     if (!(await stat(currentRealPath)).isDirectory()) throw new ApiError(404, 'DIRECTORY_NOT_FOUND', 'Directory was not found');
@@ -403,13 +400,12 @@ export class RepositoryService {
         const realPath = await this.resolveFileSystem(configuredPath);
         if (knownRealPaths.has(realPath) || !(await stat(realPath)).isDirectory()) continue;
         const markers = await this.detectMarkers(realPath);
-        if (!markers.includes('git')) continue;
         knownRealPaths.add(realPath);
         entries.push({
           id: this.manualIdFor(realPath),
           name: path.basename(realPath),
           relativePath: realPath,
-          kind: 'repository',
+          kind: markers.includes('git') ? 'repository' : 'directory',
           source: 'manual',
           markers,
           viewer: null,

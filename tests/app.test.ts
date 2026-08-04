@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app.js';
 import type { ReadinessResult } from '../src/domain/types.js';
 import type { ZellijAdapter } from '../src/services/zellij-service.js';
@@ -497,6 +497,82 @@ describe('MVP-1 routes', () => {
     await app.close();
   });
 
+  it('cleans repository components before removing a manual repository', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-remove-cleanup-route-'));
+    temporaryDirectories.push(root);
+    const workspace = path.join(root, 'workspace');
+    const external = path.join(root, 'external-repository');
+    await mkdir(workspace);
+    await mkdir(path.join(external, '.git'), { recursive: true });
+    let sessions = '';
+    const zellijDelete = vi.fn(async (arguments_: string[]) => { sessions = sessions.replace(`${arguments_[2]}\n`, ''); });
+    const viewerStop = vi.fn(async () => undefined);
+    const repositoryId = `dir_${'a'.repeat(43)}`;
+    const cleanupRepository = vi.fn(async () => undefined);
+    const viewerManager = new ViewerManager({
+      start: async (_path, port) => ({
+        pid: 321,
+        output: () => `GDP_LISTEN_URL=http://127.0.0.1:${port}/\n`,
+        exited: () => false,
+        waitForExit: async () => undefined,
+      }),
+      healthy: async () => true,
+      stop: viewerStop,
+    }, 8022, 'https://192.0.2.10:8024');
+    const app = await createApp(createTestConfig(workspace), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      manualRepositoryPaths: [external],
+      zellijAdapter: {
+        listSessions: async () => sessions,
+        createSession: async arguments_ => { sessions = `${arguments_[4]}\n`; },
+        deleteSession: zellijDelete,
+      },
+      viewerManager,
+      codexChatService: {
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
+        send: async () => undefined,
+        getConversation: () => null,
+        clearConversation: async () => undefined,
+        cleanupRepository,
+        stopConversation: () => undefined,
+        close: async () => undefined,
+      },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+    const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
+    const manualEntry = listing.json().entries.find((entry: { source: string }) => entry.source === 'manual');
+    expect(manualEntry).toBeDefined();
+    const id = manualEntry.id as string;
+    const createdSession = await app.inject({
+      method: 'POST',
+      url: '/api/sessions',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { repositoryId: id, command: 'codex' },
+    });
+    expect(createdSession.statusCode).toBe(201);
+    await app.inject({
+      method: 'POST',
+      url: '/api/viewers',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { repositoryId: id },
+    });
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/api/repositories/${id}`,
+      headers: { origin: 'https://192.0.2.10:8024' },
+    });
+
+    expect(removed.statusCode).toBe(204);
+    expect(zellijDelete).toHaveBeenCalledTimes(1);
+    expect(viewerStop).toHaveBeenCalledTimes(1);
+    expect(cleanupRepository).toHaveBeenCalledWith(id);
+    await app.close();
+  });
+
   it('does not accept server paths in the folder picker API', async () => {
     const app = await testApp();
     const queryResponse = await app.inject({ method: 'GET', url: '/api/repository-folders?path=/etc' });
@@ -508,6 +584,28 @@ describe('MVP-1 routes', () => {
     });
     expect(queryResponse.statusCode).toBe(400);
     expect(bodyResponse.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('accepts a relative initial directory for the folder picker', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-initial-folder-route-'));
+    temporaryDirectories.push(root);
+    const relativePath = path.relative(path.parse(root).root, root);
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/repository-folders?initialPath=${encodeURIComponent(relativePath)}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().current.name).toBe(path.basename(root));
     await app.close();
   });
 

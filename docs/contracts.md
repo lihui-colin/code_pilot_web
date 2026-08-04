@@ -81,7 +81,7 @@ Zellij Web Token 初始化和管理遵循：
 4. 配置已有 Token 时，通过 `web --list-tokens` 确认名称仍存在；名称已被撤销时自动创建并保存替代 Token。
 5. 重新创建时先创建并保存新名称和值，再使用旧名称调用 `web --revoke-token <old-name>`，避免创建失败导致无可用 Token。
 6. 删除时使用配置保存的名称撤销 Token，并从配置删除名称和值。
-7. Token 值只能出现在受 VPN/内网保护的专用只读 API 和主页默认隐藏的 Token 管理侧边栏；普通日志、错误响应和其他 API 不得包含 Token。
+7. Token 值只能出现在受 VPN/内网保护的专用只读 API 和主页默认隐藏的系统设置面板；普通日志、错误响应和其他 API 不得包含 Token。
 
 只有管理服务 `listenPort` 对外监听，并必须通过主机防火墙限制在 VPN/公司内网网段。Zellij Web、code-viewer 和 OpenVSCode 上游端口只监听 `127.0.0.1`，不得加入防火墙允许列表；Codex Chat 直接运行在管理服务进程内。写请求仍需校验 `Origin`，目录与命令边界不因取消登录或 TLS 而放宽。
 
@@ -250,13 +250,14 @@ interface RepositoryFolderListing {
 ```http
 GET /api/repositories
 GET /api/repository-folders?directoryId=<folder_id>
+GET /api/repository-folders?initialPath=<relative_path>
 POST /api/repositories
 DELETE /api/repositories/:repositoryId
 ```
 
 `GET /api/repositories` 不接受 `parentId`、路径或其他查询参数。服务端把 workspace 扫描结果和手动选择结果合并为单一扁平列表。每个条目的 `source` 表示来自 `workspace` 自动扫描或 `manual` 手动选择；`session` 通过固定 repository Session 名称与当前 Zellij Session 列表匹配，不存在时为 `null`。
 
-“添加文件夹”使用独立的服务器目录选择接口。首次不带查询参数时从服务器文件系统根目录开始；后续请求只允许后端上一响应签发的 `folder_<HMAC>` 不透明 ID，不接受路径。响应只返回当前目录名、父目录 ID、可读子目录名称、子目录 ID，以及该子目录当前是否包含 `.git`。`POST /api/repositories` 请求体严格为 `{ "directoryId": "folder_..." }`，重新校验后将 Git repository 加入手动列表；`DELETE` 只移除手动列表记录，不删除目录、文件、Session 或进程。两个写请求都执行同源 Origin 校验。
+“添加文件夹”使用独立的服务器目录选择接口。首次不带查询参数时从服务器文件系统根目录开始；用户也可以提交不以 `/` 开头且不包含 `..` 路径段的相对初始目录，服务端在文件系统根目录下重新执行 `realpath()` containment 校验；后续逐层浏览只允许后端签发的 `folder_<HMAC>` 不透明 ID。响应只返回当前目录名、父目录 ID、可读子目录名称、子目录 ID，以及该子目录当前是否包含 `.git`。`POST /api/repositories` 请求体严格为 `{ "directoryId": "folder_..." }`，重新校验后将目录加入手动列表；`DELETE` 只允许移除手动列表记录，不删除目录或文件；在移除记录前，服务端会清理该目录关联的托管 Zellij Session、Codex 对话状态和 code-viewer 实例。OpenVSCode 是独立的无状态代理，不为目录保存进程状态，因此不会停止全局 OpenVSCode 服务。两个写请求都执行同源 Origin 校验。
 
 ### 3.2 工作目录
 
@@ -333,7 +334,7 @@ Git repository 的唯一准入标识为 `.git` 文件或目录。其他 marker �
 
 当 workspace 不是 Git repository 时，单次递归扫描最多检查 1000 个可见目录，超过返回 `422 DIRECTORY_TOO_LARGE`，不得静默截断。单次扫描超时 5 秒。
 
-目录选择器单次只列当前一级，最多接受 1000 个目录项，读取超时 5 秒。无权限目录不进入列表；当前目录不可读返回 `403 DIRECTORY_NOT_READABLE`。选择不含 `.git` 的目录返回 `422 NOT_A_REPOSITORY`。手动选择路径写入权限为 `0600` 的状态文件，服务重启后恢复。
+目录选择器单次只列当前一级，最多接受 1000 个目录项，读取超时 5 秒。无权限目录不进入列表；当前目录不可读返回 `403 DIRECTORY_NOT_READABLE`。当前目录或可读子目录均可作为手动目录添加，不要求包含 `.git`；手动选择路径写入权限为 `0600` 的状态文件，服务重启后恢复。列表中的非 Git 手动目录标记为 `directory`，Git 手动目录标记为 `repository`。
 
 ## 4. Viewer 契约
 
@@ -491,7 +492,7 @@ app-server 进程使用独立进程组，浏览器不能控制可执行文件、
 
 服务端按 repository ID 保存进程内对话快照，包括 conversation ID、用户与助手消息、运行状态、脱敏错误和更新时间。浏览器关闭、刷新或网络断开不得取消后台 turn；只有显式停止、30 分钟超时、输出超限或管理服务关闭才终止进程组。同一 repository 同时只能有一个运行中的 turn。只有 Codex turn 成功完成并返回合法 thread ID 后，服务端才把 repository ID 到 conversation ID 的映射原子写入状态文件；运行中、失败、停止或超时的 turn 不得覆盖已持久化 ID。管理服务重启后从状态文件恢复该映射，页面无需依赖浏览器缓存即可获得可继续的 conversation ID。
 
-`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`。`GET /api/codex/activity` 返回当前仍在运行的 repository ID 列表，供管理首页在 Codex 对话页关闭后显示“生成中”状态；该状态只来自服务端活动 turn，不依赖浏览器缓存。页面进入时先读取该快照，并建立同源 `GET /api/codex/conversations/:repositoryId/events` SSE 连接。服务端在连接建立和状态改变时立即发送当前脱敏快照；密集的 app-server `item/agentMessage/delta` 可以在不超过 40 毫秒的窗口内合并为一次快照发送。连接断开不得取消后台 turn，浏览器自动重连后重新收到当前快照；服务端必须在响应关闭、响应错误或客户端请求中止时释放该 SSE 订阅和心跳定时器。浏览器以不超过每 100 毫秒一次的频率把运行中快照保存到 `localStorage`，最终状态必须立即保存；快照不含服务器路径和文件内容。管理服务重启后服务端快照为空时，页面使用本地快照恢复消息和 conversation ID；旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 app-server 的 `thread/resume` 继续该 conversation。
+`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`。运行中的快照 `phase` 为 `starting` 或 `generating`：前者表示 Codex app-server 尚未完成 initialize/thread 握手，后者表示已建立 thread 并开始 turn；失败、停止或完成的快照不返回该字段。`GET /api/codex/activity` 返回当前仍在运行的 repository ID 列表，供管理首页在 Codex 对话页关闭后显示“生成中”状态；该状态只来自服务端活动 turn，不依赖浏览器缓存。页面进入时先读取该快照，并建立同源 `GET /api/codex/conversations/:repositoryId/events` SSE 连接。服务端在连接建立和状态改变时立即发送当前脱敏快照；密集的 app-server `item/agentMessage/delta` 可以在不超过 40 毫秒的窗口内合并为一次快照发送。连接断开不得取消后台 turn，浏览器自动重连后重新收到当前快照；服务端必须在响应关闭、响应错误或客户端请求中止时释放该 SSE 订阅和心跳定时器。浏览器以不超过每 100 毫秒一次的频率把运行中快照保存到 `localStorage`，最终状态必须立即保存；快照不含服务器路径和文件内容。管理服务重启后服务端快照为空时，页面使用本地快照恢复消息和 conversation ID；旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 app-server 的 `thread/resume` 继续该 conversation。
 
 `POST /api/codex/messages` 成功启动后台 turn 时返回 `202` 和启动后的对话快照。`POST /api/codex/conversations/:repositoryId/stop` 显式停止当前 turn；`DELETE /api/codex/conversations/:repositoryId` 仅在没有运行中 turn 时清空快照，供“新对话”使用。Codex app-server 原始 JSONL/JSON-RPC 事件只在服务端用于更新快照，不直接返回浏览器。
 
@@ -660,6 +661,7 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 - 轮询不得覆盖本地 `starting`、`stopping` 或删除中状态。
 - 相对路径只作为文本渲染，不使用 `dangerouslySetInnerHTML`。
 - viewer URL 不持久化到 localStorage。
-- 主页默认不显示 Zellij Web Token 名称和值；通过 Token 管理按钮打开侧边栏后显示名称和值，并提供复制、删除和重新创建操作。侧边栏支持关闭按钮、遮罩和 Esc 关闭。
+- 主页默认不显示 Zellij Web Token 名称和值；通过系统设置按钮打开默认隐藏的系统设置面板后显示名称和值，并提供复制、删除和重新创建操作。系统设置面板同时提供后台服务重启操作，并支持关闭按钮、遮罩和 Esc 关闭。
 - 删除和重新创建 Token 必须二次确认；Token 操作完成后立即更新页面状态。
 - 页面提供“重启后台服务”操作并二次确认，明确提示现有 Web/编辑连接会断开但 Zellij Session 会保留。请求被接受后按钮保持禁用，前端等待管理服务实际离线并恢复健康后刷新页面。
+- 管理服务、系统就绪状态、Zellij、code-viewer、OpenVSCode 和 Codex CLI 状态不常驻首页，集中放在默认关闭的“系统状态”页面中；页面同时显示管理服务、Zellij、code-viewer、OpenVSCode 和 Codex CLI 的版本信息，其中 Codex CLI 使用现有 `/api/codex/status` 的脱敏版本信息；页面支持关闭按钮、遮罩和 Esc 关闭。

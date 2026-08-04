@@ -23,7 +23,12 @@ import type { ZellijTokenService } from './services/zellij-token-service.js';
 
 const repositoryQuerySchema = z.object({}).strict();
 const folderIdSchema = z.string().regex(/^folder_[A-Za-z0-9_-]{43}$/u);
-const repositoryFolderQuerySchema = z.object({ directoryId: folderIdSchema.optional() }).strict();
+const repositoryFolderQuerySchema = z.object({
+  directoryId: folderIdSchema.optional(),
+  initialPath: z.string().trim().min(1).max(512)
+    .regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~+\-\/]+$/u)
+    .optional(),
+}).strict().refine(value => !(value.directoryId && value.initialPath), 'directoryId and initialPath are mutually exclusive');
 const addManualRepositorySchema = z.object({ directoryId: folderIdSchema }).strict();
 const createSessionSchema = z.object({
   repositoryId: repositoryIdSchema,
@@ -236,7 +241,7 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
   app.get('/api/repository-folders', async request => {
     if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Repository browsing is not ready');
     const query = repositoryFolderQuerySchema.parse(request.query);
-    return repositoryService.listFolders(query.directoryId);
+    return repositoryService.listFolders(query.directoryId, query.initialPath);
   });
   app.get('/api/repositories/:repositoryId/files', async request => {
     if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Repository browsing is not ready');
@@ -256,6 +261,18 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     requireSameOrigin(request.headers.origin);
     noBodySchema.parse(request.body);
     const params = repositoryParamsSchema.parse(request.params);
+    await zellijService.deleteSessionsForRepository(params.repositoryId);
+    await viewerManager.stopFor(params.repositoryId);
+    if (codexChatService.cleanupRepository) {
+      await codexChatService.cleanupRepository(params.repositoryId);
+    } else {
+      try {
+        codexChatService.stopConversation(params.repositoryId);
+      } catch {
+        // No active Codex turn is also a clean state.
+      }
+      await codexChatService.clearConversation(params.repositoryId);
+    }
     await repositoryService.removeManualRepository(params.repositoryId);
     await reply.code(204).send();
   });
