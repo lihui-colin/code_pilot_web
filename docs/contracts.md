@@ -57,18 +57,18 @@ Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。
 
 管理应用不设置用户名、密码、Basic Auth、Bearer Token 或登录页面。页面、API 和后续 viewer 代理在 VPN/公司内网边界内通过 HTTPS 访问，并复用 Zellij Web 证书和私钥。
 
-`publicBaseUrl` 和 `zellijWebBaseUrl` 必须为 HTTPS，并使用相同主机名或 IP。Zellij Web 的登录 Cookie 为 `Secure; SameSite=Strict`，同主机 HTTPS 入口确保从管理页面打开 Session 时能够复用 Remember me 登录。两者都不得包含查询参数、片段或应用路径，也不得使用 `0.0.0.0` 或 `[::]` 作为浏览器地址。配置中的文件路径相对配置文件所在目录解析。
+`publicBaseUrl` 是唯一浏览器入口，必须使用 HTTPS，且不得包含查询参数、片段或应用路径，也不得使用 `0.0.0.0` 或 `[::]`。Zellij Web 内部端口由 `zellij.webPort` 配置并只监听 localhost，不保存或返回独立浏览器 URL。配置中的文件路径相对配置文件所在目录解析。
 
 配置必须提供项目托管 Zellij 二进制路径、Zellij 默认 `config.kdl` 路径、Zellij Web 证书路径和私钥路径。管理服务启动时先确认 `config.kdl` 是普通文件，并在顶层原子补充或修正 `web_sharing "on"`，同时保留原文件权限。这样之后通过普通 `zellij --session <name>` 创建的新 Session 会允许运行中的 Zellij Web 附加。
 
-配置还必须提供 `openVsCode.executableFile` 和 `openVsCode.port`。端口默认 `8023`，作为只监听 `127.0.0.1` 的 OpenVSCode 上游端口，且不得与管理端口、Zellij Web 端口或任一 code-viewer 端口冲突。OpenVSCode 路径相对配置文件所在目录解析。
+配置还必须提供 `openVSCode.executableFile` 和 `openVSCode.port`。端口默认 `8023`，作为只监听 `127.0.0.1` 的 OpenVSCode 上游端口，且不得与管理端口、Zellij Web 端口或任一 code-viewer 端口冲突。OpenVSCode 路径相对配置文件所在目录解析。
 
 `web_sharing` 是 Session 创建时读取的选项，不会追溯修改已经运行的 Session。启用前创建且未主动共享的 Session 需要停止后用相同命令重新创建；管理服务不得为此自动删除现有 Session。
 
 初始化脚本在网络依赖安装之前按下述规则创建证书。未运行初始化脚本时，管理服务首次启动执行相同的创建和校验规则：
 
 1. 证书和私钥都存在时，确认两者为非空普通文件、私钥不允许 group/other 访问、证书未过期且公钥匹配，然后直接复用。
-2. 两者都不存在时，通过参数数组调用 `openssl` 创建十年期 RSA-2048/SHA-256 自签名证书；SAN 至少包含 `localhost`、`127.0.0.1` 和 `zellijWebBaseUrl` 的主机。证书权限为 `0644`，私钥权限为 `0600`。
+2. 两者都不存在时，通过参数数组调用 `openssl` 创建十年期 RSA-2048/SHA-256 自签名证书；SAN 至少包含 `localhost`、`127.0.0.1` 和 `publicBaseUrl` 的主机。证书权限为 `0644`，私钥权限为 `0600`。
 3. 只存在其中一个、文件无效、已过期、密钥不匹配或权限不安全时启动失败，不得覆盖现有文件。
 
 Zellij Web 的独立服务配置必须把 `web_server_cert` 和 `web_server_key` 指向上述文件。
@@ -83,7 +83,7 @@ Zellij Web Token 初始化和管理遵循：
 6. 删除时使用配置保存的名称撤销 Token，并从配置删除名称和值。
 7. Token 值只能出现在受 VPN/内网保护的专用只读 API 和主页 Token 区域；普通日志、错误响应和其他 API 不得包含 Token。
 
-公开端口必须通过主机防火墙限制在 VPN/公司内网网段。写请求仍需校验 `Origin`，目录与命令边界不因取消登录或 TLS 而放宽。
+只有管理服务 `listenPort` 对外监听，并必须通过主机防火墙限制在 VPN/公司内网网段。Zellij Web、code-viewer 和 OpenVSCode 上游端口只监听 `127.0.0.1`，不得加入防火墙允许列表；Codex Chat 直接运行在管理服务进程内。写请求仍需校验 `Origin`，目录与命令边界不因取消登录或 TLS 而放宽。
 
 ### 1.4 健康和就绪接口
 
@@ -182,7 +182,7 @@ Session 出现在结果中即为 `running`。MVP 不探测 Session 内 Codex 是
 
 ### 2.5 Web URL
 
-`zellijWebBaseUrl` 必须是 HTTPS URL，启动时使用标准 `URL` 解析，且不得包含查询参数、片段或 Session 路径。
+`zellij.webPort` 必须是 `1-65535` 的整数，且不得与管理、OpenVSCode 或 code-viewer 端口冲突。
 
 Session URL 由服务端生成：
 
@@ -421,27 +421,35 @@ API 和 viewer 代理均不要求应用层登录。上游端口不得监听公�
 
 不得自动改为公开端口池。通用多实例限制见 [ADR-002](decisions/002-viewer-proxy.md)，当前兼容结构见 [ADR-004](decisions/004-single-viewer-compatibility-proxy.md)。
 
-### 4.5 OpenVSCode 编辑入口
+### 4.5 Zellij Web 代理
+
+Zellij Web 必须只监听 `127.0.0.1:<zellij-port>`。浏览器入口固定为 `<publicBaseUrl>/zellij/<session-name>`，不得返回或跳转到 Zellij Web 上游端口。
+
+管理服务必须移除 `/zellij` 前缀并代理 Zellij Web 的普通 HTTP、登录请求和 WebSocket Upgrade。Zellij `0.44.3` 入口 HTML 固定包含 `<base href="/" />`，管理服务只对合法入口路径 `/zellij/` 和 `/zellij/<session-name>` 的 HTML 响应把它改为 `<base href="/zellij/" />`；静态资源、API 和 WebSocket 响应保持流式转发，不修改正文。入口 HTML 最大允许 1 MiB，超过限制时代理失败。
+
+Zellij Web 保留自身 Token 与 Cookie 认证。通过同源 `/zellij` 入口登录后，浏览器只与主服务 HTTPS 端口通信；Zellij 上游端口不得加入防火墙允许列表。
+
+### 4.6 OpenVSCode 编辑入口
 
 每个 repository 条目的“code-viewer”旁边显示“编辑代码”链接。链接在新标签页打开，并设置 `rel="noopener noreferrer"`。
 
-OpenVSCode Server 是部署侧独立启动的编辑服务，但不得直接暴露其 HTTP 端口。后端必须对每个 repository ID 重新执行真实路径解析、Git repository 检查和对应来源的路径边界校验，然后基于 `publicBaseUrl` 和校验后的 repository 绝对路径生成同源 HTTPS URL：`<publicBaseUrl>/openvscode/?folder=<encoded-absolute-path>`。`GET /api/repositories` 在每个 repository 条目中返回对应的 `openVsCodeUrl`；OpenVSCode 将 `folder` 参数解析为远程目录并自动打开该 repository。
+OpenVSCode Server 是部署侧独立启动的编辑服务，但不得直接暴露其 HTTP 端口。后端必须对每个 repository ID 重新执行真实路径解析、Git repository 检查和对应来源的路径边界校验，然后基于 `publicBaseUrl` 和校验后的 repository 绝对路径生成同源 HTTPS URL：`<publicBaseUrl>/openvscode/?folder=<encoded-absolute-path>`。`GET /api/repositories` 在每个 repository 条目中返回对应的 `openVSCodeUrl`；OpenVSCode 将 `folder` 参数解析为远程目录并自动打开该 repository。
 
-前端必须直接使用条目中的 `openVsCodeUrl`，不得自行拼接或提交服务器绝对路径、命令、环境变量或任意端口。后端只可为 workspace 扫描结果或已持久化的手动 Git repository 生成 URL；已经消失或不再是 Git repository 的目录不得生成 URL。
+前端必须直接使用条目中的 `openVSCodeUrl`，不得自行拼接或提交服务器绝对路径、命令、环境变量或任意端口。后端只可为 workspace 扫描结果或已持久化的手动 Git repository 生成 URL；已经消失或不再是 Git repository 的目录不得生成 URL。
 
-管理服务必须把 `/openvscode` 下的普通 HTTP 请求和 WebSocket Upgrade 流式代理到 `http://127.0.0.1:<openVsCode.port>`，保留 `/openvscode` 基路径，并使用 `publicBaseUrl` 的 authority 和 HTTPS Origin 生成上游请求头。这样非 localhost 浏览器仍处于安全上下文，Codex 等依赖 Webview、Worker 或安全浏览器 API 的扩展能够正常渲染。OpenVSCode 上游不得加入防火墙公开端口。
+管理服务必须把 `/openvscode` 下的普通 HTTP 请求和 WebSocket Upgrade 流式代理到 `http://127.0.0.1:<openVSCode.port>`，保留 `/openvscode` 基路径，并使用 `publicBaseUrl` 的 authority 和 HTTPS Origin 生成上游请求头。这样非 localhost 浏览器仍处于安全上下文，Codex 等依赖 Webview、Worker 或安全浏览器 API 的扩展能够正常渲染。OpenVSCode 上游不得加入防火墙公开端口。
 
 OpenVSCode 进程的工作目录必须设置为配置给管理服务的同一 workspace root。部署命令的参数数组固定为：
 
 ```text
-["--host", "127.0.0.1", "--port", String(openVsCode.port), "--server-base-path", "/openvscode", "--without-connection-token", "--accept-server-license-terms", "--telemetry-level", "off"]
+["--host", "127.0.0.1", "--port", String(openVSCode.port), "--server-base-path", "/openvscode", "--without-connection-token", "--accept-server-license-terms", "--telemetry-level", "off"]
 ```
 
 该入口与 code-viewer 代理相互独立，也不改变 code-viewer 只监听 localhost 的约束。OpenVSCode localhost 上游端口只能由配置和部署侧决定，不能由前端请求修改。
 
 OpenVSCode 平时仍是独立进程，但统一重启脚本负责停止并重新拉起本项目配置的实例。停止时必须校验可执行文件安装目录和固定端口，并终止其独立进程组，以清理 Server、Extension Host 等子进程；不得按进程名全局终止其他 OpenVSCode 实例。
 
-### 4.6 Codex 浏览器对话
+### 4.7 Codex 浏览器对话
 
 repository 条目的“与 Codex 对话”链接必须在新标签页打开 `/codex-chat?repositoryId=<encoded-id>`，并设置 `rel="noopener noreferrer"`。对话页面必须先通过 `GET /api/repositories` 确认 ID 仍对应当前列表中的 Git repository；前端不得把 relative path 转换为服务器路径，也不得提交绝对路径、命令、命令参数、环境变量、KDL、可执行文件或 Codex 配置。
 
@@ -577,11 +585,11 @@ Fastify 为请求、查询和响应配置 schema；Zod 定义共享领域类型�
 
 管理应用不提供应用层认证，不要求用户名、密码、Bearer Token 或登录 Cookie，也不提供 `/api/me`。
 
-页面、API、Codex 流式响应、viewer 代理和 OpenVSCode 代理必须同源 HTTPS。Zellij Web 使用同主机、不同端口的 HTTPS 入口。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
+页面、API、Codex 流式响应、Zellij Web、viewer 和 OpenVSCode 代理必须全部通过 `publicBaseUrl` 同源 HTTPS 访问。Zellij Web 使用 `/zellij/<session>`，code-viewer 使用 `/viewer/<viewer_id>/`，OpenVSCode 使用 `/openvscode/`。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
 
 服务重启接口同样执行严格同源校验。前端不能提交 workspace、配置文件、端口、PID、命令、环境变量或服务列表。
 
-访问控制由 VPN/公司内网和主机防火墙承担。公开管理端口和 Zellij Web 端口只允许受控网段访问；code-viewer 与 OpenVSCode 上游端口只监听 localhost。
+访问控制由 VPN/公司内网和主机防火墙承担。只有公开管理端口允许受控网段访问；Zellij Web、code-viewer 与 OpenVSCode 上游端口只监听 localhost。
 
 Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理专用 Zellij Web Token，并只通过主页专用接口展示。Token 管理写请求必须执行同源 Origin 校验。
 

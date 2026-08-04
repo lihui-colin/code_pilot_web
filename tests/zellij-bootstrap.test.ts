@@ -190,6 +190,7 @@ describe('ensureZellijWebSharing', () => {
     await expect(ensureZellijWebSharing(configFile)).resolves.toBe(true);
     const content = await readFile(configFile, 'utf8');
     expect(content).toContain('\nweb_sharing "on"\n');
+    expect(content).toContain('\nweb_server_ip "127.0.0.1"\n');
     expect(content).toContain('\nshow_startup_tips false\n');
     expect(content).toContain('\nshow_release_notes false\n');
     expect((await stat(configFile)).mode & 0o777).toBe(0o640);
@@ -200,6 +201,7 @@ describe('ensureZellijWebSharing', () => {
     const configFile = path.join(root, 'config.kdl');
     await writeFile(configFile, [
       'web_sharing "off"',
+      'web_server_ip "0.0.0.0"',
       'show_startup_tips true',
       'show_release_notes true',
       '',
@@ -208,6 +210,7 @@ describe('ensureZellijWebSharing', () => {
     await expect(ensureZellijWebSharing(configFile)).resolves.toBe(false);
     expect(await readFile(configFile, 'utf8')).toBe([
       'web_sharing "on"',
+      'web_server_ip "127.0.0.1"',
       'show_startup_tips false',
       'show_release_notes false',
       '',

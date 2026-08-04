@@ -114,7 +114,7 @@ export class ZellijService {
 
   constructor(
     private readonly adapter: ZellijAdapter,
-    private readonly zellijWebBaseUrl: string,
+    private readonly sessionWebBaseUrl: string,
     private readonly logger: FastifyBaseLogger,
     private readonly managedSessions: Map<string, ManagedSessionMetadata> = new Map(),
     private readonly layoutsDirectory = path.resolve('data/layouts'),
@@ -136,7 +136,7 @@ export class ZellijService {
         relativePath: metadata?.relativePath ?? null,
         createdAt: metadata?.createdAt ?? null,
         command: metadata?.command ?? null,
-        webUrl: new URL(encodeURIComponent(name), `${this.zellijWebBaseUrl}/`).toString(),
+        webUrl: new URL(encodeURIComponent(name), `${this.sessionWebBaseUrl}/`).toString(),
       };
     });
   }

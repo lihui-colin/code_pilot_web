@@ -31,7 +31,7 @@ const repositories = {
   breadcrumbs: [{ id: null, name: 'workspace', relativePath: '' }],
   entries: [],
 };
-const openVsCodeUrl = 'https://192.0.2.10:8024/openvscode/?folder=%2Fworkspace%2Fterminal-web';
+const openVSCodeUrl = 'https://192.0.2.10:8024/openvscode/?folder=%2Fworkspace%2Fterminal-web';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -52,7 +52,7 @@ beforeEach(() => {
     relativePath: null,
     createdAt: null,
     command: null,
-    webUrl: 'https://192.0.2.10:8021/alpha',
+    webUrl: 'https://192.0.2.10:8024/zellij/alpha',
   }]);
   vi.mocked(api.getZellijToken).mockResolvedValue({
     name: 'terminal-web-test',
@@ -67,7 +67,7 @@ beforeEach(() => {
   vi.mocked(api.createSession).mockResolvedValue({
     name: 'terminal-web', status: 'running', origin: 'managed', repositoryId: `dir_${'a'.repeat(43)}`,
     relativePath: 'terminal-web', createdAt: '2026-08-02T00:00:00.000Z', command: 'codex',
-    webUrl: 'https://192.0.2.10:8021/terminal-web',
+    webUrl: 'https://192.0.2.10:8024/zellij/terminal-web',
   });
   vi.mocked(api.createViewer).mockResolvedValue({
     id: `viewer_${'b'.repeat(22)}`, repositoryId: `dir_${'a'.repeat(43)}`, pid: 123,
@@ -100,7 +100,7 @@ describe('App', () => {
     const link = await screen.findByRole('link', { name: '打开' });
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(link).toHaveAttribute('href', 'https://192.0.2.10:8021/alpha');
+    expect(link).toHaveAttribute('href', 'https://192.0.2.10:8024/zellij/alpha');
   });
 
   it('still shows Sessions and the token while readiness is degraded', async () => {
@@ -206,7 +206,7 @@ describe('App', () => {
         kind: 'repository',
         source: 'workspace',
         markers: ['git', 'node'],
-        openVsCodeUrl,
+        openVSCodeUrl,
         viewer: null,
         session: null,
       }],
@@ -248,7 +248,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: repositoryId, name: 'external-project', relativePath: '/srv/external-project',
-        kind: 'repository', source: 'manual', markers: ['git'], openVsCodeUrl, viewer: null, session: null,
+        kind: 'repository', source: 'manual', markers: ['git'], openVSCodeUrl, viewer: null, session: null,
       }],
     });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -263,12 +263,12 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
+        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null, session: null,
       }],
     });
     render(<App />);
     const link = await screen.findByRole('link', { name: '编辑代码' });
-    expect(link).toHaveAttribute('href', openVsCodeUrl);
+    expect(link).toHaveAttribute('href', openVSCodeUrl);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   });
@@ -278,7 +278,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
+        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null, session: null,
       }],
     });
     render(<App />);
@@ -297,14 +297,14 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVsCodeUrl, viewer: null,
-        session: { name: sessionName, status: 'running', webUrl: `https://192.0.2.10:8021/${sessionName}` },
+        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null,
+        session: { name: sessionName, status: 'running', webUrl: `https://192.0.2.10:8024/zellij/${sessionName}` },
       }],
     });
     vi.spyOn(window, 'prompt').mockReturnValue(sessionName);
     render(<App />);
     const link = await screen.findByRole('link', { name: '打开 Zellij Web' });
-    expect(link).toHaveAttribute('href', `https://192.0.2.10:8021/${sessionName}`);
+    expect(link).toHaveAttribute('href', `https://192.0.2.10:8024/zellij/${sessionName}`);
     expect(link).toHaveAttribute('target', '_blank');
     fireEvent.click(link);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('123e4567-e89b-42d3-a456-426614174000'));
@@ -318,7 +318,7 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
-        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVsCodeUrl, viewer: null, session: null,
+        kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null, session: null,
       }],
     });
     const replace = vi.fn();

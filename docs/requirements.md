@@ -135,14 +135,14 @@ Codex 流式响应只包含 conversation ID、助手文本、完成状态和脱�
 
 ## 安全边界
 
-- 页面、API 和 viewer 代理无需应用登录，使用同源 HTTPS，并由 VPN 和防火墙限制访问网段。
+- 页面、API、Zellij Web、viewer、OpenVSCode 和 Codex Chat 使用主服务端口的同源 HTTPS，并由 VPN 和防火墙限制访问网段。
 - Zellij Web 保留自身 Token 验证；管理服务首次启动创建专用 Token，同时保存名称和值并在主页提供复制、删除和重新创建操作。
 - Token 成功写入浏览器剪贴板后，主页显示“已复制”反馈。
 - 自动扫描只允许访问启动时配置的工作目录；workspace 外目录只能通过服务器目录选择器主动加入。
 - 每次目录相关操作都重新执行真实路径和对应来源边界校验。
 - 禁止前端提交任意命令、命令参数、环境变量、KDL 或绝对路径。
 - 管理服务和 code-viewer 使用普通用户运行，不使用 root。
-- Zellij 缺失时由项目安装固定版本；HTTPS 证书在管理服务首次启动时初始化，由管理入口和 Zellij Web 共同使用，且两个入口使用相同主机名或 IP。
+- Zellij 缺失时由项目安装固定版本；HTTPS 证书在管理服务首次启动时初始化，由公开管理入口和 localhost Zellij Web 上游共同使用，浏览器只访问管理入口。
 - 项目启动时确保默认 Zellij 配置包含 `web_sharing "on"`，使之后通过 `zellij --session` 创建的 Session 也能从浏览器打开；已运行的旧 Session 不自动删除或重建。
 
 每个 Git repository 条目提供以下操作：
@@ -156,7 +156,7 @@ Codex 流式响应只包含 conversation ID、助手文本、完成状态和脱�
 - code-viewer 只监听 localhost，上游端口不对 VPN 网络开放。
 - 写请求执行同源校验。
 - 记录 Session 创建、删除和 viewer 启停审计日志。
-- 主机防火墙只允许 VPN 网段访问管理入口和 Zellij Web；OpenVSCode 与 code-viewer 上游端口不得公开。
+- 主机防火墙只允许 VPN 网段访问管理入口；Zellij Web、OpenVSCode 与 code-viewer 上游端口不得公开。
 
 ## 与现有脚本的关系
 

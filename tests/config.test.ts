@@ -18,15 +18,15 @@ async function fixture() {
     listenHost: '0.0.0.0',
     listenPort: 8024,
     publicBaseUrl: 'https://192.0.2.10:8024',
-    zellijWebBaseUrl: 'https://192.0.2.10:8021',
     zellij: {
+      webPort: 8021,
       managedBinaryFile: 'bin/zellij',
       configFile: 'zellij/config.kdl',
       webTokenDatabaseFile: 'zellij/tokens.db',
       webCertificateFile: 'certs/cert.pem',
       webPrivateKeyFile: 'certs/key.pem',
     },
-    openVsCode: {
+    openVSCode: {
       executableFile: 'openvscode/current/bin/openvscode-server',
       port: 8023,
     },
@@ -62,8 +62,8 @@ describe('loadConfiguration', () => {
     expect(loaded.config.zellijConfigFile).toBe(path.join(root, 'zellij/config.kdl'));
     expect(loaded.config.zellijWebTokenDatabaseFile).toBe(path.join(root, 'zellij/tokens.db'));
     expect(loaded.config.zellijWebCertificateFile).toBe(path.join(root, 'certs/cert.pem'));
-    expect(loaded.config.openVsCodeExecutableFile).toBe(path.join(root, 'openvscode/current/bin/openvscode-server'));
-    expect(loaded.config.openVsCodePort).toBe(8023);
+    expect(loaded.config.openVSCodeExecutableFile).toBe(path.join(root, 'openvscode/current/bin/openvscode-server'));
+    expect(loaded.config.openVSCodePort).toBe(8023);
     expect(loaded.directoryIdSecret?.length).toBe(32);
   });
 
@@ -86,7 +86,7 @@ describe('loadConfiguration', () => {
     const { root, workspace } = await fixture();
     const configPath = path.join(root, 'config.json');
     const config = JSON.parse(await readFile(configPath, 'utf8'));
-    delete config.openVsCode.port;
+    delete config.openVSCode.port;
     await writeFile(configPath, JSON.stringify(config));
 
     const loaded = await loadConfiguration([
@@ -94,7 +94,7 @@ describe('loadConfiguration', () => {
       '--workspace-root', workspace,
     ], root);
 
-    expect(loaded.config.openVsCodePort).toBe(8023);
+    expect(loaded.config.openVSCodePort).toBe(8023);
   });
 
   it('keeps serving possible but marks an unsafe directory secret unavailable', async () => {
@@ -119,7 +119,7 @@ describe('loadConfiguration', () => {
     ], root)).rejects.toThrow('IP address or hostname that browsers access');
   });
 
-  it('requires HTTPS and the same hostname for management and Zellij Web', async () => {
+  it('requires HTTPS for the public browser URL', async () => {
     const { root, workspace } = await fixture();
     const configPath = path.join(root, 'config.json');
     const config = JSON.parse(await readFile(configPath, 'utf8'));
@@ -130,27 +130,13 @@ describe('loadConfiguration', () => {
       '--workspace-root', workspace,
     ], root)).rejects.toThrow('publicBaseUrl must use HTTPS');
 
-    config.publicBaseUrl = 'https://192.0.2.10:8024';
-    config.zellijWebBaseUrl = 'http://192.0.2.10:8021';
-    await writeFile(configPath, JSON.stringify(config));
-    await expect(loadConfiguration([
-      '--config', 'config.json',
-      '--workspace-root', workspace,
-    ], root)).rejects.toThrow('zellijWebBaseUrl must use HTTPS');
-
-    config.zellijWebBaseUrl = 'https://zellij.example.test:8021';
-    await writeFile(configPath, JSON.stringify(config));
-    await expect(loadConfiguration([
-      '--config', 'config.json',
-      '--workspace-root', workspace,
-    ], root)).rejects.toThrow('must use the same hostname');
   });
 
   it('rejects an OpenVSCode port that overlaps another configured service', async () => {
     const { root, workspace } = await fixture();
     const configPath = path.join(root, 'config.json');
     const config = JSON.parse(await readFile(configPath, 'utf8'));
-    config.openVsCode.port = 18_000;
+    config.openVSCode.port = 18_000;
     await writeFile(configPath, JSON.stringify(config));
     await expect(loadConfiguration([
       '--config', 'config.json',

@@ -11,7 +11,7 @@ import { promisify } from 'node:util';
 const execFile = promisify(execFileCallback);
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const dataDirectory = path.join(projectRoot, 'data');
-const openVsCodePidFile = path.join(dataDirectory, 'openvscode.pid');
+const openVSCodePidFile = path.join(dataDirectory, 'openvscode.pid');
 const zellijWebPidFile = path.join(dataDirectory, 'zellij-web.pid');
 
 function resolveConfigPath(configDirectory, value) {
@@ -25,12 +25,11 @@ async function loadRuntime(configFile, workspaceRoot) {
   const workspaceRootRealPath = await realpath(workspaceRoot);
   const workspaceStat = await stat(workspaceRootRealPath);
   if (!workspaceStat.isDirectory()) throw new Error('workspace root is not a directory');
-  const zellijWebPort = Number(new URL(config.zellijWebBaseUrl).port || 443);
   return {
     configFile: resolvedConfigFile,
     managementPort: Number(config.listenPort),
-    openVsCodeExecutable: resolveConfigPath(configDirectory, config.openVsCode.executableFile),
-    openVsCodePort: Number(config.openVsCode.port),
+    openVSCodeExecutable: resolveConfigPath(configDirectory, config.openVSCode.executableFile),
+    openVSCodePort: Number(config.openVSCode.port),
     viewerPorts: Array.from(
       { length: Number(config.viewerPortRange.end) - Number(config.viewerPortRange.start) + 1 },
       (_, index) => Number(config.viewerPortRange.start) + index,
@@ -38,7 +37,7 @@ async function loadRuntime(configFile, workspaceRoot) {
     workspaceRoot: workspaceRootRealPath,
     zellijConfigFile: resolveConfigPath(configDirectory, config.zellij.configFile),
     zellijManagedBinary: resolveConfigPath(configDirectory, config.zellij.managedBinaryFile),
-    zellijWebPort,
+    zellijWebPort: Number(config.zellij.webPort),
   };
 }
 
@@ -118,18 +117,18 @@ async function processKind(pid, runtime) {
   if (arguments_.includes(viewerEntry)
     && runtime.viewerPorts.some(port => hasOption(arguments_, '--port', String(port)))) return 'viewer';
 
-  let openVsCodeRealExecutable = runtime.openVsCodeExecutable;
+  let openVSCodeRealExecutable = runtime.openVSCodeExecutable;
   try {
-    openVsCodeRealExecutable = await realpath(runtime.openVsCodeExecutable);
+    openVSCodeRealExecutable = await realpath(runtime.openVSCodeExecutable);
   } catch {
     // A missing executable will be reported when support services are started.
   }
-  const openVsCodeRoot = path.dirname(path.dirname(openVsCodeRealExecutable));
-  if (hasOption(arguments_, '--port', String(runtime.openVsCodePort))
+  const openVSCodeRoot = path.dirname(path.dirname(openVSCodeRealExecutable));
+  if (hasOption(arguments_, '--port', String(runtime.openVSCodePort))
     && arguments_.some(argument => (
-      argument === runtime.openVsCodeExecutable
-      || argument === openVsCodeRealExecutable
-      || argument.startsWith(`${openVsCodeRoot}${path.sep}`)
+      argument === runtime.openVSCodeExecutable
+      || argument === openVSCodeRealExecutable
+      || argument.startsWith(`${openVSCodeRoot}${path.sep}`)
     ))) return 'openvscode';
 
   if (arguments_.some(argument => path.basename(argument) === 'zellij')
@@ -217,10 +216,10 @@ async function cleanup(runtime) {
   await stopZellijWeb(runtime);
   await cleanupPort(runtime, runtime.managementPort, ['management']);
   for (const port of runtime.viewerPorts) await cleanupPort(runtime, port, ['viewer']);
-  await cleanupPort(runtime, runtime.openVsCodePort, ['openvscode']);
+  await cleanupPort(runtime, runtime.openVSCodePort, ['openvscode']);
   await cleanupPort(runtime, runtime.zellijWebPort, ['zellij-web']);
   await Promise.all([
-    rm(openVsCodePidFile, { force: true }),
+    rm(openVSCodePidFile, { force: true }),
     rm(zellijWebPidFile, { force: true }),
   ]);
 }
@@ -256,7 +255,12 @@ async function writePidFile(file, pid) {
 
 async function startZellijWeb(runtime) {
   const zellijExecutable = await resolveZellijExecutable(runtime);
-  await execFile(zellijExecutable, ['--config', runtime.zellijConfigFile, 'web', '-d'], {
+  await execFile(zellijExecutable, [
+    '--config', runtime.zellijConfigFile,
+    'web', '-d',
+    '--ip', '127.0.0.1',
+    '--port', String(runtime.zellijWebPort),
+  ], {
     cwd: projectRoot,
     shell: false,
     timeout: 15_000,
@@ -275,15 +279,15 @@ async function startZellijWeb(runtime) {
 }
 
 async function startOpenVsCode(runtime) {
-  if (!(await isExecutable(runtime.openVsCodeExecutable))) throw new Error('OpenVSCode executable is not available');
+  if (!(await isExecutable(runtime.openVSCodeExecutable))) throw new Error('OpenVSCode executable is not available');
   const logFile = path.join(dataDirectory, 'openvscode.log');
   const logHandle = await open(logFile, 'a', 0o600);
   await logHandle.chmod(0o600);
   let child;
   try {
-    child = spawn(runtime.openVsCodeExecutable, [
+    child = spawn(runtime.openVSCodeExecutable, [
       '--host', '127.0.0.1',
-      '--port', String(runtime.openVsCodePort),
+      '--port', String(runtime.openVSCodePort),
       '--server-base-path', '/openvscode',
       '--without-connection-token',
       '--accept-server-license-terms',
@@ -299,22 +303,22 @@ async function startOpenVsCode(runtime) {
       child.once('error', reject);
     });
     if (!child.pid) throw new Error('OpenVSCode did not provide a process ID');
-    await writePidFile(openVsCodePidFile, child.pid);
+    await writePidFile(openVSCodePidFile, child.pid);
     child.unref();
   } finally {
     await logHandle.close();
   }
   try {
-    await waitForPort(runtime.openVsCodePort, true, 30_000);
+    await waitForPort(runtime.openVSCodePort, true, 30_000);
   } catch (error) {
     if (child?.pid) await stopPid(runtime, child.pid, 'openvscode');
-    await rm(openVsCodePidFile, { force: true });
+    await rm(openVSCodePidFile, { force: true });
     throw error;
   }
 }
 
 async function startSupport(runtime) {
-  const ports = [runtime.managementPort, ...runtime.viewerPorts, runtime.openVsCodePort, runtime.zellijWebPort];
+  const ports = [runtime.managementPort, ...runtime.viewerPorts, runtime.openVSCodePort, runtime.zellijWebPort];
   for (const port of ports) await waitForPort(port, false, 1_000);
   await startZellijWeb(runtime);
   try {

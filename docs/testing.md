@@ -107,11 +107,14 @@
 
 1. 页面和 API 不要求用户凭据。
 2. 服务可以绑定 `0.0.0.0`，并通过配置的 HTTP IP 入口访问。
-3. 管理入口使用 HTTPS 时被拒绝，Zellij Web 不使用 HTTPS 时被拒绝。
+3. 管理入口和 `publicBaseUrl` 必须使用 HTTPS；浏览器不直接访问 Zellij Web 上游端口。
 4. 页面不显示或请求用户身份。
 5. Session 打开链接使用新标签页和 `noopener noreferrer`。
 6. 桌面和移动尺寸无文字溢出和控件重叠。
 7. 页面隐藏时停止轮询，恢复时立即刷新。
+8. Session URL 使用主服务同源 `/zellij/<session>`，不包含 Zellij 上游端口。
+9. Zellij Web 只监听 localhost；入口 HTML 的 base 被改写为 `/zellij/`，登录 HTTP 和终端 WebSocket 均通过主服务代理。
+10. 防火墙只需公开主服务端口，Zellij Web、code-viewer 和 OpenVSCode 端口从外部不可访问。
 
 ## MVP-2：Session 操作
 

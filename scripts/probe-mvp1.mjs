@@ -100,8 +100,8 @@ async function main() {
       listenHost: '0.0.0.0',
       listenPort: port,
       publicBaseUrl: `http://127.0.0.1:${port}`,
-      zellijWebBaseUrl: 'https://127.0.0.1:8021',
       zellij: {
+        webPort: 8021,
         managedBinaryFile: 'bin/zellij',
         webCertificateFile: 'certs/cert.pem',
         webPrivateKeyFile: 'certs/key.pem',

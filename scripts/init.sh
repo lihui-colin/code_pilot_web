@@ -11,9 +11,9 @@ zellij_token_database_file="${XDG_DATA_HOME:-$HOME/.local/share}/zellij/tokens.d
 host=""
 listen_host="0.0.0.0"
 service_port="8020"
-zellij_port="8021"
-viewer_port="8022"
-openvscode_port="8023"
+zellij_port="5021"
+viewer_port="5022"
+openvscode_port="5023"
 non_interactive=false
 managed_zellij_file="$HOME/.local/bin/zellij"
 project_zellij_file="$project_root/data/bin/zellij"
@@ -122,11 +122,11 @@ validate_port "Zellij port" "$zellij_port"
 validate_port "viewer port" "$viewer_port"
 validate_port "OpenVSCode port" "$openvscode_port"
 [[ "$service_port" != "$zellij_port" \
-    && "$service_port" != "$viewer_port" \
-    && "$service_port" != "$openvscode_port" \
-    && "$zellij_port" != "$viewer_port" \
-    && "$zellij_port" != "$openvscode_port" \
-    && "$viewer_port" != "$openvscode_port" ]] \
+        && "$service_port" != "$viewer_port" \
+        && "$service_port" != "$openvscode_port" \
+        && "$zellij_port" != "$viewer_port" \
+        && "$zellij_port" != "$openvscode_port" \
+&& "$viewer_port" != "$openvscode_port" ]] \
 || die "service, Zellij, viewer, and OpenVSCode ports must be different"
 
 local_zellij_version=""
@@ -279,15 +279,15 @@ const config = {
   listenHost: process.env.LISTEN_HOST_VALUE,
   listenPort: Number(process.env.SERVICE_PORT_VALUE),
   publicBaseUrl: `https://${process.env.HOST_VALUE}:${process.env.SERVICE_PORT_VALUE}`,
-  zellijWebBaseUrl: `https://${process.env.HOST_VALUE}:${process.env.ZELLIJ_PORT_VALUE}`,
   zellij: {
+        webPort: Number(process.env.ZELLIJ_PORT_VALUE),
         managedBinaryFile: process.env.ZELLIJ_BINARY_VALUE,
     configFile: process.env.ZELLIJ_CONFIG_VALUE,
     webTokenDatabaseFile: process.env.ZELLIJ_TOKEN_DB_VALUE,
     webCertificateFile: process.env.CERTIFICATE_FILE_VALUE,
     webPrivateKeyFile: process.env.PRIVATE_KEY_FILE_VALUE,
   },
-  openVsCode: {
+    openVSCode: {
     executableFile: process.env.OPENVSCODE_EXECUTABLE_VALUE,
     port: Number(process.env.OPENVSCODE_PORT_VALUE),
   },
@@ -326,7 +326,7 @@ const settings = new Map([
     ['web_sharing', 'web_sharing "on"'],
     ['show_startup_tips', 'show_startup_tips false'],
     ['show_release_notes', 'show_release_notes false'],
-    ['web_server_ip', 'web_server_ip "0.0.0.0"'],
+    ['web_server_ip', 'web_server_ip "127.0.0.1"'],
     ['web_server_port', `web_server_port ${process.env.ZELLIJ_PORT_VALUE}`],
     ['web_server_cert', `web_server_cert "${process.env.CERTIFICATE_FILE_VALUE}"`],
     ['web_server_key', `web_server_key "${process.env.PRIVATE_KEY_FILE_VALUE}"`],

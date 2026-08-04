@@ -431,7 +431,7 @@ export function App() {
                 >code-viewer</button>
                 <a
                   className="button-link editor-link"
-                  href={entry.openVsCodeUrl}
+                  href={entry.openVSCodeUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                 >编辑代码</a>

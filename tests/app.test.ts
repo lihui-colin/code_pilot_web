@@ -338,7 +338,7 @@ describe('MVP-1 routes', () => {
     const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
     const manualEntry = listing.json().entries.find((entry: { source: string }) => entry.source === 'manual');
     expect(manualEntry).toMatchObject({ name: 'external-repository', relativePath: external, markers: ['git'] });
-    expect(new URL(manualEntry.openVsCodeUrl).searchParams.get('folder')).toBe(external);
+    expect(new URL(manualEntry.openVSCodeUrl).searchParams.get('folder')).toBe(external);
 
     const removed = await app.inject({
       method: 'DELETE',
@@ -400,10 +400,10 @@ describe('MVP-1 routes', () => {
     });
     const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
     const repositoryEntry = listing.json().entries[0];
-    const openVsCodeUrl = new URL(repositoryEntry.openVsCodeUrl);
-    expect(openVsCodeUrl.origin).toBe('https://192.0.2.10:8024');
-    expect(openVsCodeUrl.pathname).toBe('/openvscode/');
-    expect(openVsCodeUrl.searchParams.get('folder')).toBe(path.join(root, 'repository'));
+    const openVSCodeUrl = new URL(repositoryEntry.openVSCodeUrl);
+    expect(openVSCodeUrl.origin).toBe('https://192.0.2.10:8024');
+    expect(openVSCodeUrl.pathname).toBe('/openvscode/');
+    expect(openVSCodeUrl.searchParams.get('folder')).toBe(path.join(root, 'repository'));
     const repositoryId = repositoryEntry.id as string;
     const response = await app.inject({
       method: 'POST',
@@ -418,7 +418,7 @@ describe('MVP-1 routes', () => {
     const listingWithSession = await app.inject({ method: 'GET', url: '/api/repositories' });
     expect(listingWithSession.json().entries[0].session).toMatchObject({
       name: sessionName,
-      webUrl: `https://192.0.2.10:8021/${sessionName}`,
+      webUrl: `https://192.0.2.10:8024/zellij/${sessionName}`,
     });
 
     const reused = await app.inject({
@@ -475,6 +475,63 @@ describe('MVP-1 routes', () => {
       upstreamUrl: 'http://127.0.0.1:8022',
       webUrl: expect.stringMatching(/^https:\/\/192\.0\.2\.10:8024\/viewer\/viewer_/u),
     });
+    await app.close();
+  });
+
+  it('serves Codex Chat from the management SPA even when a viewer cookie is active', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-route-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, 'static'), { recursive: true });
+    await writeFile(path.join(root, 'static/index.html'), '<div id="management-spa">Terminal Web</div>');
+    const viewerId = `viewer_${'v'.repeat(22)}`;
+    const viewerAdapter: ViewerProcessAdapter = {
+      start: async () => ({
+        pid: 321,
+        output: () => 'GDP_LISTEN_URL=http://127.0.0.1:8022/\n',
+        exited: () => false,
+        waitForExit: async () => undefined,
+      }),
+      healthy: async () => true,
+      stop: async () => undefined,
+    };
+    const viewerManager = new ViewerManager(viewerAdapter, 8022, 'https://192.0.2.10:8024');
+    Object.assign(viewerManager, {
+      active: {
+        instance: {
+          id: viewerId,
+          repositoryId: `dir_${'a'.repeat(43)}`,
+          pid: 321,
+          upstreamUrl: 'http://127.0.0.1:8022',
+          webUrl: `https://192.0.2.10:8024/viewer/${viewerId}/`,
+          createdAt: new Date().toISOString(),
+          lastAccessedAt: new Date().toISOString(),
+          status: 'running',
+        },
+        process: {
+          pid: 321,
+          output: () => '',
+          exited: () => false,
+          waitForExit: async () => undefined,
+        },
+      },
+    });
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      viewerManager,
+      staticRoot: path.join(root, 'static'),
+      https: false,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/codex-chat?repositoryId=dir_${'a'.repeat(43)}`,
+      headers: { cookie: `terminal_web_viewer=${viewerId}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('management-spa');
     await app.close();
   });
 

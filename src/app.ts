@@ -1,4 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyHttpProxy from '@fastify/http-proxy';
@@ -42,7 +44,7 @@ const codexChatSchema = z.object({
 const emptyBodySchema = z.object({}).strict();
 const noBodySchema = z.undefined();
 
-function openVsCodeWebUrl(config: AppConfig, repositoryRealPath: string): string {
+function openVSCodeWebUrl(config: AppConfig, repositoryRealPath: string): string {
   const url = new URL(config.publicBaseUrl);
   url.pathname = '/openvscode/';
   url.search = '';
@@ -51,10 +53,49 @@ function openVsCodeWebUrl(config: AppConfig, repositoryRealPath: string): string
   return url.toString();
 }
 
+async function proxyZellijHtml(destination: string, cookie: string | undefined) {
+  const url = new URL(destination);
+  const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
+  return new Promise<{ statusCode: number; headers: Record<string, string | string[]>; body: string }>((resolve, reject) => {
+    const upstream = request(url, {
+      headers: cookie ? { cookie } : undefined,
+      rejectUnauthorized: false,
+    }, response => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      response.on('data', (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > 1024 * 1024) {
+          response.destroy(new Error('Zellij Web HTML response is too large'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.once('error', reject);
+      response.once('end', () => {
+        const headers: Record<string, string | string[]> = {};
+        for (const [name, value] of Object.entries(response.headers)) {
+          if (value !== undefined && !['connection', 'content-length', 'keep-alive', 'transfer-encoding'].includes(name)) {
+            headers[name] = value;
+          }
+        }
+        resolve({
+          statusCode: response.statusCode ?? 502,
+          headers,
+          body: Buffer.concat(chunks).toString('utf8').replace('<base href="/" />', '<base href="/zellij/" />'),
+        });
+      });
+    });
+    upstream.once('error', reject);
+    upstream.end();
+  });
+}
+
 export interface AppDependencies {
   readiness: ReadinessResult;
   directoryIdSecret: Buffer | null;
   zellijExecutablePath?: string;
+  zellijWebUpstreamUrl?: string;
   codeViewerExecutablePath?: string;
   codexExecutablePath?: string;
   zellijAdapter?: ConstructorParameters<typeof ZellijService>[0];
@@ -84,9 +125,27 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     base: `http://127.0.0.1:${config.viewerPortRange.start}`,
     disableRequestLogging: true,
   });
-  const openVsCodePublicUrl = new URL(config.publicBaseUrl);
+  const zellijProxyUpstream = dependencies.zellijWebUpstreamUrl ?? `https://127.0.0.1:${config.zellijWebPort}`;
   await app.register(fastifyHttpProxy, {
-    upstream: `http://127.0.0.1:${config.openVsCodePort}`,
+    upstream: zellijProxyUpstream,
+    prefix: '/zellij',
+    rewritePrefix: '',
+    websocket: true,
+    disableRequestLogging: true,
+    undici: { connect: { rejectUnauthorized: false } },
+    wsClientOptions: { rejectUnauthorized: false },
+    handler: async (request, reply, destination, options) => {
+      const pathname = new URL(request.raw.url ?? '/', config.publicBaseUrl).pathname;
+      if (request.method === 'GET' && (/^\/zellij\/?$/u.test(pathname) || /^\/zellij\/[A-Za-z0-9_-]{1,64}\/?$/u.test(pathname))) {
+        const response = await proxyZellijHtml(new URL(destination, `${zellijProxyUpstream}/`).toString(), request.headers.cookie);
+        return reply.code(response.statusCode).headers(response.headers).send(response.body);
+      }
+      return reply.from(destination, options);
+    },
+  });
+  const openVSCodePublicUrl = new URL(config.publicBaseUrl);
+  await app.register(fastifyHttpProxy, {
+    upstream: `http://127.0.0.1:${config.openVSCodePort}`,
     prefix: '/openvscode',
     rewritePrefix: '/openvscode',
     websocket: true,
@@ -94,14 +153,14 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     replyOptions: {
       rewriteRequestHeaders: (_request, headers) => ({
         ...headers,
-        host: openVsCodePublicUrl.host,
-        'x-forwarded-host': openVsCodePublicUrl.host,
+        host: openVSCodePublicUrl.host,
+        'x-forwarded-host': openVSCodePublicUrl.host,
         'x-forwarded-proto': 'https',
       }),
     },
     wsClientOptions: {
       headers: {
-        host: openVsCodePublicUrl.host,
+        host: openVSCodePublicUrl.host,
         origin: config.publicBaseUrl,
       },
     },
@@ -118,7 +177,7 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     : null;
   const zellijService = new ZellijService(
     dependencies.zellijAdapter ?? new ExecFileZellijAdapter(dependencies.zellijExecutablePath),
-    config.zellijWebBaseUrl,
+    new URL('/zellij/', config.publicBaseUrl).toString().replace(/\/$/u, ''),
     app.log,
     dependencies.managedSessions ?? new Map(),
     path.join(path.dirname(config.directoryIdSecretFile), 'layouts'),
@@ -176,7 +235,7 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       const session = sessionsByName.get(sessionName);
       return {
         ...entry,
-        openVsCodeUrl: openVsCodeWebUrl(config, repository.realPath),
+        openVSCodeUrl: openVSCodeWebUrl(config, repository.realPath),
         viewer: viewer ? { id: viewer.id, status: viewer.status, webUrl: viewer.webUrl } : null,
         session: session ? { name: session.name, status: session.status, webUrl: session.webUrl } : null,
       };
@@ -373,8 +432,9 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
           `${prefixed[2] ?? '/'}${requestUrl.search}`,
         );
       }
+      const managementPage = requestUrl.pathname === '/' || requestUrl.pathname === '/codex-chat';
       const cookieViewerId = viewerIdFromCookie(request.headers.cookie);
-      if (requestUrl.pathname !== '/' && cookieViewerId && cookieViewerId === viewerManager.activeViewerId()) {
+      if (!managementPage && cookieViewerId && cookieViewerId === viewerManager.activeViewerId()) {
         return proxyViewerRequest(request, reply, viewerManager, cookieViewerId, `${requestUrl.pathname}${requestUrl.search}`);
       }
       if (request.method === 'GET') {

@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(process.argv[2] ?? process.cwd());
-const zellijWebBaseUrl = process.env.ZELLIJ_WEB_BASE_URL;
+const zellijWebProbeBaseUrl = process.env.ZELLIJ_WEB_BASE_URL;
 const results = [];
 
 function withoutZellijEnvironment(environment) {
@@ -330,12 +330,12 @@ async function probeCodeViewer() {
 }
 
 async function probeZellijWebUrl(sessionName) {
-  if (!zellijWebBaseUrl) {
+  if (!zellijWebProbeBaseUrl) {
     record('Zellij Web Session URL routes to the encoded Session path', 'skip', 'set ZELLIJ_WEB_BASE_URL to probe the running service');
     return;
   }
 
-  const sessionUrl = new URL(encodeURIComponent(sessionName), `${zellijWebBaseUrl.replace(/\/$/u, '')}/`);
+  const sessionUrl = new URL(encodeURIComponent(sessionName), `${zellijWebProbeBaseUrl.replace(/\/$/u, '')}/`);
   const response = await request(sessionUrl, {
     rejectUnauthorized: process.env.ZELLIJ_WEB_INSECURE !== '1',
   });

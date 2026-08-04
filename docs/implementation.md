@@ -75,8 +75,8 @@ terminal_web/
   "listenHost": "0.0.0.0",
   "listenPort": 8020,
   "publicBaseUrl": "https://192.0.2.10:8020",
-  "zellijWebBaseUrl": "https://192.0.2.10:8021",
   "zellij": {
+    "webPort": 8021,
     "managedBinaryFile": "data/bin/zellij",
     "configFile": "/home/user/.config/zellij/config.kdl",
     "webTokenDatabaseFile": "/home/user/.local/share/zellij/tokens.db",
@@ -235,4 +235,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ```
 
-管理应用默认监听 `0.0.0.0:8020` 并提供 HTTPS；Zellij Web 使用同主机的 `8021`，两者复用证书；code-viewer 使用 `8022` 且上游仍只能监听 `127.0.0.1`；独立 OpenVSCode Server 使用相同 workspace root 和默认 localhost 上游端口 `8023`，管理服务通过同源 HTTPS `/openvscode` 代理其 HTTP 与 WebSocket 流量。OpenVSCode 固定版本由独立下载脚本安装，上游端口由 `init.sh` 写入配置。管理应用不设置用户或密码，防火墙必须把公开端口限制在 VPN/公司内网。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij、OpenVSCode 和证书目录，但不能扩大为 root 权限。
+管理应用默认监听 `0.0.0.0:8020` 并作为唯一对外 HTTPS 入口；Zellij Web 使用 localhost `8021` 并通过 `/zellij` 代理，code-viewer 使用 localhost `8022` 并通过 `/viewer` 代理，独立 OpenVSCode Server 使用相同 workspace root 和 localhost `8023` 并通过 `/openvscode` 代理 HTTP 与 WebSocket 流量。Codex Chat 直接由管理服务 API 提供。OpenVSCode 固定版本由独立下载脚本安装，上游端口由 `init.sh` 写入配置。管理应用不设置用户或密码，防火墙只允许 VPN/公司内网访问管理端口。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij、OpenVSCode 和证书目录，但不能扩大为 root 权限。

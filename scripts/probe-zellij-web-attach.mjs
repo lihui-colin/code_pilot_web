@@ -127,7 +127,7 @@ function firstWebSocketFrame(baseUrl, pathname, cookie) {
 
 const config = JSON.parse(await readFile(configFile, 'utf8'));
 const token = config.zellij?.webToken?.value;
-const baseUrl = config.zellijWebBaseUrl;
+const baseUrl = new URL('/zellij/', config.publicBaseUrl).toString().replace(/\/$/u, '');
 if (typeof token !== 'string' || typeof baseUrl !== 'string') throw new Error('Zellij Web configuration is incomplete');
 
 const login = await request(baseUrl, '/command/login', { auth_token: token, remember_me: false });

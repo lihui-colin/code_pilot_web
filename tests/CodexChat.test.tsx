@@ -31,7 +31,7 @@ beforeEach(() => {
       markers: ['git', 'node'],
       viewer: null,
       session: null,
-      openVsCodeUrl: 'https://example.test/openvscode/',
+      openVSCodeUrl: 'https://example.test/openvscode/',
     }],
   });
   vi.mocked(api.getCodexStatus).mockResolvedValue({ available: true, version: 'codex-cli 0.146.0' });

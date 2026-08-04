@@ -11,7 +11,7 @@
 
 ## 配置
 
-复制 `config.example.json` 为 `config.json`，把 `publicBaseUrl` 改为实际 HTTPS 访问地址，例如 `https://192.168.1.20:8020`，并把 `zellijWebBaseUrl` 改为同一主机上的 Zellij Web HTTPS 地址，例如 `https://192.168.1.20:8021`。
+复制 `config.example.json` 为 `config.json`，把 `publicBaseUrl` 改为唯一对外 HTTPS 访问地址，例如 `https://192.168.1.20:8020`。Zellij Web 的 localhost 上游端口通过 `zellij.webPort` 配置。
 
 准备权限受限的目录 ID secret。管理页面不需要用户名、密码或 TLS 证书：
 
@@ -45,7 +45,7 @@ OpenVSCode 使用独立的 `scripts/download-openvscode.sh` 下载。该脚本�
 scripts/init.sh --host 192.168.1.20 --service-port 8020 --zellij-port 8021 --viewer-port 8022 --openvscode-port 8023 --non-interactive
 ```
 
-使用 `scripts/init.sh --help` 查看全部参数。脚本不会配置主机防火墙；仍需只允许 VPN 或公司内网访问管理端口和 Zellij Web 端口。OpenVSCode 与 code-viewer 上游端口只监听 localhost，不应加入防火墙允许列表。
+使用 `scripts/init.sh --help` 查看全部参数。脚本不会配置主机防火墙；只需允许 VPN 或公司内网访问管理端口。Zellij Web、OpenVSCode 与 code-viewer 上游端口只监听 localhost，不应加入防火墙允许列表。
 
 初始化完成后，显式启动后台服务：
 
@@ -94,9 +94,9 @@ cp config.example.json config.json
 ```
 
 - `publicBaseUrl` 必须使用 HTTPS，例如 `https://192.168.1.20:8020`。
-- `zellijWebBaseUrl` 必须使用 HTTPS，并与 `publicBaseUrl` 使用相同主机名或 IP，例如 `https://192.168.1.20:8021`。
+- `zellij.webPort` 默认是 localhost 上游端口 `8021`；浏览器通过 `publicBaseUrl/zellij/` 访问，不直接访问该端口。
 - `zellij.configFile` 和 `zellij.webTokenDatabaseFile` 必须指向运行服务用户的 Zellij 配置及数据目录。
-- `openVsCode.executableFile` 指向独立下载脚本安装的程序，`openVsCode.port` 默认是 localhost 上游端口 `8023`，且不能与管理、Zellij Web 或 code-viewer 端口冲突。浏览器通过管理入口的同源 HTTPS `/openvscode/` 访问，不直接访问该端口。
+- `openVSCode.executableFile` 指向独立下载脚本安装的程序，`openVSCode.port` 默认是 localhost 上游端口 `8023`，且不能与管理、Zellij Web 或 code-viewer 端口冲突。浏览器通过管理入口的同源 HTTPS `/openvscode/` 访问，不直接访问该端口。
 
 生成权限受限的目录 ID secret：
 
@@ -196,4 +196,4 @@ npm run probe:mvp1
 ZELLIJ_WEB_BASE_URL=https://127.0.0.1:8021 ZELLIJ_WEB_INSECURE=1 npm run probe:mvp0
 ```
 
-每个 Git 仓库固定对应一个服务端命名的 Zellij Session：不存在时可创建，存在时可直接打开或删除。仓库条目同时提供“code-viewer”“编辑代码”和“与 Codex 对话”；code-viewer `0.10.0` 使用 `127.0.0.1:8022`，浏览器通过管理服务的同源 viewer URL 访问；当前为单活动实例，切换仓库时会停止旧实例，不会公开 localhost 上游端口。“编辑代码”会打开后端根据管理服务 HTTPS 地址和已校验 repository 目录生成的 `/openvscode/` URL，并通过 `folder` 参数自动打开该仓库。OpenVSCode 使用相同 workspace root、只监听 localhost，Codex Webview 因此可在非 localhost 浏览器地址中运行于安全上下文。“与 Codex 对话”会打开独立的流式对话页面，并在已校验 repository 中使用固定参数运行 Codex CLI。
+每个 Git 仓库固定对应一个服务端命名的 Zellij Session：不存在时可创建，存在时可通过管理服务同源 `/zellij/<session>` 打开或删除。仓库条目同时提供“code-viewer”“编辑代码”和“与 Codex 对话”；code-viewer `0.10.0` 使用 `127.0.0.1:8022`，浏览器通过管理服务的同源 viewer URL 访问；当前为单活动实例，切换仓库时会停止旧实例，不会公开 localhost 上游端口。“编辑代码”会打开后端根据管理服务 HTTPS 地址和已校验 repository 目录生成的 `/openvscode/` URL，并通过 `folder` 参数自动打开该仓库。OpenVSCode 使用相同 workspace root、只监听 localhost，Codex Webview 因此可在非 localhost 浏览器地址中运行于安全上下文。“与 Codex 对话”由主服务提供流式页面和 API，并在已校验 repository 中使用固定参数运行 Codex CLI。外部只需开放管理服务端口。

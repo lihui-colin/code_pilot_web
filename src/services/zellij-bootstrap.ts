@@ -31,6 +31,7 @@ export async function ensureZellijWebSharing(configFile: string): Promise<boolea
   const lines = original.split(/\r?\n/u);
   const settings = [
     { pattern: /^web_sharing\s+"(?:on|off|disabled)"\s*(?:\/\/.*)?$/u, value: 'web_sharing "on"' },
+    { pattern: /^web_server_ip\s+"[^"]+"\s*(?:\/\/.*)?$/u, value: 'web_server_ip "127.0.0.1"' },
     { pattern: /^show_startup_tips\s+(?:true|false)\s*(?:\/\/.*)?$/u, value: 'show_startup_tips false' },
     { pattern: /^show_release_notes\s+(?:true|false)\s*(?:\/\/.*)?$/u, value: 'show_release_notes false' },
   ];
@@ -135,7 +136,7 @@ async function generateCertificate(certificateFile: string, privateKeyFile: stri
 }
 
 export async function ensureZellijWebCertificate(
-  zellijWebBaseUrl: string,
+  publicBaseUrl: string,
   certificateFile: string,
   privateKeyFile: string,
   dependencies: ZellijCertificateDependencies = {},
@@ -149,7 +150,7 @@ export async function ensureZellijWebCertificate(
   }
 
   const runner = dependencies.runOpenSsl ?? runOpenSsl;
-  const hostname = new URL(zellijWebBaseUrl).hostname.replace(/^\[|\]$/gu, '');
+  const hostname = new URL(publicBaseUrl).hostname.replace(/^\[|\]$/gu, '');
   if (certificateStat && privateKeyStat) {
     await validateCertificatePair(certificateFile, privateKeyFile, hostname, runner);
     return false;
@@ -196,7 +197,7 @@ export async function bootstrapZellij(
   const zellij = await ensureZellij(config.zellijManagedBinaryFile, dependencies.installer);
   const webSharingConfigured = await ensureZellijWebSharing(config.zellijConfigFile);
   const certificateCreated = await ensureZellijWebCertificate(
-    config.zellijWebBaseUrl,
+    config.publicBaseUrl,
     config.zellijWebCertificateFile,
     config.zellijWebPrivateKeyFile,
     dependencies.certificate,

@@ -65,7 +65,7 @@ export interface RepositoryListing {
 }
 
 export interface RepositoryEntryResponse extends DirectoryEntry {
-  openVsCodeUrl: string;
+  openVSCodeUrl: string;
 }
 
 export type RepositoryListingResponse = Omit<RepositoryListing, 'entries'> & {

@@ -10,8 +10,8 @@ const FileConfigSchema = z.object({
   listenHost: z.string().min(1).default('0.0.0.0'),
   listenPort: z.number().int().min(1).max(65_535).default(8020),
   publicBaseUrl: z.string().url(),
-  zellijWebBaseUrl: z.string().url(),
   zellij: z.object({
+    webPort: z.number().int().min(1).max(65_535).default(8021),
     managedBinaryFile: z.string().min(1),
     configFile: z.string().min(1),
     webTokenDatabaseFile: z.string().min(1),
@@ -22,7 +22,7 @@ const FileConfigSchema = z.object({
       value: z.string().uuid(),
     }).strict().optional(),
   }).strict(),
-  openVsCode: z.object({
+  openVSCode: z.object({
     executableFile: z.string().min(1),
     port: z.number().int().min(1).max(65_535).default(8023),
   }).strict(),
@@ -41,15 +41,15 @@ export interface AppConfig {
   listenHost: string;
   listenPort: number;
   publicBaseUrl: string;
-  zellijWebBaseUrl: string;
+  zellijWebPort: number;
   zellijManagedBinaryFile: string;
   zellijConfigFile: string;
   zellijWebTokenDatabaseFile: string;
   zellijWebCertificateFile: string;
   zellijWebPrivateKeyFile: string;
   zellijWebToken: ZellijWebToken | null;
-  openVsCodeExecutableFile: string;
-  openVsCodePort: number;
+  openVSCodeExecutableFile: string;
+  openVSCodePort: number;
   directoryIdSecretFile: string;
   viewerPortRange: { start: number; end: number };
   viewerIdleTimeoutMinutes: number;
@@ -120,13 +120,9 @@ export async function loadConfiguration(argv = process.argv.slice(2), cwd = proc
   const configDirectory = path.dirname(configPath);
   const raw = FileConfigSchema.parse(JSON.parse(await readFile(configPath, 'utf8')));
   const publicBaseUrl = validateBaseUrl(raw.publicBaseUrl, 'publicBaseUrl');
-  const zellijWebBaseUrl = validateBaseUrl(raw.zellijWebBaseUrl, 'zellijWebBaseUrl');
-  if (new URL(publicBaseUrl).hostname !== new URL(zellijWebBaseUrl).hostname) {
-    throw new Error('publicBaseUrl and zellijWebBaseUrl must use the same hostname');
-  }
-  const reservedPorts = new Set([raw.listenPort, Number(new URL(zellijWebBaseUrl).port || 443)]);
+  const reservedPorts = new Set([raw.listenPort, raw.zellij.webPort]);
   for (let port = raw.viewerPortRange.start; port <= raw.viewerPortRange.end; port += 1) reservedPorts.add(port);
-  if (reservedPorts.has(raw.openVsCode.port)) {
+  if (reservedPorts.has(raw.openVSCode.port)) {
     throw new Error('OpenVSCode port must be different from management, Zellij, and viewer ports');
   }
   const resolveConfigPath = (value: string) => path.resolve(configDirectory, value);
@@ -137,15 +133,15 @@ export async function loadConfiguration(argv = process.argv.slice(2), cwd = proc
       listenHost: raw.listenHost,
       listenPort: raw.listenPort,
       publicBaseUrl,
-      zellijWebBaseUrl,
+      zellijWebPort: raw.zellij.webPort,
       zellijManagedBinaryFile: resolveConfigPath(raw.zellij.managedBinaryFile),
       zellijConfigFile: resolveConfigPath(raw.zellij.configFile),
       zellijWebTokenDatabaseFile: resolveConfigPath(raw.zellij.webTokenDatabaseFile),
       zellijWebCertificateFile: resolveConfigPath(raw.zellij.webCertificateFile),
       zellijWebPrivateKeyFile: resolveConfigPath(raw.zellij.webPrivateKeyFile),
       zellijWebToken: raw.zellij.webToken ?? null,
-      openVsCodeExecutableFile: resolveConfigPath(raw.openVsCode.executableFile),
-      openVsCodePort: raw.openVsCode.port,
+      openVSCodeExecutableFile: resolveConfigPath(raw.openVSCode.executableFile),
+      openVSCodePort: raw.openVSCode.port,
       directoryIdSecretFile,
       viewerPortRange: raw.viewerPortRange,
       viewerIdleTimeoutMinutes: raw.viewerIdleTimeoutMinutes,

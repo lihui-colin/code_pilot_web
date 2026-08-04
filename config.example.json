@@ -2,22 +2,22 @@
   "listenHost": "0.0.0.0",
   "listenPort": 8020,
   "publicBaseUrl": "https://192.0.2.10:8020",
-  "zellijWebBaseUrl": "https://192.0.2.10:8021",
   "zellij": {
+    "webPort": 5021,
     "managedBinaryFile": "/home/user/.local/bin/zellij",
     "configFile": "/home/user/.config/zellij/config.kdl",
     "webTokenDatabaseFile": "/home/user/.local/share/zellij/tokens.db",
     "webCertificateFile": "data/zellij/certs/cert.pem",
     "webPrivateKeyFile": "data/zellij/certs/key.pem"
   },
-  "openVsCode": {
+  "openVSCode": {
     "executableFile": "data/openvscode/current/bin/openvscode-server",
-    "port": 8023
+    "port": 5023
   },
   "directoryIdSecretFile": "data/directory-id.secret",
   "viewerPortRange": {
-    "start": 8022,
-    "end": 8022
+    "start": 5022,
+    "end": 5022
   },
   "viewerIdleTimeoutMinutes": 60,
   "viewerMaxInstances": 1,
