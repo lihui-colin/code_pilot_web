@@ -32,6 +32,24 @@ interface DashboardState {
   zellijToken: ZellijWebTokenInfo | null;
 }
 
+const FOLDER_INITIAL_PATH_STORAGE_KEY = 'codepilot-web.folder-initial-path';
+
+function readRememberedFolderPath(): string {
+  try {
+    return window.localStorage.getItem(FOLDER_INITIAL_PATH_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function rememberFolderPath(value: string): void {
+  try {
+    window.localStorage.setItem(FOLDER_INITIAL_PATH_STORAGE_KEY, value);
+  } catch {
+    // Storage may be disabled by the browser; directory browsing still works.
+  }
+}
+
 export function App() {
   const [dashboard, setDashboard] = useState<DashboardState | null>(null);
   const [codexStatus, setCodexStatus] = useState<CodexCliStatus | null>(null);
@@ -235,16 +253,18 @@ export function App() {
     }
   }, []);
 
-  const loadRepositoryFolder = async (directoryId?: string, initialPath?: string) => {
+  const loadRepositoryFolder = async (directoryId?: string, initialPath?: string): Promise<boolean> => {
     setFolderPickerBusy(true);
     try {
       setFolderPicker(await getRepositoryFolders(directoryId, initialPath));
       setFolderPickerError(null);
       setError(null);
+      return true;
     } catch (caught) {
       const message = errorMessage(caught, '服务器目录加载失败');
       setFolderPickerError(message);
       setError(message);
+      return false;
     } finally {
       setFolderPickerBusy(false);
     }
@@ -252,7 +272,7 @@ export function App() {
 
   const openFolderPicker = async () => {
     setFolderPickerOpen(true);
-    setFolderInitialPath('');
+    setFolderInitialPath(readRememberedFolderPath());
     setFolderPickerError(null);
     await loadRepositoryFolder();
   };
@@ -265,7 +285,7 @@ export function App() {
       setFolderPickerError('请输入有效的服务器目录，不能包含 .. 路径段。');
       return;
     }
-    await loadRepositoryFolder(undefined, initialPath);
+    if (await loadRepositoryFolder(undefined, initialPath)) rememberFolderPath(enteredPath);
   };
 
   const selectRepositoryFolder = async (directoryId: string) => {

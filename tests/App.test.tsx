@@ -42,6 +42,7 @@ async function openTokenPanel() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage?.clear?.();
   vi.mocked(api.getReadiness).mockResolvedValue(readiness);
   vi.mocked(api.getCodexStatus).mockResolvedValue({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' });
   vi.mocked(api.getCodexActivity).mockResolvedValue({ runningRepositoryIds: [] });
@@ -389,6 +390,25 @@ describe('App', () => {
       'data01/home/lihui/projects',
     ));
     expect(await screen.findByText('projects')).toBeInTheDocument();
+  });
+
+  it('remembers the last successful initial directory', async () => {
+    vi.mocked(api.getRepositoryFolders).mockResolvedValue({
+      current: { id: `folder_${'i'.repeat(43)}`, name: 'projects', gitRepository: false },
+      parentId: null,
+      entries: [],
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加文件夹' }));
+    const input = await screen.findByRole('textbox', { name: '初始目录' });
+    fireEvent.change(input, { target: { value: '/data01/home/lihui/projects' } });
+    fireEvent.click(screen.getByRole('button', { name: '前往' }));
+    await waitFor(() => expect(screen.getByText('projects')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加文件夹' }));
+    expect(await screen.findByRole('textbox', { name: '初始目录' })).toHaveValue('/data01/home/lihui/projects');
   });
 
   it('removes a manually added repository without deleting files', async () => {
