@@ -172,7 +172,7 @@
 1. repository 条目的“与 Codex 对话”链接使用新标签页、`noopener noreferrer` 和编码后的 repository ID。
 2. 可用性检查固定执行 `codex --version`，使用参数数组、`shell: false`、5 秒超时和 64 KiB 输出上限。
 3. CLI 可用时状态接口返回脱敏版本并启用输入；不存在、不可执行、超时或退出失败时返回 unavailable，页面显示操作提示并禁用发送。
-4. 消息接口在建立响应流前再次检查 CLI；不可用时返回 `503 CODEX_CLI_UNAVAILABLE` 且不调用 Codex turn。
+4. 消息接口在启动后台 turn 前再次检查 CLI；不可用时返回 `503 CODEX_CLI_UNAVAILABLE` 且不调用 Codex turn。
 5. `/codex-chat` 只接受列表中仍然存在的 repository ID；用户消息和头像靠右，Codex 回复和头像靠左。“新对话”、repository 路径和返回入口默认隐藏在抽屉中，可通过菜单按钮打开，并可通过关闭按钮、遮罩和 Esc 关闭；桌面和移动布局均能完成发送、停止和新对话操作。
 6. “Add file”只列出当前 repository 内普通文件的 opaque ID、相对路径和大小；`.git`、依赖/构建目录、符号链接和超过 128 KiB 的文件不显示。
 7. 前端最多选择 8 个文件，显示可移除附件标签，并只提交 server-issued file ID；发送后的用户消息显示本次附件路径。
@@ -180,16 +180,21 @@
 9. 二进制、非严格 UTF-8、单文件超过 128 KiB、总计超过 512 KiB 和重复文件 ID 被拒绝，错误不包含文件绝对路径或内容。
 10. 请求只允许 `repositoryId`、可选 UUID `conversationId`、可选 `contextFileIds` 和 1 到 20000 字符的 `message`；路径、命令、参数、环境变量和额外字段被拒绝。
 11. 每次发送前通过 RepositoryService 重新执行 repository 真实路径和对应来源边界校验。
-12. 首次消息固定调用 `codex exec --json --color never --sandbox workspace-write --cd <repository> -`，包含校验后文件 JSON 的 prompt 只通过 stdin 发送，且 `shell: false`。
-13. 后续消息固定调用 `codex exec --json --color never --sandbox workspace-write resume <conversationId> -`。
-14. 只有 Codex 返回的合法 UUID 会被登记；conversation 只能由原 repository 继续，服务重启后旧 ID 不可继续。
-15. 同一 conversation 不允许同时运行两个 turn，新对话不复用旧 conversation ID。
-16. NDJSON 客户端可解析跨 chunk 和最后无换行的事件，并依次展示助手增量。
-17. 后端只转发 conversation、assistant delta、done 和脱敏 error，不返回 stderr、工具事件、usage、异常堆栈或原始失败详情。
+12. 首次消息固定调用 `codex exec --yolo --json --color never --sandbox workspace-write --cd <repository> -`，包含校验后文件 JSON 的 prompt 只通过 stdin 发送，且 `shell: false`。
+13. 后续消息固定调用 `codex exec --yolo --json --color never --sandbox workspace-write resume <conversationId> -`。
+14. 只有 Codex 返回的合法 UUID 会被登记；进程内已知 conversation 只能由原 repository 继续，服务重启后浏览器保存的合法 UUID 使用 Codex 原生 resume 恢复。
+15. 同一 repository 不允许同时运行两个 turn，新对话不复用旧 conversation ID。
+16. 消息接口返回 `202` 和后台对话快照；快照查询返回消息、conversation ID、状态、脱敏错误和更新时间。
+17. 后端不返回 Codex 原始 JSONL、stderr、工具事件、usage、异常堆栈或原始失败详情。
 18. 助手文本中的当前 repository 绝对路径被替换为相对根标记 `.`。
-19. 浏览器停止或连接关闭会终止整个 Codex 进程组；5 秒后仍未退出时升级为 `SIGKILL`。
+19. 浏览器关闭、刷新或连接断开不终止 Codex；显式停止会终止整个进程组，5 秒后仍未退出时升级为 `SIGKILL`。
 20. 30 分钟超时和 4 MiB stdout 超限会清理进程组并返回脱敏错误，stderr 保留量不超过 64 KiB且不返回浏览器。
 21. 管理服务关闭会取消所有活动 Codex turn，且不删除任何 Zellij Session。
+22. 再次进入同一 repository 时恢复服务端快照；运行中每秒轮询，任务完成后恢复完整助手文本。
+23. 管理服务重启后，本地 `running` 快照转换为已中断状态，保留消息和 conversation ID，下一条消息使用原生 resume。
+24. “新对话”在无运行中 turn 时清空服务端和浏览器快照；运行中请求返回冲突。
+25. Codex turn 成功完成后才持久化 repository ID 到 conversation ID；运行中、失败、停止和超时不写入新 ID。
+26. 管理服务重启后从状态文件恢复 conversation ID，页面无需依赖浏览器缓存即可显示可继续的会话，下一条消息固定使用 `codex exec ... resume <id> -`。
 
 ## MVP-4：生产化
 

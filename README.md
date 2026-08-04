@@ -141,7 +141,7 @@ node dist/server.js --config config.json --workspace-root /实际/workspace/路�
 
 在主页的 Git repository 条目中点击“与 Codex 对话”，会在新标签页打开独立对话页面。页面首先通过后台执行 `codex --version` 检测 CLI；检测成功后显示版本并启用输入，检测失败则禁用发送，并提示检查安装、可执行权限和后台服务用户的 `PATH`。输入框中的“Add file”可以搜索并选择当前 repository 内最多 8 个普通 UTF-8 文本文件，作为下一条消息的重点上下文；前端只提交服务端签发的文件 ID，不提交服务器路径。首条消息创建 conversation，后续消息在同一 repository 中继续；“新对话”会开始新的 conversation，“停止”会取消当前 turn。conversation 绑定只保存在管理服务内存中，因此服务重启后需要开始新对话。
 
-Codex 以该 repository 为工作目录，并使用固定的 `workspace-write` 沙箱参数运行，可以阅读和修改仓库文件、执行测试并流式返回助手文本。页面或 HTTP 连接关闭时，服务会停止对应的 Codex 进程组；Codex 响应不会把原始 stderr、工具事件和服务器绝对路径发送到浏览器。
+Codex 以该 repository 为工作目录，并使用服务端固定的 `--yolo` 参数运行，可以阅读和修改仓库文件、执行测试。`--yolo` 会跳过审批并绕过 Codex 沙箱，只应向受信任的 VPN 用户开放。页面或 HTTP 连接关闭时，未完成的 turn 会继续在管理服务后台运行；重新进入同一 repository 时恢复消息和运行状态。turn 成功完成后，服务端把 conversation ID 写入 `data/state.json`；管理服务重启后从该状态恢复，并使用当前 Codex 版本支持的 `codex exec --yolo ... resume <id> -` 继续会话。Codex 响应不会把原始 stderr、工具事件和服务器绝对路径发送到浏览器。
 
 在前台运行时按 `Ctrl+C` 停止服务。停止管理服务不会删除已存在的 Zellij Session。
 
@@ -158,6 +158,8 @@ npm run service:start -- /实际/workspace/路径
 ```bash
 npm run service:stop
 ```
+
+停止命令会依次终止管理服务、活动 Codex CLI、code-viewer、Zellij Web 和 OpenVSCode，并清理本项目的 PID/运行元数据；已有 Zellij Session 不会被删除。
 
 统一重启管理服务、Zellij Web、当前 code-viewer 和 OpenVSCode：
 

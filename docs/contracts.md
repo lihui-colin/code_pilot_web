@@ -455,7 +455,7 @@ repository 条目的“与 Codex 对话”链接必须在新标签页打开 `/co
 
 对话页面加载时还必须调用 `GET /api/codex/status`。后端使用 `execFile()`、参数数组 `['--version']`、`shell: false`、5 秒超时和 64 KiB 输出上限检查服务进程实际使用的 Codex 可执行文件。命令成功且 stdout 去除空白后匹配受限的 `codex-cli <version>` 格式时返回 `{ available: true, version: string }`；可执行文件不存在、不可执行、超时、退出非零或版本输出不匹配时返回 `{ available: false, version: null }`。原始错误和未匹配的命令输出不得返回浏览器或写入普通错误响应。
 
-页面只有在 `available` 为 `true` 时才允许发送消息。不可用时必须显示可理解的提示，要求检查 Codex CLI 安装、可执行权限和后台服务用户的 `PATH`。`POST /api/codex/messages` 在解析 repository 后、建立 NDJSON 响应流前必须再次执行同一检查；不可用时返回 `503 CODEX_CLI_UNAVAILABLE`，不得启动 Codex turn。
+页面只有在 `available` 为 `true` 时才允许发送消息。不可用时必须显示可理解的提示，要求检查 Codex CLI 安装、可执行权限和后台服务用户的 `PATH`。`POST /api/codex/messages` 在解析 repository 后、启动后台 turn 前必须再次执行同一检查；不可用时返回 `503 CODEX_CLI_UNAVAILABLE`，不得启动 Codex turn。
 
 `POST /api/codex/messages` 请求体严格为：
 
@@ -480,7 +480,7 @@ interface CodexChatRequest {
 
 ```typescript
 [
-  "exec", "--json", "--color", "never", "--sandbox", "workspace-write",
+  "exec", "--yolo", "--json", "--color", "never", "--sandbox", "workspace-write",
   "--cd", repositoryRealPath, "-"
 ]
 ```
@@ -489,14 +489,18 @@ interface CodexChatRequest {
 
 ```typescript
 [
-  "exec", "--json", "--color", "never", "--sandbox", "workspace-write",
+  "exec", "--yolo", "--json", "--color", "never", "--sandbox", "workspace-write",
   "resume", conversationId, "-"
 ]
 ```
 
-两种调用的子进程 `cwd` 都是重新校验后的 repository 真实路径，使用参数数组、`shell: false` 和独立进程组。浏览器不能控制上述参数。Codex CLI 必须返回符合 UUID 格式的 thread ID；服务端只在进程内保存 `conversationId -> repositoryId` 映射。继续请求只能使用服务端已登记且属于同一 repository 的 ID；未知、服务重启后失效或跨 repository 的 ID 产生 `CODEX_CONVERSATION_NOT_FOUND`，同一 conversation 已有请求运行时产生 `CODEX_CONVERSATION_BUSY`。由于响应流在执行 Codex 前已经建立，这些执行期错误通过脱敏 `error` 事件返回。
+两种调用都固定带 `--yolo`。该选项会跳过 Codex 审批并绕过其沙箱限制，即使参数数组中仍保留 `--sandbox workspace-write`，也不得把运行时视为受 workspace-write 沙箱保护；部署者必须信任能够访问管理页面并发起 Codex 对话的用户。子进程 `cwd` 是重新校验后的 repository 真实路径，使用参数数组、`shell: false` 和独立进程组，浏览器不能控制上述参数。Codex CLI 必须返回符合 UUID 格式的 thread ID。当前安装版本不支持顶层 `codex --resume <id>`；非交互恢复必须使用 `codex exec --yolo --json --color never --sandbox workspace-write resume <conversationId> -`。服务端进程内和状态文件中已知的 conversation ID 必须保持 repository 归属校验。
 
-成功响应状态为 `200`，Content-Type 为 `application/x-ndjson; charset=utf-8`，并禁用响应缓存和代理缓冲。每行只允许以下事件之一：
+服务端按 repository ID 保存进程内对话快照，包括 conversation ID、用户与助手消息、运行状态、脱敏错误和更新时间。浏览器关闭、刷新或网络断开不得取消后台 turn；只有显式停止、30 分钟超时、输出超限或管理服务关闭才终止进程组。同一 repository 同时只能有一个运行中的 turn。只有 Codex turn 成功完成并返回合法 thread ID 后，服务端才把 repository ID 到 conversation ID 的映射原子写入状态文件；运行中、失败、停止或超时的 turn 不得覆盖已持久化 ID。管理服务重启后从状态文件恢复该映射，页面无需依赖浏览器缓存即可获得可继续的 conversation ID。
+
+`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`。页面进入时先读取该快照，运行中每秒轮询一次；浏览器同时把不含服务器路径和文件内容的快照保存到 `localStorage`。管理服务重启后服务端快照为空时，页面使用本地快照恢复消息和 conversation ID；旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 Codex 原生 resume 继续该 conversation。
+
+`POST /api/codex/messages` 成功启动后台 turn 时返回 `202` 和启动后的对话快照。`POST /api/codex/conversations/:repositoryId/stop` 显式停止当前 turn；`DELETE /api/codex/conversations/:repositoryId` 仅在没有运行中 turn 时清空快照，供“新对话”使用。Codex 原始 JSONL 事件只在服务端用于更新快照，不直接返回浏览器；允许解析的事件形状仍为：
 
 ```typescript
 type CodexChatStreamEvent =
@@ -508,7 +512,7 @@ type CodexChatStreamEvent =
 
 服务端只从 Codex JSONL 的 `agent_message` 项提取助手文本，不转发原始事件、工具调用、usage、stderr 或原始失败详情。助手文本中出现的当前 repository 绝对路径替换为 `.`。流开始后的失败使用脱敏 `error` 事件表示；流开始前的 schema、Origin、repository 和就绪错误继续使用标准 JSON 错误响应。
 
-每次 Codex turn 最长运行 30 分钟，stdout 上限为 4 MiB，保留的 stderr 诊断上限为 64 KiB且不得返回前端。浏览器取消请求、HTTP 响应关闭、输出超限、超时或管理服务关闭时，必须先向 Codex 独立进程组发送 `SIGTERM`；5 秒后仍未退出则发送 `SIGKILL`。管理服务关闭时取消所有活动 Codex turn，但仍不得删除 Zellij Session。
+每次 Codex turn 最长运行 30 分钟，stdout 上限为 4 MiB，保留的 stderr 诊断上限为 64 KiB且不得返回前端。显式停止、输出超限、超时或管理服务关闭时，必须先向 Codex 独立进程组发送 `SIGTERM`；5 秒后仍未退出则发送 `SIGKILL`。浏览器取消请求或 HTTP 响应关闭不得终止后台 turn。管理服务关闭时取消所有活动 Codex turn，但仍不得删除 Zellij Session。
 
 ## 5. API 契约
 
@@ -532,8 +536,11 @@ type CodexChatStreamEvent =
 | `POST` | `/api/viewers` | `200` 或 `201` | 复用或创建 viewer |
 | `DELETE` | `/api/viewers/:id` | `204` | 停止 viewer |
 | `GET` | `/api/codex/status` | `200` | 检查后台服务能否调用 Codex CLI 并返回版本 |
+| `GET` | `/api/codex/conversations/:repositoryId` | `200` | 获取 repository 当前 Codex 对话快照 |
 | `GET` | `/api/repositories/:repositoryId/files` | `200` | 返回可作为 Codex 上下文的 repository 文件 opaque ID |
-| `POST` | `/api/codex/messages` | `200` 流 | 在已校验 repository 中创建或继续 Codex 对话 |
+| `POST` | `/api/codex/messages` | `202` | 在后台创建或继续 Codex 对话 |
+| `POST` | `/api/codex/conversations/:repositoryId/stop` | `202` | 停止 repository 当前运行的 Codex turn |
+| `DELETE` | `/api/codex/conversations/:repositoryId` | `204` | 清空 repository 当前 Codex 对话快照 |
 | `POST` | `/api/services/restart` | `202` | 重启管理、Zellij Web、code-viewer 和 OpenVSCode 服务 |
 
 `DELETE` 请求不接受请求体。`POST /api/services/restart` 只接受空 JSON 对象并拒绝额外字段。`GET /api/viewers` 按 `createdAt` 升序返回。
@@ -585,7 +592,7 @@ Fastify 为请求、查询和响应配置 schema；Zod 定义共享领域类型�
 
 管理应用不提供应用层认证，不要求用户名、密码、Bearer Token 或登录 Cookie，也不提供 `/api/me`。
 
-页面、API、Codex 流式响应、Zellij Web、viewer 和 OpenVSCode 代理必须全部通过 `publicBaseUrl` 同源 HTTPS 访问。Zellij Web 使用 `/zellij/<session>`，code-viewer 使用 `/viewer/<viewer_id>/`，OpenVSCode 使用 `/openvscode/`。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
+页面、API、Codex 后台对话、Zellij Web、viewer 和 OpenVSCode 代理必须全部通过 `publicBaseUrl` 同源 HTTPS 访问。Zellij Web 使用 `/zellij/<session>`，code-viewer 使用 `/viewer/<viewer_id>/`，OpenVSCode 使用 `/openvscode/`。所有写请求的 `Origin` 必须等于 `publicBaseUrl`。
 
 服务重启接口同样执行严格同源校验。前端不能提交 workspace、配置文件、端口、PID、命令、环境变量或服务列表。
 
@@ -603,10 +610,11 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "sessions": [],
   "viewers": [],
-  "repositories": []
+  "repositories": [],
+  "codexConversations": []
 }
 ```
 
@@ -626,7 +634,7 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 
 状态写入是写操作成功的一部分。外部操作成功但写入失败时返回 `500 STATE_WRITE_FAILED`，记录高优先级日志，并重新查询真实状态进行补偿。
 
-状态文件保存 managed Session 元数据、viewer 清理元数据和用户手动选择的规范化 repository 真实路径，不保存 Token、命令输出或其他秘密。版本 1 文件在读取后迁移为版本 2，已有 Session 元数据必须保留。
+状态文件保存 managed Session 元数据、viewer 清理元数据、用户手动选择的规范化 repository 真实路径，以及成功完成的 repository ID 到 Codex conversation ID 映射；不保存 Codex 消息、附件内容、Token、命令输出或其他秘密。版本 1 和版本 2 文件在读取后迁移为版本 3，已有 Session 和 repository 元数据必须保留。
 
 ### 7.3 恢复与退出
 
@@ -634,7 +642,9 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 
 首版不接管历史 viewer。历史 PID 只在同时验证命令和启动时间属于本服务时终止，随后清空 viewer 和端口记录。用户下次访问时重新创建。
 
-`scripts/stop-service.sh` 必须先验证 PID 文件指向本项目的管理服务，再发送 `SIGTERM`。在最多 10 秒的优雅退出等待期内，交互终端必须显示单行百分比和耗时进度，非交互输出必须至少每秒记录一次进度。服务提前退出时显示实际耗时并删除 PID 文件；超时后明确显示升级为 `SIGKILL`，且不得删除 Zellij Session。
+`scripts/start-service.sh` 必须以 `0600` 原子保存启动时已校验的配置文件和 workspace root。`scripts/stop-service.sh` 必须先验证 PID 文件指向本项目的管理服务，再发送 `SIGTERM`；管理服务的 Fastify close hook 必须停止所有 code-viewer 和活动 Codex CLI 进程组。在最多 10 秒的优雅退出等待期内，交互终端必须显示单行百分比和耗时进度，非交互输出必须至少每秒记录一次进度。管理进程退出后，停止脚本必须使用已保存的配置与 workspace root 调用统一 runtime cleanup，按进程身份和固定端口停止 Zellij Web、残留 code-viewer、OpenVSCode 和其他本项目托管后台进程。即使 PID 文件缺失或失效，只要运行元数据存在也必须执行该 cleanup。服务提前退出时显示实际耗时并删除 PID 与运行元数据；超时后明确显示升级为 `SIGKILL`。任何停止路径都不得删除 Zellij Session。
+
+`scripts/start-service.sh` 在启动管理进程前必须执行幂等的 support-service ensure：Zellij Web 或 OpenVSCode 端口空闲时启动对应服务；已由配置匹配的本项目进程监听时复用并重建 `0600` PID 文件；被无关进程占用时拒绝启动。该检查不要求管理端口或按需 code-viewer 端口空闲，因此既可用于单独启动管理服务，也可安全衔接统一重启流程。
 
 收到 `SIGTERM` 时：
 

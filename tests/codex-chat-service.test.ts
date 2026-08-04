@@ -203,7 +203,7 @@ describe('CodexChatService', () => {
 
     const request = adapter.execute.mock.calls[0]![0] as CodexExecutionRequest;
     expect(request.arguments_).toEqual([
-      'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write',
+      'exec', '--yolo', '--json', '--color', 'never', '--sandbox', 'workspace-write',
       '--cd', '/workspace/repository', '-',
     ]);
     expect(request.cwd).toBe('/workspace/repository');
@@ -246,7 +246,7 @@ describe('CodexChatService', () => {
 
     const request = adapter.execute.mock.calls[1]![0] as CodexExecutionRequest;
     expect(request.arguments_).toEqual([
-      'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write',
+      'exec', '--yolo', '--json', '--color', 'never', '--sandbox', 'workspace-write',
       'resume', threadId, '-',
     ]);
     await expect(service.send({
@@ -256,6 +256,110 @@ describe('CodexChatService', () => {
       message: 'Read another repository',
       onEvent: () => undefined,
     })).rejects.toMatchObject({ code: 'CODEX_CONVERSATION_NOT_FOUND' });
+  });
+
+  it('keeps a background snapshot running until explicitly stopped', async () => {
+    let executionRequest: CodexExecutionRequest | undefined;
+    const adapter: CodexProcessAdapter = {
+      checkAvailability: async () => ({ available: true, version: 'codex-cli 0.146.0' }),
+      execute: vi.fn(async request => {
+        executionRequest = request;
+        await new Promise<void>((_resolve, reject) => {
+          request.signal.addEventListener('abort', () => reject(Object.assign(new Error('stopped'), { name: 'AbortError' })), {
+            once: true,
+          });
+        });
+      }),
+    };
+    const service = new CodexChatService(adapter);
+    const execution = service.send({
+      repositoryId,
+      repositoryRealPath: '/workspace/repository',
+      message: 'Keep working',
+      onEvent: () => undefined,
+    });
+
+    expect(service.getConversation(repositoryId)).toMatchObject({
+      repositoryId,
+      status: 'running',
+      messages: [{ role: 'user', content: 'Keep working' }, { role: 'assistant', content: '' }],
+    });
+    expect(executionRequest).toBeDefined();
+    service.stopConversation(repositoryId);
+    await expect(execution).rejects.toMatchObject({ name: 'AbortError' });
+    expect(service.getConversation(repositoryId)).toMatchObject({
+      status: 'stopped',
+      messages: [{ role: 'user', content: 'Keep working' }, { role: 'assistant', content: '（本次响应已停止）' }],
+    });
+  });
+
+  it('uses Codex native resume for a valid conversation ID after service restart', async () => {
+    const adapter = adapterWith([
+      JSON.stringify({ type: 'thread.started', thread_id: threadId }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'answer', type: 'agent_message', text: 'Resumed' } }),
+    ]);
+    const service = new CodexChatService(adapter);
+
+    await service.send({
+      repositoryId,
+      repositoryRealPath: '/workspace/repository',
+      conversationId: threadId,
+      message: 'Continue after restart',
+      onEvent: () => undefined,
+    });
+
+    const request = adapter.execute.mock.calls[0]![0] as CodexExecutionRequest;
+    expect(request.arguments_).toEqual([
+      'exec', '--yolo', '--json', '--color', 'never', '--sandbox', 'workspace-write',
+      'resume', threadId, '-',
+    ]);
+  });
+
+  it('persists the repository conversation ID only after a successful turn', async () => {
+    const persisted: Array<Map<string, string>> = [];
+    const successfulAdapter = adapterWith([
+      JSON.stringify({ type: 'thread.started', thread_id: threadId }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'answer', type: 'agent_message', text: 'Done' } }),
+    ]);
+    const service = new CodexChatService(successfulAdapter, new Map(), async conversations => {
+      persisted.push(new Map(conversations));
+    });
+
+    await service.send({
+      repositoryId,
+      repositoryRealPath: '/workspace/repository',
+      message: 'Complete this turn',
+      onEvent: () => undefined,
+    });
+
+    expect(persisted).toEqual([new Map([[repositoryId, threadId]])]);
+    expect(service.getConversation(repositoryId)).toMatchObject({ conversationId: threadId, status: 'idle' });
+
+    const failedPersist = vi.fn(async () => undefined);
+    const failedService = new CodexChatService(adapterWith([
+      JSON.stringify({ type: 'thread.started', thread_id: threadId }),
+      JSON.stringify({ type: 'turn.failed' }),
+    ]), new Map(), failedPersist);
+    await expect(failedService.send({
+      repositoryId,
+      repositoryRealPath: '/workspace/repository',
+      message: 'Fail this turn',
+      onEvent: () => undefined,
+    })).rejects.toMatchObject({ code: 'CODEX_TURN_FAILED' });
+    expect(failedPersist).not.toHaveBeenCalled();
+  });
+
+  it('restores a persisted conversation ID without requiring browser state', () => {
+    const service = new CodexChatService(adapterWith([]), new Map([[repositoryId, threadId]]));
+
+    expect(service.getConversation(repositoryId)).toEqual({
+      repositoryId,
+      conversationId: threadId,
+      messages: [],
+      status: 'idle',
+      error: null,
+      updatedAt: '1970-01-01T00:00:00.000Z',
+    });
   });
 
   it('does not return raw Codex failure details', async () => {

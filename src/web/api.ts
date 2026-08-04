@@ -1,7 +1,7 @@
 import type {
   CodexChatRequest,
-  CodexChatStreamEvent,
   CodexCliStatus,
+  CodexConversationSnapshot,
   ReadinessResult,
   RepositoryContextFileListing,
   RepositoryFolderListing,
@@ -127,43 +127,32 @@ export function getRepositoryContextFiles(repositoryId: string): Promise<Reposit
   return getJson<RepositoryContextFileListing>(`/api/repositories/${encodeURIComponent(repositoryId)}/files`);
 }
 
-export async function streamCodexMessage(
-  request: CodexChatRequest,
-  onEvent: (event: CodexChatStreamEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const response = await fetch('/api/codex/messages', {
-    method: 'POST',
+export async function getCodexConversation(repositoryId: string): Promise<CodexConversationSnapshot | null> {
+  const result = await getJson<{ conversation: CodexConversationSnapshot | null }>(
+    `/api/codex/conversations/${encodeURIComponent(repositoryId)}`,
+  );
+  return result.conversation;
+}
+
+export async function startCodexMessage(request: CodexChatRequest): Promise<CodexConversationSnapshot> {
+  const result = await postJson<{ conversation: CodexConversationSnapshot }>('/api/codex/messages', request);
+  return result.conversation;
+}
+
+export async function stopCodexConversation(repositoryId: string): Promise<void> {
+  await postJson<{ status: 'stopping' }>(
+    `/api/codex/conversations/${encodeURIComponent(repositoryId)}/stop`,
+    {},
+  );
+}
+
+export async function clearCodexConversation(repositoryId: string): Promise<void> {
+  const response = await fetch(`/api/codex/conversations/${encodeURIComponent(repositoryId)}`, {
+    method: 'DELETE',
     credentials: 'same-origin',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request),
-    ...(signal ? { signal } : {}),
   });
   if (!response.ok) {
     const result = await response.json().catch(() => ({})) as ApiErrorBody;
     throw new Error(result.error?.message ?? `请求失败（HTTP ${response.status}）`);
   }
-  if (!response.body) throw new Error('浏览器不支持 Codex 流式响应');
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffered = '';
-  let streamError: string | null = null;
-  const consumeLine = (line: string) => {
-    if (!line.trim()) return;
-    const event = JSON.parse(line) as CodexChatStreamEvent;
-    onEvent(event);
-    if (event.type === 'error') streamError = event.message;
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    buffered += decoder.decode(value, { stream: !done });
-    const lines = buffered.split('\n');
-    buffered = lines.pop() ?? '';
-    for (const line of lines) consumeLine(line);
-    if (done) break;
-  }
-  consumeLine(buffered);
-  if (streamError) throw new Error(streamError);
 }

@@ -9,7 +9,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError, z } from 'zod';
 import type { AppConfig } from './config.js';
-import type { CodexChatStreamEvent, ReadinessResult } from './domain/types.js';
+import type { ReadinessResult } from './domain/types.js';
 import { ApiError } from './errors.js';
 import { CodexChatService, SpawnCodexProcessAdapter, type CodexChatServiceLike } from './services/codex-chat-service.js';
 import { RepositoryService } from './services/repository-service.js';
@@ -314,6 +314,12 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     await reply.code(result.created ? 201 : 200).send(result.instance);
   });
   app.get('/api/codex/status', async () => codexChatService.status());
+  app.get('/api/codex/conversations/:repositoryId', async request => {
+    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
+    const params = repositoryParamsSchema.parse(request.params);
+    await repositoryService.resolveRepository(params.repositoryId);
+    return { conversation: codexChatService.getConversation(params.repositoryId) };
+  });
   app.post('/api/codex/messages', async (request, reply) => {
     if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
     requireSameOrigin(request.headers.origin);
@@ -327,46 +333,38 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       body.repositoryId,
       body.contextFileIds ?? [],
     );
-    const controller = new AbortController();
-    let completed = false;
-    const onClose = () => {
-      if (!completed) controller.abort();
-    };
-
-    reply.hijack();
-    reply.raw.once('close', onClose);
-    reply.raw.writeHead(200, {
-      'cache-control': 'no-store',
-      connection: 'keep-alive',
-      'content-type': 'application/x-ndjson; charset=utf-8',
-      'x-accel-buffering': 'no',
+    const execution = codexChatService.send({
+      repositoryId: body.repositoryId,
+      repositoryRealPath: repository.realPath,
+      ...(body.conversationId ? { conversationId: body.conversationId } : {}),
+      ...(contextFiles.length > 0 ? { contextFiles } : {}),
+      message: body.message,
+      onEvent: () => undefined,
     });
-    reply.raw.flushHeaders();
-    const sendEvent = (event: CodexChatStreamEvent) => {
-      if (!reply.raw.destroyed) reply.raw.write(`${JSON.stringify(event)}\n`);
-    };
-    try {
-      await codexChatService.send({
-        repositoryId: body.repositoryId,
-        repositoryRealPath: repository.realPath,
-        ...(body.conversationId ? { conversationId: body.conversationId } : {}),
-        ...(contextFiles.length > 0 ? { contextFiles } : {}),
-        message: body.message,
-        signal: controller.signal,
-        onEvent: sendEvent,
-      });
-    } catch (error) {
+    void execution.catch(error => {
       if (!(error instanceof Error && error.name === 'AbortError')) {
-        const message = error instanceof ApiError ? error.message : 'Codex request failed';
-        request.log.warn({ code: error instanceof ApiError ? error.code : 'CODEX_UNAVAILABLE' }, 'Codex chat turn failed');
-        sendEvent({ type: 'error', message });
+        request.log.warn({ code: error instanceof ApiError ? error.code : 'CODEX_UNAVAILABLE' }, 'Codex background turn failed');
       }
-    } finally {
-      completed = true;
-      reply.raw.off('close', onClose);
-      if (!reply.raw.destroyed) reply.raw.end();
-    }
-    return reply;
+    });
+    return reply.code(202).send({ conversation: codexChatService.getConversation(body.repositoryId) });
+  });
+  app.post('/api/codex/conversations/:repositoryId/stop', async (request, reply) => {
+    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
+    requireSameOrigin(request.headers.origin);
+    emptyBodySchema.parse(request.body ?? {});
+    const params = repositoryParamsSchema.parse(request.params);
+    await repositoryService.resolveRepository(params.repositoryId);
+    codexChatService.stopConversation(params.repositoryId);
+    return reply.code(202).send({ status: 'stopping' });
+  });
+  app.delete('/api/codex/conversations/:repositoryId', async (request, reply) => {
+    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
+    requireSameOrigin(request.headers.origin);
+    noBodySchema.parse(request.body);
+    const params = repositoryParamsSchema.parse(request.params);
+    await repositoryService.resolveRepository(params.repositoryId);
+    await codexChatService.clearConversation(params.repositoryId);
+    return reply.code(204).send();
   });
   app.post('/api/zellij-token/regenerate', async (request, reply) => {
     requireSameOrigin(request.headers.origin);

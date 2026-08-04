@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { CodexCliStatus, RepositoryContextFile, RepositoryEntryResponse } from '../domain/types.js';
-import { getCodexStatus, getRepositories, getRepositoryContextFiles, streamCodexMessage } from './api.js';
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  contextFiles?: string[];
-}
+import type {
+  CodexChatMessageSnapshot,
+  CodexCliStatus,
+  CodexConversationSnapshot,
+  RepositoryContextFile,
+  RepositoryEntryResponse,
+} from '../domain/types.js';
+import {
+  clearCodexConversation,
+  getCodexConversation,
+  getCodexStatus,
+  getRepositories,
+  getRepositoryContextFiles,
+  startCodexMessage,
+  stopCodexConversation,
+} from './api.js';
 
 const suggestions = [
   '介绍这个项目的架构和主要模块',
@@ -15,15 +22,32 @@ const suggestions = [
   '运行相关测试并分析失败原因',
 ];
 
-function newMessageId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function conversationStorageKey(repositoryId: string): string {
+  return `codepilot.codex.${repositoryId}`;
+}
+
+function readStoredConversation(repositoryId: string): CodexConversationSnapshot | null {
+  try {
+    const value = window.localStorage?.getItem?.(conversationStorageKey(repositoryId));
+    if (!value) return null;
+    const snapshot = JSON.parse(value) as CodexConversationSnapshot;
+    return snapshot.status === 'running'
+      ? {
+          ...snapshot,
+          status: 'stopped',
+          error: '后台服务已重启，上次运行已中断；可以发送下一条消息继续该 Codex 会话。',
+        }
+      : snapshot;
+  } catch {
+    return null;
+  }
 }
 
 export function CodexChat() {
   const repositoryId = new URLSearchParams(window.location.search).get('repositoryId');
   const [repository, setRepository] = useState<RepositoryEntryResponse | null>(null);
   const [codexStatus, setCodexStatus] = useState<CodexCliStatus | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<CodexChatMessageSnapshot[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -36,8 +60,39 @@ export function CodexChat() {
   const [fileSearch, setFileSearch] = useState('');
   const [filesLoading, setFilesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const abortController = useRef<AbortController | null>(null);
   const messagesEnd = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<CodexChatMessageSnapshot[]>([]);
+  const conversationIdRef = useRef<string | null>(null);
+  const filePickerRef = useRef<HTMLElement | null>(null);
+  const filePickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const applySnapshot = (snapshot: CodexConversationSnapshot | null, preserveHistory = true) => {
+    const sameConversation = snapshot?.conversationId
+      && conversationIdRef.current
+      && snapshot.conversationId === conversationIdRef.current;
+    const nextMessages = snapshot && preserveHistory && sameConversation
+      ? [
+          ...messagesRef.current.filter(message => !snapshot.messages.some(candidate => candidate.id === message.id)),
+          ...snapshot.messages,
+        ]
+      : snapshot?.messages ?? [];
+    messagesRef.current = nextMessages;
+    conversationIdRef.current = snapshot?.conversationId ?? null;
+    setMessages(nextMessages);
+    setConversationId(conversationIdRef.current);
+    setRunning(snapshot?.status === 'running');
+    setError(snapshot?.error ?? null);
+    if (!repositoryId) return;
+    try {
+      if (snapshot) window.localStorage?.setItem?.(conversationStorageKey(repositoryId), JSON.stringify({
+        ...snapshot,
+        messages: nextMessages,
+      }));
+      else window.localStorage?.removeItem?.(conversationStorageKey(repositoryId));
+    } catch {
+      // Conversation recovery still works from the server when browser storage is unavailable.
+    }
+  };
 
   useEffect(() => {
     document.title = 'Codex 对话 · CodePilot Web';
@@ -46,19 +101,32 @@ export function CodexChat() {
       setLoading(false);
       return;
     }
-    void Promise.all([getRepositories(), getCodexStatus()]).then(([listing, status]) => {
+    void Promise.all([getRepositories(), getCodexStatus(), getCodexConversation(repositoryId)]).then(([listing, status, serverConversation]) => {
       const selected = listing.entries.find(entry => entry.id === repositoryId);
       if (!selected) throw new Error('仓库不存在或已经不可用');
       setRepository(selected);
       setCodexStatus(status);
+      const storedConversation = readStoredConversation(repositoryId);
+      const restoredConversation = serverConversation && storedConversation
+        && serverConversation.conversationId === storedConversation.conversationId
+        ? { ...serverConversation, messages: storedConversation.messages }
+        : serverConversation ?? storedConversation;
+      applySnapshot(restoredConversation);
       if (!status.available) {
         setError('服务器未检测到可用的 Codex CLI。请确认 codex 已安装、可执行，并已加入后台服务用户的 PATH，然后刷新页面。');
       }
     }).catch(caught => {
       setError(caught instanceof Error ? caught.message : '仓库加载失败');
     }).finally(() => setLoading(false));
-    return () => abortController.current?.abort();
   }, [repositoryId]);
+
+  useEffect(() => {
+    if (!repositoryId || !running) return;
+    const timer = window.setInterval(() => {
+      void getCodexConversation(repositoryId).then(applySnapshot).catch(() => undefined);
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [repositoryId, running]);
 
   useEffect(() => {
     if (typeof messagesEnd.current?.scrollIntoView === 'function') {
@@ -76,6 +144,18 @@ export function CodexChat() {
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [filePickerOpen, panelOpen]);
+
+  useEffect(() => {
+    if (!filePickerOpen) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (filePickerRef.current?.contains(target) || filePickerTriggerRef.current?.contains(target)) return;
+      setFilePickerOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
+  }, [filePickerOpen]);
 
   const openFilePicker = async () => {
     if (!repositoryId || running) return;
@@ -107,46 +187,21 @@ export function CodexChat() {
     const content = message.trim();
     if (!content || !repositoryId || !repository || !codexStatus?.available || running) return;
     const attachedFiles = selectedContextFiles;
-    const userMessage: ChatMessage = {
-      id: newMessageId('user'),
-      role: 'user',
-      content,
-      ...(attachedFiles.length > 0 ? { contextFiles: attachedFiles.map(file => file.relativePath) } : {}),
-    };
-    const assistantId = newMessageId('assistant');
-    setMessages(current => [...current, userMessage, { id: assistantId, role: 'assistant', content: '' }]);
     setDraft('');
     setSelectedContextFiles([]);
     setFilePickerOpen(false);
     setError(null);
     setRunning(true);
-    const controller = new AbortController();
-    abortController.current = controller;
     try {
-      await streamCodexMessage({
+      const snapshot = await startCodexMessage({
         repositoryId,
         ...(conversationId ? { conversationId } : {}),
         ...(attachedFiles.length > 0 ? { contextFileIds: attachedFiles.map(file => file.id) } : {}),
         message: content,
-      }, event => {
-        if (event.type === 'conversation') setConversationId(event.conversationId);
-        if (event.type === 'assistant_delta') {
-          setMessages(current => current.map(item => (
-            item.id === assistantId ? { ...item, content: `${item.content}${event.delta}` } : item
-          )));
-        }
-      }, controller.signal);
+      });
+      applySnapshot(snapshot);
     } catch (caught) {
-      if (caught instanceof Error && caught.name === 'AbortError') {
-        setMessages(current => current.map(item => (
-          item.id === assistantId && !item.content ? { ...item, content: '（本次响应已停止）' } : item
-        )));
-      } else {
-        setError(caught instanceof Error ? caught.message : 'Codex 请求失败');
-        setMessages(current => current.filter(item => item.id !== assistantId || item.content.length > 0));
-      }
-    } finally {
-      abortController.current = null;
+      setError(caught instanceof Error ? caught.message : 'Codex 请求失败');
       setRunning(false);
     }
   };
@@ -163,14 +218,30 @@ export function CodexChat() {
     }
   };
 
-  const startNewConversation = () => {
+  const startNewConversation = async () => {
     if (running) return;
-    setMessages([]);
-    setConversationId(null);
-    setSelectedContextFiles([]);
-    setFilePickerOpen(false);
-    setError(null);
-    setPanelOpen(false);
+    if (!repositoryId) return;
+    try {
+      await clearCodexConversation(repositoryId);
+      applySnapshot(null, false);
+      setSelectedContextFiles([]);
+      setFilePickerOpen(false);
+      setError(null);
+      setPanelOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '新对话创建失败');
+    }
+  };
+
+  const stop = async () => {
+    if (!repositoryId || !running) return;
+    try {
+      await stopCodexConversation(repositoryId);
+      const snapshot = await getCodexConversation(repositoryId);
+      applySnapshot(snapshot);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Codex 停止失败');
+    }
   };
 
   const normalizedFileSearch = fileSearch.trim().toLocaleLowerCase();
@@ -194,7 +265,7 @@ export function CodexChat() {
               <button type="button" aria-label="关闭对话面板" onClick={() => setPanelOpen(false)}>×</button>
             </div>
             <div className="chat-brand"><span>CODEPILOT</span><strong>Codex 对话</strong></div>
-            <button type="button" onClick={startNewConversation} disabled={running}>＋ 新对话</button>
+            <button type="button" onClick={() => void startNewConversation()} disabled={running}>＋ 新对话</button>
             <div className="chat-repository-card">
               <small>当前仓库</small>
               <strong>{repository?.name ?? (loading ? '加载中…' : '不可用')}</strong>
@@ -265,7 +336,7 @@ export function CodexChat() {
 
         <div className="chat-composer-wrap">
           {filePickerOpen && (
-            <section className="chat-file-picker" role="dialog" aria-label="选择上下文文件">
+            <section ref={filePickerRef} className="chat-file-picker" role="dialog" aria-label="选择上下文文件">
               <div className="chat-file-picker-heading">
                 <div><strong>Add file</strong><small>最多选择 8 个文本文件</small></div>
                 <button type="button" aria-label="关闭文件选择" onClick={() => setFilePickerOpen(false)}>×</button>
@@ -324,6 +395,7 @@ export function CodexChat() {
             <div className="chat-composer-footer">
               <div className="chat-composer-tools">
                 <button
+                  ref={filePickerTriggerRef}
                   type="button"
                   onClick={() => void openFilePicker()}
                   disabled={!repository || !codexStatus?.available || running}
@@ -331,7 +403,7 @@ export function CodexChat() {
                 <span>{selectedContextFiles.length > 0 ? `已选 ${selectedContextFiles.length}/8` : 'Enter 发送 · Shift+Enter 换行'}</span>
               </div>
               {running ? (
-                <button className="danger-button" type="button" onClick={() => abortController.current?.abort()}>停止</button>
+                <button className="danger-button" type="button" onClick={() => void stop()}>停止</button>
               ) : (
                 <button type="submit" disabled={!draft.trim() || !repository || !codexStatus?.available}>发送</button>
               )}

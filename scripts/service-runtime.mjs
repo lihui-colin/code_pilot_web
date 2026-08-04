@@ -330,14 +330,44 @@ async function startSupport(runtime) {
   }
 }
 
+async function ensureManagedListener(runtime, port, kind, pidFile, start) {
+  const pids = [...new Set(await listenerPids(port))];
+  if (pids.length === 0) {
+    await start(runtime);
+    return;
+  }
+  let managedPid;
+  for (const pid of pids) {
+    const actualKind = await processKind(pid, runtime);
+    if (actualKind !== kind) {
+      throw new Error(`port ${port} is occupied by an unrelated process (PID ${pid})`);
+    }
+    managedPid ??= pid;
+  }
+  if (managedPid) await writePidFile(pidFile, managedPid);
+}
+
+async function ensureSupport(runtime) {
+  await ensureManagedListener(runtime, runtime.zellijWebPort, 'zellij-web', zellijWebPidFile, startZellijWeb);
+  try {
+    await ensureManagedListener(runtime, runtime.openVSCodePort, 'openvscode', openVSCodePidFile, startOpenVsCode);
+  } catch (error) {
+    if ((await listenerPids(runtime.zellijWebPort)).length === 0) {
+      await rm(zellijWebPidFile, { force: true });
+    }
+    throw error;
+  }
+}
+
 async function main() {
   const [operation, configFile, workspaceRoot] = process.argv.slice(2);
-  if (!['cleanup', 'start-support'].includes(operation) || !configFile || !workspaceRoot) {
-    throw new Error('usage: service-runtime.mjs <cleanup|start-support> <config-file> <workspace-root>');
+  if (!['cleanup', 'start-support', 'ensure-support'].includes(operation) || !configFile || !workspaceRoot) {
+    throw new Error('usage: service-runtime.mjs <cleanup|start-support|ensure-support> <config-file> <workspace-root>');
   }
   const runtime = await loadRuntime(configFile, workspaceRoot);
   if (operation === 'cleanup') await cleanup(runtime);
-  else await startSupport(runtime);
+  else if (operation === 'start-support') await startSupport(runtime);
+  else await ensureSupport(runtime);
 }
 
 main().catch(error => {

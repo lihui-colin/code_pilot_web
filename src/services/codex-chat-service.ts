@@ -1,7 +1,12 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
-import type { CodexChatStreamEvent, CodexCliStatus } from '../domain/types.js';
+import type {
+  CodexChatMessageSnapshot,
+  CodexChatStreamEvent,
+  CodexCliStatus,
+  CodexConversationSnapshot,
+} from '../domain/types.js';
 import { ApiError } from '../errors.js';
 
 const MAX_STDOUT_BYTES = 4 * 1024 * 1024;
@@ -163,6 +168,9 @@ export interface CodexChatTurn {
 export interface CodexChatServiceLike {
   status(): Promise<CodexCliStatus>;
   send(turn: CodexChatTurn): Promise<void>;
+  getConversation(repositoryId: string): CodexConversationSnapshot | null;
+  clearConversation(repositoryId: string): Promise<void> | void;
+  stopConversation(repositoryId: string): void;
   close(): Promise<void>;
 }
 
@@ -203,19 +211,68 @@ function sanitizedAssistantText(text: string, repositoryRealPath: string): strin
 
 export class CodexChatService implements CodexChatServiceLike {
   private readonly conversations = new Map<string, string>();
+  private readonly persistedConversations: Map<string, string>;
   private readonly activeConversations = new Set<string>();
   private readonly activeControllers = new Set<AbortController>();
+  private readonly controllersByRepository = new Map<string, AbortController>();
+  private readonly snapshots = new Map<string, CodexConversationSnapshot>();
 
-  constructor(private readonly adapter: CodexProcessAdapter) {}
+  constructor(
+    private readonly adapter: CodexProcessAdapter,
+    persistedConversations: ReadonlyMap<string, string> = new Map(),
+    private readonly persistConversations: (conversations: ReadonlyMap<string, string>) => Promise<void> = async () => undefined,
+  ) {
+    this.persistedConversations = new Map(persistedConversations);
+    for (const [repositoryId, conversationId] of persistedConversations) {
+      this.conversations.set(conversationId, repositoryId);
+    }
+  }
 
   status(): Promise<CodexCliStatus> {
     return this.adapter.checkAvailability();
   }
 
+  getConversation(repositoryId: string): CodexConversationSnapshot | null {
+    const snapshot = this.snapshots.get(repositoryId);
+    if (snapshot) return structuredClone(snapshot);
+    const conversationId = this.persistedConversations.get(repositoryId);
+    return conversationId ? {
+      repositoryId,
+      conversationId,
+      messages: [],
+      status: 'idle',
+      error: null,
+      updatedAt: new Date(0).toISOString(),
+    } : null;
+  }
+
+  async clearConversation(repositoryId: string): Promise<void> {
+    if (this.controllersByRepository.has(repositoryId)) {
+      throw new ApiError(409, 'CODEX_CONVERSATION_BUSY', 'Codex is already responding in this conversation');
+    }
+    const conversationId = this.snapshots.get(repositoryId)?.conversationId;
+    if (conversationId) this.conversations.delete(conversationId);
+    this.snapshots.delete(repositoryId);
+    const persistedConversationId = this.persistedConversations.get(repositoryId);
+    if (persistedConversationId) this.conversations.delete(persistedConversationId);
+    if (this.persistedConversations.delete(repositoryId)) {
+      await this.persistConversations(this.persistedConversations);
+    }
+  }
+
+  stopConversation(repositoryId: string): void {
+    const controller = this.controllersByRepository.get(repositoryId);
+    if (!controller) throw new ApiError(409, 'CODEX_CONVERSATION_NOT_RUNNING', 'Codex conversation is not running');
+    controller.abort();
+  }
+
   async send(turn: CodexChatTurn): Promise<void> {
+    if (this.controllersByRepository.has(turn.repositoryId)) {
+      throw new ApiError(409, 'CODEX_CONVERSATION_BUSY', 'Codex is already responding in this conversation');
+    }
     if (turn.conversationId) {
       const repositoryId = this.conversations.get(turn.conversationId);
-      if (repositoryId !== turn.repositoryId) {
+      if (repositoryId && repositoryId !== turn.repositoryId) {
         throw new ApiError(404, 'CODEX_CONVERSATION_NOT_FOUND', 'Codex conversation was not found');
       }
       if (this.activeConversations.has(turn.conversationId)) {
@@ -228,16 +285,44 @@ export class CodexChatService implements CodexChatServiceLike {
     const forwardAbort = () => controller.abort();
     turn.signal?.addEventListener('abort', forwardAbort, { once: true });
     this.activeControllers.add(controller);
+    this.controllersByRepository.set(turn.repositoryId, controller);
     let conversationId = turn.conversationId;
     let turnFailed = false;
     const assistantTextByItem = new Map<string, string>();
+    const currentSnapshot = this.snapshots.get(turn.repositoryId);
+    const userMessage: CodexChatMessageSnapshot = {
+      id: `user-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      role: 'user',
+      content: turn.message,
+      ...(turn.contextFiles?.length
+        ? { contextFiles: turn.contextFiles.map(file => file.relativePath) }
+        : {}),
+    };
+    const assistantMessage: CodexChatMessageSnapshot = {
+      id: `assistant-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      role: 'assistant',
+      content: '',
+    };
+    const snapshot: CodexConversationSnapshot = {
+      repositoryId: turn.repositoryId,
+      conversationId: conversationId ?? null,
+      messages: [...(currentSnapshot?.messages ?? []), userMessage, assistantMessage],
+      status: 'running',
+      error: null,
+      updatedAt: new Date().toISOString(),
+    };
+    this.snapshots.set(turn.repositoryId, snapshot);
+    const updateSnapshot = () => {
+      snapshot.conversationId = conversationId ?? null;
+      snapshot.updatedAt = new Date().toISOString();
+    };
     const arguments_ = turn.conversationId
       ? [
-          'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write',
+          'exec', '--yolo', '--json', '--color', 'never', '--sandbox', 'workspace-write',
           'resume', turn.conversationId, '-',
         ]
       : [
-          'exec', '--json', '--color', 'never', '--sandbox', 'workspace-write',
+          'exec', '--yolo', '--json', '--color', 'never', '--sandbox', 'workspace-write',
           '--cd', turn.repositoryRealPath, '-',
         ];
 
@@ -263,6 +348,7 @@ export class CodexChatService implements CodexChatServiceLike {
             conversationId = event.thread_id;
             this.conversations.set(event.thread_id, turn.repositoryId);
             this.activeConversations.add(event.thread_id);
+            updateSnapshot();
             turn.onEvent({ type: 'conversation', conversationId: event.thread_id });
             return;
           }
@@ -278,19 +364,42 @@ export class CodexChatService implements CodexChatServiceLike {
             const previous = assistantTextByItem.get(itemId) ?? '';
             const delta = text.startsWith(previous) ? text.slice(previous.length) : text;
             assistantTextByItem.set(itemId, text);
-            if (delta) turn.onEvent({ type: 'assistant_delta', delta });
+            if (delta) {
+              assistantMessage.content = `${assistantMessage.content}${delta}`;
+              updateSnapshot();
+              turn.onEvent({ type: 'assistant_delta', delta });
+            }
           }
         },
       });
       if (!conversationId) throw new ApiError(502, 'CODEX_PROTOCOL_ERROR', 'Codex did not start a conversation');
       if (turnFailed) throw new ApiError(502, 'CODEX_TURN_FAILED', 'Codex could not complete the request');
+      snapshot.status = 'idle';
+      updateSnapshot();
+      this.persistedConversations.set(turn.repositoryId, conversationId);
+      await this.persistConversations(this.persistedConversations);
       turn.onEvent({ type: 'done' });
     } catch (error) {
-      if (error instanceof ApiError || (error instanceof Error && error.name === 'AbortError')) throw error;
-      throw new ApiError(502, 'CODEX_UNAVAILABLE', 'Codex is temporarily unavailable');
+      if (error instanceof Error && error.name === 'AbortError') {
+        snapshot.status = 'stopped';
+        if (!assistantMessage.content) assistantMessage.content = '（本次响应已停止）';
+        updateSnapshot();
+        throw error;
+      }
+      const apiError = error instanceof ApiError
+        ? error
+        : new ApiError(502, 'CODEX_UNAVAILABLE', 'Codex is temporarily unavailable');
+      snapshot.status = 'failed';
+      snapshot.error = apiError.message;
+      if (!assistantMessage.content) {
+        snapshot.messages = snapshot.messages.filter(message => message.id !== assistantMessage.id);
+      }
+      updateSnapshot();
+      throw apiError;
     } finally {
       if (conversationId) this.activeConversations.delete(conversationId);
       this.activeControllers.delete(controller);
+      this.controllersByRepository.delete(turn.repositoryId);
       turn.signal?.removeEventListener('abort', forwardAbort);
     }
   }

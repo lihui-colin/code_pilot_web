@@ -97,13 +97,13 @@ node dist/server.js --workspace-root /home/lihui/projects
 
 ## Codex 对话体验
 
-每个 Git repository 条目提供“与 Codex 对话”链接，在新标签页打开独立的 `/codex-chat` 页面。页面加载时先检查后台服务能否调用 Codex CLI；可用时展示版本并启用输入，不可用时禁用发送并提示检查安装、可执行权限和后台服务用户的 `PATH`。用户发送的消息和头像靠右显示，Codex 回复和头像靠左显示。“新对话”、repository 路径、返回首页和运行信息放在默认隐藏的抽屉面板中，通过顶部菜单按钮打开，并支持遮罩和 Esc 关闭；主对话区域始终占满可用宽度。消息输入框提供“Add file”，从服务端列出的当前 repository 普通文本文件中最多选择 8 个作为本次消息的限定上下文；已选文件以可移除标签展示，发送后也显示在用户消息中。页面展示流式响应状态和停止操作；支持 Enter 发送、Shift+Enter 换行，并适配桌面和移动浏览器。
+每个 Git repository 条目提供“与 Codex 对话”链接，在新标签页打开独立的 `/codex-chat` 页面。页面加载时先检查后台服务能否调用 Codex CLI；可用时展示版本并启用输入，不可用时禁用发送并提示检查安装、可执行权限和后台服务用户的 `PATH`。用户发送的消息和头像靠右显示，Codex 回复和头像靠左显示。“新对话”、repository 路径、返回首页和运行信息放在默认隐藏的抽屉面板中，通过顶部菜单按钮打开，并支持遮罩和 Esc 关闭；主对话区域始终占满可用宽度。消息输入框提供“Add file”，从服务端列出的当前 repository 普通文本文件中最多选择 8 个作为本次消息的限定上下文；已选文件以可移除标签展示，发送后也显示在用户消息中。页面展示后台响应状态和停止操作；关闭或刷新页面时未完成的 Codex turn 继续在管理服务后台运行，再次进入同一 repository 时恢复消息、conversation ID 和运行状态。管理服务重启后使用浏览器安全快照恢复历史，并通过 Codex 原生 resume 继续会话。支持 Enter 发送、Shift+Enter 换行，并适配桌面和移动浏览器。
 
-用户只提交 repository ID、自然语言消息和服务端签发的上下文文件 ID。服务端重新解析 repository 和每个文件的真实路径并执行对应来源的路径边界校验，然后在该 repository 中以固定的 `workspace-write` 沙箱参数运行 Codex CLI。用户不能从浏览器提交目录、绝对路径、文件路径、可执行文件、命令参数、环境变量或 Codex 配置。
+用户只提交 repository ID、自然语言消息和服务端签发的上下文文件 ID。服务端重新解析 repository 和每个文件的真实路径并执行对应来源的路径边界校验，然后在该 repository 中使用服务端固定的 `--yolo` 参数运行 Codex CLI。`--yolo` 会跳过审批并绕过 Codex 沙箱，因此该入口只适用于受信任的 VPN 用户。用户不能从浏览器提交目录、绝对路径、文件路径、可执行文件、命令参数、环境变量或 Codex 配置。
 
-首条消息创建由 Codex 返回的 conversation ID；后续消息只能继续当前服务进程已经登记、且属于同一 repository 的 conversation。新对话会清空页面消息并重新创建 conversation。页面关闭、用户点击停止、管理服务关闭、30 分钟超时或输出超过限制时，后端必须清理该次 Codex 进程组。
+首条消息创建由 Codex 返回的 conversation ID；后续消息使用 Codex 原生 resume 继续 conversation。新对话会清空页面和服务端快照并重新创建 conversation。页面关闭不得清理 Codex 进程组；只有用户点击停止、管理服务关闭、30 分钟超时或输出超过限制时，后端才清理该次 Codex 进程组。
 
-Codex 流式响应只包含 conversation ID、助手文本、完成状态和脱敏错误，不展示原始工具事件、标准错误、服务器绝对路径或异常堆栈。
+Codex 对话快照只包含 conversation ID、用户与助手文本、运行状态和脱敏错误，不展示原始工具事件、标准错误、服务器绝对路径、附件内容或异常堆栈。
 
 ## 管理页面
 

@@ -24,38 +24,53 @@ const stateV2Schema = z.object({
   repositories: z.array(z.string().min(1)),
 }).strict();
 
-const stateSchema = z.union([stateV1Schema, stateV2Schema]);
+const codexConversationStateSchema = z.object({
+  repositoryId: z.string().regex(/^dir_[A-Za-z0-9_-]{43}$/u),
+  conversationId: z.uuid(),
+}).strict();
+
+const stateV3Schema = z.object({
+  version: z.literal(3),
+  sessions: z.array(sessionStateSchema),
+  viewers: z.array(z.unknown()),
+  repositories: z.array(z.string().min(1)),
+  codexConversations: z.array(codexConversationStateSchema),
+}).strict();
+
+const stateSchema = z.union([stateV1Schema, stateV2Schema, stateV3Schema]);
 
 interface StateFile {
-  version: 2;
+  version: 3;
   sessions: Array<ManagedSessionMetadata & { name: string }>;
   viewers: unknown[];
   repositories: string[];
+  codexConversations: Array<{ repositoryId: string; conversationId: string }>;
 }
 
 export class StateStore {
   private writeQueue = Promise.resolve();
-  private state: StateFile = { version: 2, sessions: [], viewers: [], repositories: [] };
+  private state: StateFile = { version: 3, sessions: [], viewers: [], repositories: [], codexConversations: [] };
 
   constructor(private readonly stateFile = path.resolve('data/state.json')) {}
 
   async initialize(actualSessionNames: readonly string[] | null): Promise<Map<string, ManagedSessionMetadata>> {
     const loaded = await this.read();
     const state: StateFile = {
-      version: 2,
+      version: 3,
       sessions: loaded.sessions,
       viewers: loaded.viewers,
-      repositories: loaded.version === 2 ? loaded.repositories : [],
+      repositories: loaded.version === 2 || loaded.version === 3 ? loaded.repositories : [],
+      codexConversations: loaded.version === 3 ? loaded.codexConversations : [],
     };
     if (actualSessionNames === null) {
       this.state = state;
-      if (loaded.version === 1) await this.write(this.state);
+      if (loaded.version !== 3) await this.write(this.state);
       return new Map(state.sessions.map(({ name, ...metadata }) => [name, metadata]));
     }
     const actualNames = new Set(actualSessionNames);
     const sessions = state.sessions.filter(session => actualNames.has(session.name));
     this.state = { ...state, sessions, viewers: [] };
-    if (loaded.version === 1 || sessions.length !== state.sessions.length || state.viewers.length > 0) {
+    if (loaded.version !== 3 || sessions.length !== state.sessions.length || state.viewers.length > 0) {
       await this.write(this.state);
     }
     return new Map(sessions.map(({ name, ...metadata }) => [name, metadata]));
@@ -63,6 +78,10 @@ export class StateStore {
 
   repositoryPaths(): readonly string[] {
     return [...this.state.repositories];
+  }
+
+  codexConversations(): ReadonlyMap<string, string> {
+    return new Map(this.state.codexConversations.map(entry => [entry.repositoryId, entry.conversationId]));
   }
 
   persist(sessions: ReadonlyMap<string, ManagedSessionMetadata>): Promise<void> {
@@ -81,6 +100,15 @@ export class StateStore {
     }));
   }
 
+  persistCodexConversations(conversations: ReadonlyMap<string, string>): Promise<void> {
+    return this.enqueue(state => ({
+      ...state,
+      codexConversations: [...conversations.entries()]
+        .map(([repositoryId, conversationId]) => ({ repositoryId, conversationId }))
+        .sort((left, right) => Buffer.compare(Buffer.from(left.repositoryId), Buffer.from(right.repositoryId))),
+    }));
+  }
+
   private enqueue(update: (state: StateFile) => StateFile): Promise<void> {
     const operation = this.writeQueue.then(async () => {
       const next = update(this.state);
@@ -96,7 +124,7 @@ export class StateStore {
       return stateSchema.parse(JSON.parse(await readFile(this.stateFile, 'utf8')));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { version: 2, sessions: [], viewers: [], repositories: [] };
+        return { version: 3, sessions: [], viewers: [], repositories: [], codexConversations: [] };
       }
       throw error;
     }

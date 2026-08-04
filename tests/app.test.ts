@@ -34,7 +34,7 @@ afterEach(async () => {
 });
 
 describe('MVP-1 routes', () => {
-  it('streams a Codex conversation for a validated repository ID', async () => {
+  it('starts a background Codex conversation for a validated repository ID', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-route-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
@@ -50,6 +50,9 @@ describe('MVP-1 routes', () => {
           turn.onEvent({ type: 'assistant_delta', delta: 'Hello from Codex' });
           turn.onEvent({ type: 'done' });
         },
+        getConversation: () => null,
+        clearConversation: () => undefined,
+        stopConversation: () => undefined,
         close: async () => undefined,
       },
       staticRoot: false,
@@ -66,13 +69,8 @@ describe('MVP-1 routes', () => {
       payload: { repositoryId, message: 'Hello' },
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.headers['content-type']).toContain('application/x-ndjson');
-    expect(response.body.trim().split('\n').map(line => JSON.parse(line))).toEqual([
-      { type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' },
-      { type: 'assistant_delta', delta: 'Hello from Codex' },
-      { type: 'done' },
-    ]);
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ conversation: null });
     expect(receivedPath).toBe(path.join(root, 'repository'));
     await app.close();
   });
@@ -94,6 +92,9 @@ describe('MVP-1 routes', () => {
           turn.onEvent({ type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' });
           turn.onEvent({ type: 'done' });
         },
+        getConversation: () => null,
+        clearConversation: () => undefined,
+        stopConversation: () => undefined,
         close: async () => undefined,
       },
       staticRoot: false,
@@ -117,11 +118,65 @@ describe('MVP-1 routes', () => {
       },
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(202);
     expect(receivedContext).toEqual([{
       relativePath: 'src/context.ts',
       content: 'export const context = true;\n',
     }]);
+    await app.close();
+  });
+
+  it('gets, stops, and clears a repository Codex conversation', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-lifecycle-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
+    let stoppedRepositoryId = '';
+    let clearedRepositoryId = '';
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      codexChatService: {
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0' }),
+        send: async () => undefined,
+        getConversation: repositoryId => ({
+          repositoryId,
+          conversationId: '123e4567-e89b-42d3-a456-426614174000',
+          messages: [{ id: 'user-1', role: 'user', content: 'Hello' }],
+          status: 'running',
+          error: null,
+          updatedAt: '2026-08-04T00:00:00.000Z',
+        }),
+        stopConversation: repositoryId => { stoppedRepositoryId = repositoryId; },
+        clearConversation: repositoryId => { clearedRepositoryId = repositoryId; },
+        close: async () => undefined,
+      },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+    const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
+    const repositoryId = listing.json().entries[0].id as string;
+
+    const snapshot = await app.inject({ method: 'GET', url: `/api/codex/conversations/${repositoryId}` });
+    expect(snapshot.statusCode).toBe(200);
+    expect(snapshot.json().conversation).toMatchObject({ repositoryId, status: 'running' });
+
+    const stopped = await app.inject({
+      method: 'POST',
+      url: `/api/codex/conversations/${repositoryId}/stop`,
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: {},
+    });
+    expect(stopped.statusCode).toBe(202);
+    expect(stoppedRepositoryId).toBe(repositoryId);
+
+    const cleared = await app.inject({
+      method: 'DELETE',
+      url: `/api/codex/conversations/${repositoryId}`,
+      headers: { origin: 'https://192.0.2.10:8024' },
+    });
+    expect(cleared.statusCode).toBe(204);
+    expect(clearedRepositoryId).toBe(repositoryId);
     await app.close();
   });
 
@@ -136,6 +191,9 @@ describe('MVP-1 routes', () => {
       codexChatService: {
         status: async () => ({ available: false, version: null }),
         send: async () => { sends += 1; },
+        getConversation: () => null,
+        clearConversation: () => undefined,
+        stopConversation: () => undefined,
         close: async () => undefined,
       },
       staticRoot: false,

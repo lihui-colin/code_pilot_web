@@ -28,7 +28,6 @@ fi
 
 echo "[$(date -Iseconds)] Restarting Terminal Web support services"
 "$project_root/scripts/stop-service.sh"
-node "$project_root/scripts/service-runtime.mjs" cleanup "$config_file" "$workspace_root"
 
 if ! node "$project_root/scripts/service-runtime.mjs" start-support "$config_file" "$workspace_root"; then
     node "$project_root/scripts/service-runtime.mjs" cleanup "$config_file" "$workspace_root" || true

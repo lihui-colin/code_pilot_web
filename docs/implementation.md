@@ -203,14 +203,15 @@ terminal_web/
 - repository 条目中的“与 Codex 对话”新标签页入口和响应式独立页面。
 - `GET /api/codex/status` 固定版本检查，以及页面加载和发送前的可用性保护。
 - repository 文本文件扫描、opaque file ID、大小/UTF-8/containment 校验和“Add file”选择器。
-- `POST /api/codex/messages` NDJSON 流式接口。
+- `POST /api/codex/messages` 后台启动接口，以及 repository 级快照查询、停止和清空接口。
 - 通过 RepositoryService 校验 repository ID，不接受前端路径或命令。
-- 固定 `codex exec --json` / `codex exec --json resume` 参数，以及包含服务端校验文件上下文的 stdin prompt。
-- 服务端 conversation ID 到 repository ID 的进程内绑定，以及同一 conversation 并发保护。
-- 助手文本增量解析、绝对路径替换和错误脱敏。
-- 浏览器取消、连接关闭、超时、输出超限和服务关闭时的 Codex 进程组清理。
+- 固定 `codex exec --yolo --json` / `codex exec --yolo --json resume` 参数，以及包含服务端校验文件上下文的 stdin prompt。
+- 服务端 repository 级对话快照、conversation ID 归属校验和同一 repository 并发保护。
+- 助手文本增量解析到快照、绝对路径替换和错误脱敏。
+- 页面重进恢复、运行中轮询、浏览器安全快照和 Codex 原生 resume。
+- 显式停止、超时、输出超限和服务关闭时的 Codex 进程组清理；浏览器断开不取消后台 turn。
 
-验收条件：用户可以从任一 Git repository 打开独立页面，连续发送自然语言消息并看到 Codex 流式回答；前端不能改变工作目录或 Codex 启动参数，停止响应后不残留该 turn 的 Codex 子进程。
+验收条件：用户可以从任一 Git repository 打开独立页面，连续发送自然语言消息；页面退出后 Codex 继续在后台运行，再次进入时恢复对话和状态。前端不能改变工作目录或 Codex 启动参数，显式停止后不残留该 turn 的 Codex 子进程。
 
 ## 实施原则
 

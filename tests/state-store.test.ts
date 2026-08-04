@@ -36,13 +36,14 @@ describe('StateStore', () => {
 
     expect([...sessions.keys()]).toEqual(['existing']);
     expect(JSON.parse(await readFile(stateFile, 'utf8'))).toEqual({
-      version: 2,
+      version: 3,
       sessions: [{
         name: 'existing', repositoryId: 'dir_existing', relativePath: 'existing',
         createdAt: '2026-08-03T00:00:00.000Z', command: 'codex',
       }],
       viewers: [],
       repositories: [],
+      codexConversations: [],
     });
   });
 
@@ -59,19 +60,24 @@ describe('StateStore', () => {
       createdAt: '2026-08-04T00:00:00.000Z',
       command: 'codex',
     }]]));
+    const repositoryId = `dir_${'a'.repeat(43)}`;
+    const conversationId = '123e4567-e89b-42d3-a456-426614174000';
+    await store.persistCodexConversations(new Map([[repositoryId, conversationId]]));
 
     expect(JSON.parse(await readFile(stateFile, 'utf8'))).toEqual({
-      version: 2,
+      version: 3,
       sessions: [{
         name: 'session-a', repositoryId: 'dir_test', relativePath: 'repository-a',
         createdAt: '2026-08-04T00:00:00.000Z', command: 'codex',
       }],
       viewers: [],
       repositories: ['/srv/repository-a', '/srv/repository-b'],
+      codexConversations: [{ repositoryId, conversationId }],
     });
 
     const reloaded = new StateStore(stateFile);
     await reloaded.initialize(null);
     expect(reloaded.repositoryPaths()).toEqual(['/srv/repository-a', '/srv/repository-b']);
+    expect(reloaded.codexConversations()).toEqual(new Map([[repositoryId, conversationId]]));
   });
 });

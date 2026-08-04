@@ -125,6 +125,22 @@ export interface CodexCliStatus {
   version: string | null;
 }
 
+export interface CodexChatMessageSnapshot {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  contextFiles?: string[];
+}
+
+export interface CodexConversationSnapshot {
+  repositoryId: string;
+  conversationId: string | null;
+  messages: CodexChatMessageSnapshot[];
+  status: 'idle' | 'running' | 'failed' | 'stopped';
+  error: string | null;
+  updatedAt: string;
+}
+
 export type CodexChatStreamEvent =
   | { type: 'conversation'; conversationId: string }
   | { type: 'assistant_delta'; delta: string }

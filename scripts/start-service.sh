@@ -5,6 +5,7 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config_file="${2:-$project_root/config.json}"
 pid_file="$project_root/data/terminal-web.pid"
+runtime_file="$project_root/data/service-runtime.json"
 log_file="$project_root/data/terminal-web.log"
 
 print_started() {
@@ -71,6 +72,8 @@ if [[ ! -d "$workspace_root" || ! -r "$workspace_root" ]]; then
     exit 2
 fi
 
+node "$project_root/scripts/service-runtime.mjs" ensure-support "$config_file" "$workspace_root"
+
 if [[ -f "$pid_file" ]]; then
     existing_pid="$(<"$pid_file")"
     if [[ "$existing_pid" =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
@@ -88,6 +91,13 @@ fi
 cd "$project_root"
 npm run build
 mkdir -p -m 700 data
+temporary_runtime_file="$runtime_file.tmp-$$"
+node --input-type=module - "$config_file" "$workspace_root" > "$temporary_runtime_file" <<'NODE'
+const [configFile, workspaceRoot] = process.argv.slice(2);
+process.stdout.write(`${JSON.stringify({ configFile, workspaceRoot }, null, 2)}\n`);
+NODE
+chmod 600 "$temporary_runtime_file"
+mv "$temporary_runtime_file" "$runtime_file"
 : > "$log_file"
 chmod 600 "$log_file"
 
@@ -105,6 +115,7 @@ mv "$temporary_pid_file" "$pid_file"
 for _ in {1..100}; do
     if ! kill -0 "$service_pid" 2>/dev/null; then
         rm -f "$pid_file"
+        rm -f "$runtime_file"
         echo "Terminal Web failed to start. Recent log output:" >&2
         tail -n 20 "$log_file" >&2
         exit 1

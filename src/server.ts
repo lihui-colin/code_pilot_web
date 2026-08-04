@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { loadConfiguration, persistZellijWebToken } from './config.js';
 import { checkToolReadiness } from './services/tool-readiness.js';
+import { CodexChatService, SpawnCodexProcessAdapter } from './services/codex-chat-service.js';
 import { StateStore } from './services/state-store.js';
 import { SpawnServiceRestarter } from './services/service-restarter.js';
 import { bootstrapZellij } from './services/zellij-bootstrap.js';
@@ -41,6 +42,11 @@ async function main(): Promise<void> {
     zellijBootstrap.zellij.executablePath,
     codeViewerExecutablePath,
   );
+  const codexChatService = new CodexChatService(
+    new SpawnCodexProcessAdapter(),
+    stateStore.codexConversations(),
+    conversations => stateStore.persistCodexConversations(conversations),
+  );
   const projectRoot = fileURLToPath(new URL('../', import.meta.url));
   const app = await createApp(loaded.config, {
     readiness,
@@ -51,6 +57,7 @@ async function main(): Promise<void> {
     manualRepositoryPaths: stateStore.repositoryPaths(),
     persistManualRepositoryPaths: paths => stateStore.persistRepositoryPaths(paths),
     codeViewerExecutablePath,
+    codexChatService,
     zellijTokenService,
     serviceRestarter: new SpawnServiceRestarter(
       path.join(projectRoot, 'scripts/restart-service.sh'),

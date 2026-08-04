@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   addManualRepository,
+  clearCodexConversation,
+  getCodexConversation,
   getCodexStatus,
   getReadiness,
   getRepositoryContextFiles,
   getRepositoryFolders,
   restartServices,
-  streamCodexMessage,
+  startCodexMessage,
+  stopCodexConversation,
 } from '../src/web/api.js';
 
 afterEach(() => {
@@ -103,23 +106,42 @@ describe('web API', () => {
     });
   });
 
-  it('parses streamed Codex NDJSON events', async () => {
-    const events = [
-      { type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' },
-      { type: 'assistant_delta', delta: 'Hello' },
-      { type: 'done' },
-    ] as const;
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
-      `${events.map(event => JSON.stringify(event)).join('\n')}\n`,
-      { status: 200, headers: { 'content-type': 'application/x-ndjson' } },
-    )));
-    const received: unknown[] = [];
+  it('starts, reads, stops, and clears a background Codex conversation', async () => {
+    const repositoryId = `dir_${'a'.repeat(43)}`;
+    const snapshot = {
+      repositoryId,
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      messages: [{ id: 'user-1', role: 'user', content: 'Hello' }],
+      status: 'running',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    } as const;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ conversation: snapshot }), {
+        status: 202, headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ conversation: snapshot }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'stopping' }), {
+        status: 202, headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
 
-    await streamCodexMessage({
-      repositoryId: `dir_${'a'.repeat(43)}`,
-      message: 'Hello',
-    }, event => received.push(event));
+    await expect(startCodexMessage({ repositoryId, message: 'Hello' })).resolves.toEqual(snapshot);
+    await expect(getCodexConversation(repositoryId)).resolves.toEqual(snapshot);
+    await stopCodexConversation(repositoryId);
+    await clearCodexConversation(repositoryId);
 
-    expect(received).toEqual(events);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `/api/codex/conversations/${repositoryId}`, {
+      credentials: 'same-origin',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, `/api/codex/conversations/${repositoryId}/stop`, expect.objectContaining({
+      method: 'POST', body: '{}',
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, `/api/codex/conversations/${repositoryId}`, {
+      method: 'DELETE', credentials: 'same-origin',
+    });
   });
 });
