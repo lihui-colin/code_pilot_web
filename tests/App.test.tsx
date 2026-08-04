@@ -216,12 +216,45 @@ describe('App', () => {
     expect((await screen.findAllByText('terminal-web')).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Git 仓库' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '进入' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '创建 Zellij Session' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'code-viewer' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '编辑代码' })).toBeInTheDocument();
+    const zellijAction = screen.getByRole('button', { name: '创建 Zellij Session' });
+    const moreActions = screen.getByLabelText('terminal-web 更多操作').closest('.repository-more');
+    expect(zellijAction.closest('.repository-more')).toBeNull();
+    fireEvent.click(screen.getByLabelText('terminal-web 更多操作'));
+    expect(screen.getByRole('button', { name: 'code-viewer' }).closest('.repository-more')).toBe(moreActions);
+    expect(screen.getByRole('link', { name: '编辑代码' }).closest('.repository-more')).toBe(moreActions);
     const codexLink = screen.getByRole('link', { name: '与 Codex 对话' });
+    expect(codexLink.closest('.repository-more')).toBeNull();
     expect(codexLink).toHaveAttribute('href', `/codex-chat?repositoryId=dir_${'a'.repeat(43)}`);
     expect(codexLink).toHaveAttribute('target', '_blank');
+  });
+
+  it('closes repository more actions on outside click and Escape', async () => {
+    vi.mocked(api.getRepositories).mockResolvedValue({
+      ...repositories,
+      entries: [{
+        id: `dir_${'a'.repeat(43)}`,
+        name: 'terminal-web',
+        relativePath: 'terminal-web',
+        kind: 'repository',
+        source: 'workspace',
+        markers: ['git', 'node'],
+        openVSCodeUrl,
+        viewer: null,
+        session: null,
+      }],
+    });
+    render(<App />);
+    const trigger = await screen.findByLabelText('terminal-web 更多操作');
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
   });
 
   it('opens the server folder picker and adds a selected Git repository', async () => {
@@ -254,6 +287,7 @@ describe('App', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
 
+    fireEvent.click(await screen.findByLabelText('external-project 更多操作'));
     fireEvent.click(await screen.findByRole('button', { name: '移除仓库' }));
     await waitFor(() => expect(api.deleteManualRepository).toHaveBeenCalledWith(repositoryId));
   });
@@ -267,6 +301,7 @@ describe('App', () => {
       }],
     });
     render(<App />);
+    fireEvent.click(await screen.findByLabelText('terminal-web 更多操作'));
     const link = await screen.findByRole('link', { name: '编辑代码' });
     expect(link).toHaveAttribute('href', openVSCodeUrl);
     expect(link).toHaveAttribute('target', '_blank');
@@ -309,6 +344,7 @@ describe('App', () => {
     fireEvent.click(link);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('123e4567-e89b-42d3-a456-426614174000'));
     expect(screen.getByRole('status')).toHaveTextContent('Token 已复制');
+    fireEvent.click(screen.getByLabelText('terminal-web 更多操作'));
     fireEvent.click(screen.getByRole('button', { name: '删除 Session' }));
     await waitFor(() => expect(api.deleteSession).toHaveBeenCalledWith(sessionName));
   });
@@ -327,6 +363,7 @@ describe('App', () => {
       close: vi.fn(),
     } as unknown as Window);
     render(<App />);
+    fireEvent.click(await screen.findByLabelText('terminal-web 更多操作'));
     fireEvent.click(await screen.findByRole('button', { name: 'code-viewer' }));
     expect(open).toHaveBeenCalledWith('about:blank', '_blank');
     await waitFor(() => expect(replace).toHaveBeenCalledWith(`http://192.0.2.10:8024/viewer/viewer_${'b'.repeat(22)}/`));

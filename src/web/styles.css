@@ -41,6 +41,7 @@ h2 { margin-bottom: 0; font-size: 1.35rem; }
 .status-ok { color: #61e7ba; }
 .status-warn { color: #ffc46b; }
 .panel { margin-top: 1rem; border-radius: .85rem; overflow: hidden; }
+.repository-panel { overflow: visible; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1.15rem 1.25rem; border-bottom: 1px solid #233d37; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; min-width: 680px; }
@@ -67,13 +68,22 @@ tbody tr:last-child td { border-bottom: 0; }
 .directory-copy > span { margin-top: .2rem; color: #8ca59e; font-size: .83rem; }
 .markers { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .5rem; }
 .markers small { color: #b4cbc5; border: 1px solid #38564f; border-radius: .3rem; padding: .1rem .32rem; }
-.repository-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .55rem; }
-.repository-actions button:last-child { color: #06130f; background: #5ce0b6; border-color: #5ce0b6; }
-.repository-actions button:last-child:hover { background: #7ceac8; }
-.repository-actions .editor-link { color: #06130f; background: #5ce0b6; border-color: #5ce0b6; }
-.repository-actions .editor-link:hover { background: #7ceac8; }
+.repository-actions { display: flex; align-items: center; justify-content: flex-end; gap: .55rem; }
+.repository-actions > .button-link, .repository-actions > button { min-height: 2.65rem; }
+.repository-actions .zellij-link, .repository-actions .zellij-action { color: #06130f; background: #5ce0b6; border-color: #5ce0b6; }
+.repository-actions .zellij-link:hover, .repository-actions .zellij-action:hover { background: #7ceac8; }
 .repository-actions .codex-chat-link { color: #e7e3ff; background: #30275f; border-color: #6d5bd0; }
 .repository-actions .codex-chat-link:hover { background: #40347b; }
+.repository-more { position: relative; flex: 0 0 auto; }
+.repository-more-trigger { display: grid; place-items: center; width: 2.65rem; height: 2.65rem; padding: 0; border-color: #38564f; color: #d7fff3; background: #102c25; font-size: 1.25rem; line-height: 1; }
+.repository-more-trigger:hover, .repository-more-trigger[aria-expanded="true"] { background: #1d4c40; }
+.repository-more-trigger:focus-visible { outline: 2px solid #5ce0b6; outline-offset: 2px; }
+.repository-menu { position: absolute; z-index: 5; top: calc(100% + .4rem); right: 0; display: grid; gap: .25rem; width: 12rem; padding: .4rem; border: 1px solid #38564f; border-radius: .55rem; background: #091613; box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 40%); }
+.repository-menu a, .repository-menu button { display: flex; align-items: center; width: 100%; min-height: 2.5rem; padding: .55rem .7rem; border: 1px solid transparent; border-radius: .45rem; color: #d7fff3; background: transparent; text-align: left; text-decoration: none; }
+.repository-menu a:hover, .repository-menu button:hover { background: #163d34; }
+.repository-menu .danger-button { color: #ffaaa0; }
+.repository-menu .danger-button:hover { background: #351b18; }
+.repository-menu-separator { height: 1px; margin: .2rem .35rem; background: #29433d; }
 .token-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .55rem; }
 .session-actions { display: flex; align-items: center; gap: .55rem; white-space: nowrap; }
 .session-actions .button-link, .session-actions button { min-width: 4.25rem; }
@@ -169,7 +179,7 @@ tbody tr:last-child td { border-bottom: 0; }
   .breadcrumbs { justify-content: flex-start; }
   .directory-row { grid-template-columns: 2.7rem minmax(0, 1fr); }
   .kind-icon { width: 2.7rem; height: 2.7rem; }
-  .repository-actions { grid-column: 2; justify-content: flex-start; }
+  .repository-actions { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
   .token-actions { justify-content: flex-start; }
   .chat-sidebar { width: min(19rem, calc(100vw - 1rem)); padding: 1rem; }
   .chat-main { height: 100vh; }
@@ -183,4 +193,9 @@ tbody tr:last-child td { border-bottom: 0; }
   .chat-composer-footer span { display: none; }
   .chat-composer-footer { justify-content: flex-end; }
   .chat-composer-tools { margin-right: auto; }
+}
+
+@media (max-width: 480px) {
+  .repository-actions > .button-link, .repository-actions > button { flex: 1 1 calc(50% - .3rem); }
+  .repository-more { margin-left: auto; }
 }

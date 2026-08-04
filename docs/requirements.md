@@ -115,6 +115,8 @@ Codex 流式响应只包含 conversation ID、助手文本、完成状态和脱�
 - workspace 和 Git repository 列表。
 - viewer 状态和操作。
 
+每个 Git repository 只常驻显示两个主要操作：已有 Session 时显示“打开 Zellij Web”，否则显示“创建 Zellij Session”；另一个为“与 Codex 对话”。编辑代码、code-viewer、删除 Session 和移除手动仓库收纳在“更多操作”菜单中，危险操作与普通操作视觉分隔。
+
 只读数据默认每 10 秒刷新。页面不可见时暂停轮询，重新可见时立即刷新。创建、删除和停止操作完成后立即重新查询对应资源。
 
 部分工具未就绪时，页面仍展示能够读取的 Zellij Session 和 Zellij Web Token；未就绪状态只阻止依赖缺失工具的操作。

@@ -41,7 +41,26 @@ export function App() {
   const [folderPicker, setFolderPicker] = useState<RepositoryFolderListing | null>(null);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [folderPickerBusy, setFolderPickerBusy] = useState(false);
+  const [openRepositoryMenuId, setOpenRepositoryMenuId] = useState<string | null>(null);
   const copyFeedbackTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!openRepositoryMenuId) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(`[data-repository-menu-id="${openRepositoryMenuId}"]`)) return;
+      setOpenRepositoryMenuId(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenRepositoryMenuId(null);
+    };
+    document.addEventListener('pointerdown', closeOnPointerDown);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnPointerDown);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [openRepositoryMenuId]);
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -380,7 +399,7 @@ export function App() {
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel repository-panel">
         <div className="panel-heading directory-heading">
           <div><p className="eyebrow">WORKSPACE</p><h2>Git 仓库</h2></div>
           <div className="directory-heading-actions">
@@ -400,55 +419,82 @@ export function App() {
               </div>
               <div className="repository-actions">
                 {entry.session ? (
-                  <>
-                    <a
-                      className="button-link"
-                      href={entry.session.webUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={() => void copyToken()}
-                    >
-                      打开 Zellij Web
-                    </a>
-                    <button
-                      className="danger-button"
-                      type="button"
-                      onClick={() => void removeRepositorySession(entry.id, entry.session!.name)}
-                      disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
-                    >删除 Session</button>
-                  </>
+                  <a
+                    className="button-link zellij-link"
+                    href={entry.session.webUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => void copyToken()}
+                  >
+                    打开 Zellij Web
+                  </a>
                 ) : (
                   <button
+                    className="zellij-action"
                     type="button"
                     onClick={() => void createRepositorySession(entry.id)}
                     disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
                   >创建 Zellij Session</button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => void browseCode(entry.id)}
-                  disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
-                >code-viewer</button>
-                <a
-                  className="button-link editor-link"
-                  href={entry.openVSCodeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >编辑代码</a>
                 <a
                   className="button-link codex-chat-link"
                   href={`/codex-chat?repositoryId=${encodeURIComponent(entry.id)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >与 Codex 对话</a>
-                {entry.source === 'manual' && (
+                <div
+                  className="repository-more"
+                  data-repository-menu-id={entry.id}
+                >
                   <button
-                    className="danger-button"
+                    className="repository-more-trigger"
                     type="button"
-                    disabled={busyRepositoryId === entry.id}
-                    onClick={() => void removeManualRepository(entry.id)}
-                  >移除仓库</button>
-                )}
+                    aria-label={`${entry.name} 更多操作`}
+                    aria-haspopup="menu"
+                    aria-expanded={openRepositoryMenuId === entry.id}
+                    title="更多操作"
+                    onClick={() => setOpenRepositoryMenuId(current => current === entry.id ? null : entry.id)}
+                  >⋯</button>
+                  {openRepositoryMenuId === entry.id && <div className="repository-menu">
+                    <a
+                      href={entry.openVSCodeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setOpenRepositoryMenuId(null)}
+                    >编辑代码</a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenRepositoryMenuId(null);
+                        void browseCode(entry.id);
+                      }}
+                      disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
+                    >code-viewer</button>
+                    {(entry.session || entry.source === 'manual') && <div className="repository-menu-separator" />}
+                    {entry.session && (
+                      <button
+                        className="danger-button"
+                        type="button"
+                        onClick={() => {
+                          setOpenRepositoryMenuId(null);
+                          void removeRepositorySession(entry.id, entry.session!.name);
+                        }}
+                        disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
+                      >删除 Session</button>
+                    )}
+                    {entry.source === 'manual' && (
+                      <button
+                        className="danger-button"
+                        type="button"
+                        onClick={() => {
+                          setOpenRepositoryMenuId(null);
+                          void removeManualRepository(entry.id);
+                        }}
+                        disabled={busyRepositoryId === entry.id}
+                      >移除仓库</button>
+                    )}
+                  </div>}
+                </div>
               </div>
             </article>
           ))}
