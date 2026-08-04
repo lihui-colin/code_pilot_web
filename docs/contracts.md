@@ -235,7 +235,7 @@ interface RepositoryListing {
 }
 
 interface RepositoryFolderListing {
-  current: { id: string; name: string; gitRepository: boolean };
+  current: { id: string; name: string; relativePath: string; gitRepository: boolean };
   parentId: string | null;
   entries: Array<{
     id: string;
@@ -257,7 +257,7 @@ DELETE /api/repositories/:repositoryId
 
 `GET /api/repositories` 不接受 `parentId`、路径或其他查询参数。服务端把 workspace 扫描结果和手动选择结果合并为单一扁平列表。每个条目的 `source` 表示来自 `workspace` 自动扫描或 `manual` 手动选择；`session` 通过固定 repository Session 名称与当前 Zellij Session 列表匹配，不存在时为 `null`。
 
-“添加文件夹”使用独立的服务器目录选择接口。首次不带查询参数时从服务器文件系统根目录开始；用户也可以提交不以 `/` 开头且不包含 `..` 路径段的相对初始目录，服务端在文件系统根目录下重新执行 `realpath()` containment 校验；后续逐层浏览只允许后端签发的 `folder_<HMAC>` 不透明 ID。响应只返回当前目录名、父目录 ID、可读子目录名称、子目录 ID，以及该子目录当前是否包含 `.git`。`POST /api/repositories` 请求体严格为 `{ "directoryId": "folder_..." }`，重新校验后将目录加入手动列表；`DELETE` 只允许移除手动列表记录，不删除目录或文件；在移除记录前，服务端会清理该目录关联的托管 Zellij Session、Codex 对话状态和 code-viewer 实例。OpenVSCode 是独立的无状态代理，不为目录保存进程状态，因此不会停止全局 OpenVSCode 服务。两个写请求都执行同源 Origin 校验。
+“添加文件夹”使用独立的服务器目录选择接口。首次不带查询参数时从服务器文件系统根目录开始；用户也可以提交不以 `/` 开头且不包含 `..` 路径段的相对初始目录，服务端在文件系统根目录下重新执行 `realpath()` containment 校验；后续逐层浏览只允许后端签发的 `folder_<HMAC>` 不透明 ID。响应返回当前目录相对服务器文件系统根目录的规范化 `relativePath`，不返回服务器绝对路径；前端用它同步初始目录输入框。响应还返回当前目录名、父目录 ID、可读子目录名称、子目录 ID，以及目录是否包含 `.git`。`POST /api/repositories` 请求体严格为 `{ "directoryId": "folder_..." }`，重新校验后将目录加入手动列表；`DELETE` 只允许移除手动列表记录，不删除目录或文件；在移除记录前，服务端会清理该目录关联的托管 Zellij Session、Codex 对话状态和 code-viewer 实例。OpenVSCode 是独立的无状态代理，不为目录保存进程状态，因此不会停止全局 OpenVSCode 服务。两个写请求都执行同源 Origin 校验。
 
 ### 3.2 工作目录
 

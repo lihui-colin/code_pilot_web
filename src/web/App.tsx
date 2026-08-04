@@ -33,21 +33,51 @@ interface DashboardState {
 }
 
 const FOLDER_INITIAL_PATH_STORAGE_KEY = 'codepilot-web.folder-initial-path';
+const LAST_SELECTED_FOLDER_STORAGE_KEY = 'codepilot-web.last-selected-folder';
+let inMemoryRememberedFolderPath = '';
+let inMemoryLastSelectedFolderId = '';
 
 function readRememberedFolderPath(): string {
   try {
     return window.localStorage.getItem(FOLDER_INITIAL_PATH_STORAGE_KEY) ?? '';
   } catch {
-    return '';
+    return inMemoryRememberedFolderPath;
   }
 }
 
 function rememberFolderPath(value: string): void {
+  inMemoryRememberedFolderPath = value;
   try {
     window.localStorage.setItem(FOLDER_INITIAL_PATH_STORAGE_KEY, value);
   } catch {
     // Storage may be disabled by the browser; directory browsing still works.
   }
+}
+
+function readLastSelectedFolderId(): string {
+  try {
+    return window.localStorage.getItem(LAST_SELECTED_FOLDER_STORAGE_KEY) ?? '';
+  } catch {
+    return inMemoryLastSelectedFolderId;
+  }
+}
+
+function rememberLastSelectedFolderId(value: string): void {
+  inMemoryLastSelectedFolderId = value;
+  try {
+    window.localStorage.setItem(LAST_SELECTED_FOLDER_STORAGE_KEY, value);
+  } catch {
+    // Storage may be disabled by the browser; keep the current page-session memory.
+  }
+}
+
+function normalizedInitialFolderPath(value: string): string | null {
+  const enteredPath = value.trim();
+  if (!enteredPath) return null;
+  const initialPath = enteredPath.replace(/^[/\\]+/u, '');
+  if (!initialPath) return '';
+  if (initialPath.split(/[\\/]+/u).some(segment => segment === '..')) return null;
+  return initialPath;
 }
 
 export function App() {
@@ -253,10 +283,20 @@ export function App() {
     }
   }, []);
 
-  const loadRepositoryFolder = async (directoryId?: string, initialPath?: string): Promise<boolean> => {
+  const loadRepositoryFolder = async (
+    directoryId?: string,
+    initialPath?: string,
+    syncInitialPath = false,
+  ): Promise<boolean> => {
     setFolderPickerBusy(true);
     try {
-      setFolderPicker(await getRepositoryFolders(directoryId, initialPath));
+      const listing = await getRepositoryFolders(directoryId, initialPath);
+      setFolderPicker(listing);
+      if (syncInitialPath) {
+        const currentPath = listing.current.relativePath ? `/${listing.current.relativePath}` : '/';
+        setFolderInitialPath(currentPath);
+        rememberFolderPath(currentPath);
+      }
       setFolderPickerError(null);
       setError(null);
       return true;
@@ -271,21 +311,33 @@ export function App() {
   };
 
   const openFolderPicker = async () => {
+    const rememberedPath = readRememberedFolderPath();
+    const initialPath = normalizedInitialFolderPath(rememberedPath);
+    const lastSelectedFolderId = readLastSelectedFolderId();
     setFolderPickerOpen(true);
-    setFolderInitialPath(readRememberedFolderPath());
+    setFolderInitialPath(rememberedPath);
     setFolderPickerError(null);
+    if (initialPath !== null) {
+      const loaded = initialPath
+        ? await loadRepositoryFolder(undefined, initialPath, true)
+        : await loadRepositoryFolder(undefined, undefined, true);
+      if (!loaded) await loadRepositoryFolder();
+      return;
+    }
+    if (lastSelectedFolderId && await loadRepositoryFolder(lastSelectedFolderId, undefined, true)) return;
     await loadRepositoryFolder();
   };
 
   const openInitialFolder = async () => {
     const enteredPath = folderInitialPath.trim();
     if (!enteredPath) return;
-    const initialPath = enteredPath.replace(/^[/\\]+/u, '');
-    if (!initialPath || initialPath.split(/[\\/]+/u).some(segment => segment === '..')) {
+    const initialPath = normalizedInitialFolderPath(enteredPath);
+    if (initialPath === null) {
       setFolderPickerError('请输入有效的服务器目录，不能包含 .. 路径段。');
       return;
     }
-    if (await loadRepositoryFolder(undefined, initialPath)) rememberFolderPath(enteredPath);
+    if (initialPath) await loadRepositoryFolder(undefined, initialPath, true);
+    else await loadRepositoryFolder(undefined, undefined, true);
   };
 
   const selectRepositoryFolder = async (directoryId: string) => {
@@ -293,6 +345,7 @@ export function App() {
     try {
       await addManualRepository(directoryId);
       await refreshRepositories();
+      if (!folderInitialPath.trim()) rememberLastSelectedFolderId(directoryId);
       setFolderPickerOpen(false);
       setFolderPicker(null);
       setError(null);
@@ -718,7 +771,7 @@ export function App() {
               <button
                 type="button"
                 disabled={!folderPicker?.parentId || folderPickerBusy}
-                onClick={() => folderPicker?.parentId && void loadRepositoryFolder(folderPicker.parentId)}
+                onClick={() => folderPicker?.parentId && void loadRepositoryFolder(folderPicker.parentId, undefined, true)}
               ><span className="folder-action-icon" aria-hidden="true">↑</span> 上一级</button>
               <strong className="mono">{folderPicker?.current.name ?? '加载中…'}</strong>
               <button
@@ -736,7 +789,7 @@ export function App() {
                     className="folder-name"
                     type="button"
                     disabled={folderPickerBusy}
-                    onClick={() => void loadRepositoryFolder(folder.id)}
+                    onClick={() => void loadRepositoryFolder(folder.id, undefined, true)}
                   >📁 {folder.name}</button>
                   <button
                     type="button"

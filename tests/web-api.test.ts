@@ -83,10 +83,10 @@ describe('web API', () => {
     const repositoryId = `dir_${'r'.repeat(43)}`;
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        current: { id: folderId, name: 'projects', gitRepository: false }, parentId: null, entries: [],
+        current: { id: folderId, name: 'projects', relativePath: 'data01/projects', gitRepository: false }, parentId: null, entries: [],
       }), { status: 200, headers: { 'content-type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        current: { id: folderId, name: 'projects', gitRepository: false }, parentId: null, entries: [],
+        current: { id: folderId, name: 'projects', relativePath: 'data01/projects', gitRepository: false }, parentId: null, entries: [],
       }), { status: 200, headers: { 'content-type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ repositoryId }), {
         status: 201,

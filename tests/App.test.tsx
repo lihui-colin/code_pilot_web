@@ -34,6 +34,7 @@ const repositories = {
   entries: [],
 };
 const openVSCodeUrl = 'https://192.0.2.10:8024/openvscode/?folder=%2Fworkspace%2Fterminal-web';
+let localStorageValues: Map<string, string>;
 
 async function openTokenPanel() {
   fireEvent.click(await screen.findByRole('button', { name: '打开系统设置' }));
@@ -42,13 +43,22 @@ async function openTokenPanel() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  window.localStorage?.clear?.();
+  localStorageValues = new Map();
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      clear: () => localStorageValues.clear(),
+      getItem: (key: string) => localStorageValues.get(key) ?? null,
+      removeItem: (key: string) => localStorageValues.delete(key),
+      setItem: (key: string, value: string) => localStorageValues.set(key, value),
+    },
+  });
   vi.mocked(api.getReadiness).mockResolvedValue(readiness);
   vi.mocked(api.getCodexStatus).mockResolvedValue({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' });
   vi.mocked(api.getCodexActivity).mockResolvedValue({ runningRepositoryIds: [] });
   vi.mocked(api.getRepositories).mockResolvedValue(repositories);
   vi.mocked(api.getRepositoryFolders).mockResolvedValue({
-    current: { id: `folder_${'r'.repeat(43)}`, name: '/', gitRepository: false },
+    current: { id: `folder_${'r'.repeat(43)}`, name: '/', relativePath: '', gitRepository: false },
     parentId: null,
     entries: [],
   });
@@ -357,7 +367,7 @@ describe('App', () => {
   it('opens the server folder picker and adds a selected Git repository', async () => {
     const folderId = `folder_${'f'.repeat(43)}`;
     vi.mocked(api.getRepositoryFolders).mockResolvedValue({
-      current: { id: `folder_${'r'.repeat(43)}`, name: '/', gitRepository: false },
+      current: { id: `folder_${'r'.repeat(43)}`, name: '/', relativePath: '', gitRepository: false },
       parentId: null,
       entries: [{ id: folderId, name: 'external-project', gitRepository: true }],
     });
@@ -374,7 +384,7 @@ describe('App', () => {
 
   it('opens a typed relative initial directory in the folder picker', async () => {
     vi.mocked(api.getRepositoryFolders).mockResolvedValue({
-      current: { id: `folder_${'i'.repeat(43)}`, name: 'projects', gitRepository: false },
+      current: { id: `folder_${'i'.repeat(43)}`, name: 'projects', relativePath: 'data01/home/lihui/projects', gitRepository: false },
       parentId: null,
       entries: [],
     });
@@ -394,7 +404,7 @@ describe('App', () => {
 
   it('remembers the last successful initial directory', async () => {
     vi.mocked(api.getRepositoryFolders).mockResolvedValue({
-      current: { id: `folder_${'i'.repeat(43)}`, name: 'projects', gitRepository: false },
+      current: { id: `folder_${'i'.repeat(43)}`, name: 'projects', relativePath: 'data01/home/lihui/projects', gitRepository: false },
       parentId: null,
       entries: [],
     });
@@ -409,6 +419,58 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
     fireEvent.click(screen.getByRole('button', { name: '添加文件夹' }));
     expect(await screen.findByRole('textbox', { name: '初始目录' })).toHaveValue('/data01/home/lihui/projects');
+    await waitFor(() => expect(api.getRepositoryFolders).toHaveBeenLastCalledWith(
+      undefined,
+      'data01/home/lihui/projects',
+    ));
+  });
+
+  it('returns to the last selected directory when the initial directory is empty', async () => {
+    const folderId = `folder_${'s'.repeat(43)}`;
+    vi.mocked(api.getRepositoryFolders).mockResolvedValue({
+      current: { id: folderId, name: 'selected-folder', relativePath: 'data01/selected-folder', gitRepository: false },
+      parentId: null,
+      entries: [],
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加文件夹' }));
+    expect(await screen.findByRole('textbox', { name: '初始目录' })).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: '选择当前目录' }));
+    await waitFor(() => expect(api.addManualRepository).toHaveBeenCalledWith(folderId));
+
+    fireEvent.click(screen.getByRole('button', { name: '添加文件夹' }));
+    await waitFor(() => expect(api.getRepositoryFolders).toHaveBeenLastCalledWith(folderId, undefined));
+  });
+
+  it('updates the initial directory while browsing children and parents', async () => {
+    const rootId = `folder_${'r'.repeat(43)}`;
+    const childId = `folder_${'c'.repeat(43)}`;
+    vi.mocked(api.getRepositoryFolders)
+      .mockResolvedValueOnce({
+        current: { id: rootId, name: '/', relativePath: '', gitRepository: false },
+        parentId: null,
+        entries: [{ id: childId, name: 'projects', gitRepository: false }],
+      })
+      .mockResolvedValueOnce({
+        current: { id: childId, name: 'projects', relativePath: 'data01/home/lihui/projects', gitRepository: false },
+        parentId: rootId,
+        entries: [],
+      })
+      .mockResolvedValueOnce({
+        current: { id: rootId, name: '/', relativePath: '', gitRepository: false },
+        parentId: null,
+        entries: [{ id: childId, name: 'projects', gitRepository: false }],
+      });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '添加文件夹' }));
+    fireEvent.click(await screen.findByRole('button', { name: '📁 projects' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '初始目录' }))
+      .toHaveValue('/data01/home/lihui/projects'));
+
+    fireEvent.click(screen.getByRole('button', { name: '上一级' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '初始目录' })).toHaveValue('/'));
   });
 
   it('removes a manually added repository without deleting files', async () => {

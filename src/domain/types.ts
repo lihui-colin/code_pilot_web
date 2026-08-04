@@ -79,7 +79,7 @@ export interface RepositoryFolderEntry {
 }
 
 export interface RepositoryFolderListing {
-  current: { id: string; name: string; gitRepository: boolean };
+  current: { id: string; name: string; relativePath: string; gitRepository: boolean };
   parentId: string | null;
   entries: RepositoryFolderEntry[];
 }

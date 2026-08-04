@@ -606,6 +606,7 @@ describe('MVP-1 routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json().current.name).toBe(path.basename(root));
+    expect(response.json().current.relativePath).toBe(relativePath.split(path.sep).join('/'));
     await app.close();
   });
 

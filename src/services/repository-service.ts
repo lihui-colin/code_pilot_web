@@ -305,6 +305,7 @@ export class RepositoryService {
       current: {
         id: currentId,
         name: currentRealPath === this.fileSystemRoot ? this.fileSystemRoot : path.basename(currentRealPath),
+        relativePath: path.relative(this.fileSystemRoot, currentRealPath).split(path.sep).join('/'),
         gitRepository: (await this.detectMarkers(currentRealPath)).includes('git'),
       },
       parentId,
