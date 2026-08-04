@@ -56,7 +56,7 @@ describe('MVP-1 routes', () => {
       readiness: ready,
       directoryIdSecret: Buffer.from('route test secret'),
       codexChatService: {
-        status: async () => ({ available: true, version: 'codex-cli 0.146.0' }),
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
         send: async turn => {
           receivedPath = turn.repositoryRealPath;
           turn.onEvent({ type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' });
@@ -99,7 +99,7 @@ describe('MVP-1 routes', () => {
       readiness: ready,
       directoryIdSecret: Buffer.from('route test secret'),
       codexChatService: {
-        status: async () => ({ available: true, version: 'codex-cli 0.146.0' }),
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
         send: async turn => {
           receivedContext = turn.contextFiles;
           turn.onEvent({ type: 'conversation', conversationId: '123e4567-e89b-42d3-a456-426614174000' });
@@ -149,7 +149,7 @@ describe('MVP-1 routes', () => {
       readiness: ready,
       directoryIdSecret: Buffer.from('route test secret'),
       codexChatService: {
-        status: async () => ({ available: true, version: 'codex-cli 0.146.0' }),
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
         send: async () => undefined,
         getConversation: repositoryId => ({
           repositoryId,
@@ -202,7 +202,7 @@ describe('MVP-1 routes', () => {
       readiness: ready,
       directoryIdSecret: Buffer.from('route test secret'),
       codexChatService: {
-        status: async () => ({ available: false, version: null }),
+        status: async () => ({ available: false, version: null, mode: 'yolo' }),
         send: async () => { sends += 1; },
         getConversation: () => null,
         clearConversation: () => undefined,
@@ -216,7 +216,7 @@ describe('MVP-1 routes', () => {
 
     const status = await app.inject({ method: 'GET', url: '/api/codex/status' });
     expect(status.statusCode).toBe(200);
-    expect(status.json()).toEqual({ available: false, version: null });
+    expect(status.json()).toEqual({ available: false, version: null, mode: 'yolo' });
     const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
     const repositoryId = listing.json().entries[0].id as string;
     const response = await app.inject({

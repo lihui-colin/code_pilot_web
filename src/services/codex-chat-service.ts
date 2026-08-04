@@ -17,7 +17,11 @@ const AVAILABILITY_TIMEOUT_MS = 5_000;
 const MAX_VERSION_OUTPUT_BYTES = 64 * 1024;
 const CODEX_VERSION_PATTERN = /^codex-cli [0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u;
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const CODEX_EXEC_ARGUMENTS = ['exec', '--yolo', '--json', '--color', 'never', '--sandbox', 'workspace-write'];
+const CODEX_EXECUTION_MODE: CodexCliStatus['mode'] = CODEX_EXEC_ARGUMENTS.includes('--yolo') ? 'yolo' : 'sandbox';
 const execFileAsync = promisify(execFile);
+
+type CodexCliAvailability = Omit<CodexCliStatus, 'mode'>;
 
 export interface CodexExecutionRequest {
   arguments_: string[];
@@ -28,7 +32,7 @@ export interface CodexExecutionRequest {
 }
 
 export interface CodexProcessAdapter {
-  checkAvailability(): Promise<CodexCliStatus>;
+  checkAvailability(): Promise<CodexCliAvailability>;
   execute(request: CodexExecutionRequest): Promise<void>;
 }
 
@@ -58,7 +62,7 @@ export class SpawnCodexProcessAdapter implements CodexProcessAdapter {
     private readonly versionRunner: VersionRunner = runVersionCheck,
   ) {}
 
-  async checkAvailability(): Promise<CodexCliStatus> {
+  async checkAvailability(): Promise<CodexCliAvailability> {
     try {
       const version = await this.versionRunner(this.executablePath);
       return CODEX_VERSION_PATTERN.test(version)
@@ -228,8 +232,11 @@ export class CodexChatService implements CodexChatServiceLike {
     }
   }
 
-  status(): Promise<CodexCliStatus> {
-    return this.adapter.checkAvailability();
+  async status(): Promise<CodexCliStatus> {
+    return {
+      ...await this.adapter.checkAvailability(),
+      mode: CODEX_EXECUTION_MODE,
+    };
   }
 
   getConversation(repositoryId: string): CodexConversationSnapshot | null {
@@ -318,11 +325,11 @@ export class CodexChatService implements CodexChatServiceLike {
     };
     const arguments_ = turn.conversationId
       ? [
-          'exec', '--yolo', '--json', '--color', 'never', '--sandbox', 'workspace-write',
+          ...CODEX_EXEC_ARGUMENTS,
           'resume', turn.conversationId, '-',
         ]
       : [
-          'exec', '--yolo', '--json', '--color', 'never', '--sandbox', 'workspace-write',
+          ...CODEX_EXEC_ARGUMENTS,
           '--cd', turn.repositoryRealPath, '-',
         ];
 

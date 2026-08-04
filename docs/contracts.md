@@ -453,7 +453,7 @@ OpenVSCode 平时仍是独立进程，但统一重启脚本负责停止并重新
 
 repository 条目的“与 Codex 对话”链接必须在新标签页打开 `/codex-chat?repositoryId=<encoded-id>`，并设置 `rel="noopener noreferrer"`。对话页面必须先通过 `GET /api/repositories` 确认 ID 仍对应当前列表中的 Git repository；前端不得把 relative path 转换为服务器路径，也不得提交绝对路径、命令、命令参数、环境变量、KDL、可执行文件或 Codex 配置。
 
-对话页面加载时还必须调用 `GET /api/codex/status`。后端使用 `execFile()`、参数数组 `['--version']`、`shell: false`、5 秒超时和 64 KiB 输出上限检查服务进程实际使用的 Codex 可执行文件。命令成功且 stdout 去除空白后匹配受限的 `codex-cli <version>` 格式时返回 `{ available: true, version: string }`；可执行文件不存在、不可执行、超时、退出非零或版本输出不匹配时返回 `{ available: false, version: null }`。原始错误和未匹配的命令输出不得返回浏览器或写入普通错误响应。
+对话页面加载时还必须调用 `GET /api/codex/status`。后端使用 `execFile()`、参数数组 `['--version']`、`shell: false`、5 秒超时和 64 KiB 输出上限检查服务进程实际使用的 Codex 可执行文件。命令成功且 stdout 去除空白后匹配受限的 `codex-cli <version>` 格式时返回 `{ available: true, version: string, mode: 'yolo' | 'sandbox' }`；可执行文件不存在、不可执行、超时、退出非零或版本输出不匹配时返回 `{ available: false, version: null, mode: 'yolo' | 'sandbox' }`。`mode` 必须由服务端实际固定的 Codex 参数推导：参数包含 `--yolo` 时为 `yolo`，否则为 `sandbox`。原始错误和未匹配的命令输出不得返回浏览器或写入普通错误响应。
 
 Codex 页面默认字体通过配置中的 `codexChatAppearance` 设置。`fontFamily` 是长度不超过 200 的非空 CSS 字体族字符串，`fontSize` 是 `12` 到 `24` 的整数像素值；未配置时分别使用 `Inter, ui-sans-serif, system-ui, sans-serif` 和 `16`。页面通过 `GET /api/codex/appearance` 只读取 `{ fontFamily, fontSize }`，不得返回完整应用配置、路径、Token 或其他服务端字段。配置在管理服务启动时读取，修改后需要重启服务生效。任意 Codex 页面必须允许用户在抽屉中即时覆盖字体族和字号，并把覆盖值保存到当前浏览器的 `localStorage`，供所有 repository 的 Codex 页面共享；恢复默认操作删除该覆盖值并重新使用服务端配置。
 

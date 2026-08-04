@@ -40,6 +40,14 @@ function adapterWith(lines: string[]): CodexProcessAdapter & { execute: ReturnTy
 }
 
 describe('CodexChatService', () => {
+  it('reports yolo mode when the fixed execution arguments include --yolo', async () => {
+    await expect(new CodexChatService(adapterWith([])).status()).resolves.toEqual({
+      available: true,
+      version: 'codex-cli 0.146.0',
+      mode: 'yolo',
+    });
+  });
+
   it('reports only a recognized Codex CLI version as available', async () => {
     const validVersion = vi.fn(async () => 'codex-cli 0.146.0');
     const invalidVersion = vi.fn(async () => '/secret/path unexpected output');

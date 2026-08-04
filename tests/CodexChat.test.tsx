@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CodexChat } from '../src/web/CodexChat.js';
 import * as api from '../src/web/api.js';
@@ -45,7 +45,7 @@ beforeEach(() => {
       openVSCodeUrl: 'https://example.test/openvscode/',
     }],
   });
-  vi.mocked(api.getCodexStatus).mockResolvedValue({ available: true, version: 'codex-cli 0.146.0' });
+  vi.mocked(api.getCodexStatus).mockResolvedValue({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' });
   vi.mocked(api.getCodexAppearance).mockResolvedValue({
     fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
     fontSize: 16,
@@ -88,7 +88,10 @@ describe('CodexChat', () => {
     expect(screen.queryByRole('dialog', { name: '对话信息' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '打开对话面板' }));
-    expect(screen.getByRole('dialog', { name: '对话信息' })).toHaveTextContent('当前仓库');
+    const drawer = screen.getByRole('dialog', { name: '对话信息' });
+    expect(drawer).toHaveTextContent('当前仓库');
+    expect(drawer).toHaveTextContent('codex-cli 0.146.0 · 当前仓库 · YOLO 模式');
+    expect(within(drawer).getAllByText('terminal-web')).toHaveLength(1);
     expect(screen.getByRole('button', { name: '＋ 新对话' })).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -107,6 +110,20 @@ describe('CodexChat', () => {
     expect(await screen.findByText('这是 Codex 的回答。')).toBeInTheDocument();
     expect(screen.getByText('me')).toBeInTheDocument();
     expect(screen.getByText('M')).toBeInTheDocument();
+  });
+
+  it('shows sandbox mode when the server does not use yolo mode', async () => {
+    vi.mocked(api.getCodexStatus).mockResolvedValue({
+      available: true,
+      version: 'codex-cli 0.146.0',
+      mode: 'sandbox',
+    });
+    render(<CodexChat />);
+    await screen.findByRole('heading', { name: 'terminal-web' });
+
+    fireEvent.click(screen.getByRole('button', { name: '打开对话面板' }));
+    expect(screen.getByRole('dialog', { name: '对话信息' }))
+      .toHaveTextContent('codex-cli 0.146.0 · 当前仓库 · 沙箱模式');
   });
 
   it('uses a locally persisted personalized display name for user messages', async () => {
@@ -165,6 +182,9 @@ describe('CodexChat', () => {
       fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
       fontSize: '16px',
     });
+    const resetButton = screen.getByRole('button', { name: '恢复服务器默认' });
+    expect(resetButton).toBeDisabled();
+    expect(window.getComputedStyle(resetButton).cursor).toBe('default');
     expect(window.localStorage.getItem('codepilot.codex.appearance')).toBeNull();
   });
 
@@ -191,9 +211,11 @@ describe('CodexChat', () => {
     render(<CodexChat />);
     await screen.findByRole('heading', { name: 'terminal-web' });
     fireEvent.click(screen.getByRole('button', { name: '＋ Add file' }));
-    const filePath = await screen.findByText('src/app.ts');
-    fireEvent.click(filePath.closest('button')!);
-    fireEvent.click(screen.getByText('src/config.ts').closest('button')!);
+    const sourceDirectory = await screen.findByRole('button', { name: '展开目录 src' });
+    expect(screen.queryByText('app.ts')).not.toBeInTheDocument();
+    fireEvent.click(sourceDirectory);
+    fireEvent.click(screen.getByText('app.ts').closest('button')!);
+    fireEvent.click(screen.getByText('config.ts').closest('button')!);
     expect(screen.getByRole('dialog', { name: '选择上下文文件' })).toBeInTheDocument();
     expect(screen.getByText('已选 2/8')).toBeInTheDocument();
     fireEvent.mouseDown(screen.getByRole('heading', { name: 'terminal-web' }));
@@ -210,6 +232,29 @@ describe('CodexChat', () => {
       },
     ));
     expect(screen.getByText('📎 src/app.ts')).toBeInTheDocument();
+  });
+
+  it('shows matching files in their automatically expanded directory path', async () => {
+    vi.mocked(api.getRepositoryContextFiles).mockResolvedValue({
+      files: [
+        { id: `file_${'b'.repeat(43)}`, relativePath: 'src/components/Editor.tsx', size: 512 },
+        { id: `file_${'c'.repeat(43)}`, relativePath: 'tests/Editor.test.tsx', size: 256 },
+      ],
+      truncated: false,
+    });
+    render(<CodexChat />);
+    await screen.findByRole('heading', { name: 'terminal-web' });
+    fireEvent.click(screen.getByRole('button', { name: '＋ Add file' }));
+    await screen.findByRole('button', { name: '展开目录 src' });
+
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索仓库文件' }), {
+      target: { value: 'components/editor' },
+    });
+
+    expect(screen.getByRole('button', { name: '折叠目录 src' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '折叠目录 src/components' })).toBeInTheDocument();
+    expect(screen.getByText('Editor.tsx')).toBeInTheDocument();
+    expect(screen.queryByText('Editor.test.tsx')).not.toBeInTheDocument();
   });
 
   it('continues the server-issued Codex conversation on the next message', async () => {
@@ -287,7 +332,7 @@ describe('CodexChat', () => {
   });
 
   it('shows an actionable warning and disables sending when Codex CLI is unavailable', async () => {
-    vi.mocked(api.getCodexStatus).mockResolvedValue({ available: false, version: null });
+    vi.mocked(api.getCodexStatus).mockResolvedValue({ available: false, version: null, mode: 'yolo' });
     render(<CodexChat />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('服务器未检测到可用的 Codex CLI');

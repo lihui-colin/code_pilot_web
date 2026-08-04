@@ -123,6 +123,7 @@ export interface RepositoryContextFileListing {
 export interface CodexCliStatus {
   available: boolean;
   version: string | null;
+  mode: 'yolo' | 'sandbox';
 }
 
 export interface CodexChatAppearance {

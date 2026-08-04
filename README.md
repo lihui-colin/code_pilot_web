@@ -152,7 +152,7 @@ Codex 会话页面的字体和字号可以在 `config.json` 中配置，修改�
 
 `fontSize` 支持 `12` 到 `24` 的整数像素值；`fontFamily` 使用 CSS `font-family` 格式，服务器需要已安装对应字体，或者由浏览器访问端提供该字体。
 
-也可以在任意 Codex 会话页面点击左上角菜单，在抽屉中的“字体”和“字号”里即时修改。页面内设置保存在当前浏览器，并对所有 repository 的 Codex 页面生效；点击“恢复服务器默认”会重新使用 `config.json` 中的配置。
+也可以在任意 Codex 会话页面点击左上角菜单，在抽屉中的“字体”和“字号”里即时修改。页面内设置保存在当前浏览器，并对所有 repository 的 Codex 页面生效；点击“系统默认”会重新使用 `config.json` 中的配置。
 
 Codex 以该 repository 为工作目录，并使用服务端固定的 `--yolo` 参数运行，可以阅读和修改仓库文件、执行测试。`--yolo` 会跳过审批并绕过 Codex 沙箱，只应向受信任的 VPN 用户开放。页面或 HTTP 连接关闭时，未完成的 turn 会继续在管理服务后台运行；重新进入同一 repository 时恢复消息和运行状态。turn 成功完成后，服务端把 conversation ID 写入 `data/state.json`；管理服务重启后从该状态恢复，并使用当前 Codex 版本支持的 `codex exec --yolo ... resume <id> -` 继续会话。Codex 响应不会把原始 stderr、工具事件和服务器绝对路径发送到浏览器。
 

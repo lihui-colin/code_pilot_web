@@ -196,6 +196,7 @@
 25. Codex turn 成功完成后才持久化 repository ID 到 conversation ID；运行中、失败、停止和超时不写入新 ID。
 26. 管理服务重启后从状态文件恢复 conversation ID，页面无需依赖浏览器缓存即可显示可继续的会话，下一条消息固定使用 `codex exec ... resume <id> -`。
 27. `codexChatAppearance` 只接受非空字体族和 `12` 到 `24` 的整数像素字号；`GET /api/codex/appearance` 只返回这两个字段，页面把配置应用到消息、输入和抽屉文本。任意 Codex 页面抽屉中的字体和字号覆盖立即生效、保存到浏览器并跨 repository 共享，恢复默认后删除覆盖并重新应用服务端配置。
+28. “Add file”按照 repository 相对路径构建可展开目录树，目录优先于文件；路径搜索只显示匹配文件及其父目录并自动展开，文件选择仍提交原服务端签发的 opaque ID。
 
 ## MVP-4：生产化
 

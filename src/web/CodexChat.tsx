@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type {
   CodexChatAppearance,
   CodexChatMessageSnapshot,
@@ -39,6 +39,52 @@ const fontOptions = [
   { label: '系统衬线字体', value: 'ui-serif, Georgia, serif' },
   { label: '系统等宽字体', value: 'ui-monospace, "SFMono-Regular", Consolas, monospace' },
 ];
+
+interface ContextFileTreeDirectory {
+  type: 'directory';
+  name: string;
+  path: string;
+  children: ContextFileTreeNode[];
+}
+
+interface ContextFileTreeFile {
+  type: 'file';
+  name: string;
+  path: string;
+  file: RepositoryContextFile;
+}
+
+type ContextFileTreeNode = ContextFileTreeDirectory | ContextFileTreeFile;
+
+function buildContextFileTree(files: RepositoryContextFile[]): ContextFileTreeNode[] {
+  const root: ContextFileTreeDirectory = { type: 'directory', name: '', path: '', children: [] };
+  for (const file of files) {
+    const parts = file.relativePath.split('/');
+    let directory = root;
+    for (const [index, part] of parts.entries()) {
+      const nodePath = parts.slice(0, index + 1).join('/');
+      if (index === parts.length - 1) {
+        directory.children.push({ type: 'file', name: part, path: nodePath, file });
+        continue;
+      }
+      let child = directory.children.find(node => node.type === 'directory' && node.name === part);
+      if (!child || child.type !== 'directory') {
+        child = { type: 'directory', name: part, path: nodePath, children: [] };
+        directory.children.push(child);
+      }
+      directory = child;
+    }
+  }
+  const sortNodes = (nodes: ContextFileTreeNode[]) => {
+    nodes.sort((left, right) => {
+      if (left.type !== right.type) return left.type === 'directory' ? -1 : 1;
+      return left.name.localeCompare(right.name);
+    });
+    for (const node of nodes) if (node.type === 'directory') sortNodes(node.children);
+  };
+  sortNodes(root.children);
+  return root.children;
+}
 
 function readStoredDisplayName(): string {
   try {
@@ -100,6 +146,7 @@ export function CodexChat() {
   const [selectedContextFiles, setSelectedContextFiles] = useState<RepositoryContextFile[]>([]);
   const [contextFilesTruncated, setContextFilesTruncated] = useState(false);
   const [fileSearch, setFileSearch] = useState('');
+  const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(() => new Set());
   const [filesLoading, setFilesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEnd = useRef<HTMLDivElement | null>(null);
@@ -274,6 +321,15 @@ export function CodexChat() {
     });
   };
 
+  const toggleDirectory = (directoryPath: string) => {
+    setExpandedDirectories(current => {
+      const next = new Set(current);
+      if (next.has(directoryPath)) next.delete(directoryPath);
+      else next.add(directoryPath);
+      return next;
+    });
+  };
+
   const send = async (message = draft) => {
     const content = message.trim();
     if (!content || !repositoryId || !repository || !codexStatus?.available || running) return;
@@ -337,8 +393,47 @@ export function CodexChat() {
 
   const normalizedFileSearch = fileSearch.trim().toLocaleLowerCase();
   const visibleContextFiles = (contextFiles ?? [])
-    .filter(file => !normalizedFileSearch || file.relativePath.toLocaleLowerCase().includes(normalizedFileSearch))
-    .slice(0, 100);
+    .filter(file => !normalizedFileSearch || file.relativePath.toLocaleLowerCase().includes(normalizedFileSearch));
+  const contextFileTree = buildContextFileTree(visibleContextFiles);
+  const renderContextFileTree = (nodes: ContextFileTreeNode[]): ReactNode => (
+    <ul className="chat-file-tree">
+      {nodes.map(node => {
+        if (node.type === 'directory') {
+          const expanded = Boolean(normalizedFileSearch) || expandedDirectories.has(node.path);
+          return (
+            <li className="directory" key={node.path}>
+              <button
+                type="button"
+                aria-expanded={expanded}
+                aria-label={`${expanded ? '折叠' : '展开'}目录 ${node.path}`}
+                onClick={() => toggleDirectory(node.path)}
+              >
+                <span>{expanded ? '▾' : '▸'}</span>
+                <strong>{node.name}</strong>
+              </button>
+              {expanded && renderContextFileTree(node.children)}
+            </li>
+          );
+        }
+        const selected = selectedContextFiles.some(candidate => candidate.id === node.file.id);
+        return (
+          <li className="file" key={node.file.id}>
+            <button
+              type="button"
+              className={selected ? 'selected' : ''}
+              onClick={() => toggleContextFile(node.file)}
+              disabled={!selected && selectedContextFiles.length >= 8}
+              title={node.path}
+            >
+              <span>{selected ? '✓' : '+'}</span>
+              <code>{node.name}</code>
+              <small>{Math.max(1, Math.ceil(node.file.size / 1024))} KiB</small>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
 
   return (
     <main
@@ -399,16 +494,24 @@ export function CodexChat() {
                   }}
                 />
               </label>
-              <button type="button" onClick={resetAppearance} disabled={!appearanceOverride}>恢复服务器默认</button>
+              <button
+                className="chat-appearance-reset"
+                type="button"
+                aria-label="恢复服务器默认"
+                onClick={resetAppearance}
+                disabled={!appearanceOverride}
+              >系统默认</button>
             </div>
             <div className="chat-repository-card">
               <small>当前仓库</small>
               <strong>{repository?.name ?? (loading ? '加载中…' : '不可用')}</strong>
-              <span>{repository?.relativePath || '.'}</span>
+              {repository?.relativePath && repository.relativePath !== repository.name
+                ? <span>{repository.relativePath}</span>
+                : null}
             </div>
             <p className="chat-security-note">
               {codexStatus?.available
-                ? `${codexStatus.version ?? 'Codex CLI'} · 当前仓库 · workspace-write 沙箱`
+                ? `${codexStatus.version ?? 'Codex CLI'} · 当前仓库 · ${codexStatus.mode === 'yolo' ? 'YOLO 模式' : '沙箱模式'}`
                 : '发送消息前会检测后台服务是否可以调用 Codex CLI。'}
             </p>
           </aside>
@@ -484,25 +587,10 @@ export function CodexChat() {
               />
               <div className="chat-file-list">
                 {filesLoading && <p>正在读取仓库文件…</p>}
-                {!filesLoading && visibleContextFiles.map(file => {
-                  const selected = selectedContextFiles.some(candidate => candidate.id === file.id);
-                  return (
-                    <button
-                      type="button"
-                      className={selected ? 'selected' : ''}
-                      key={file.id}
-                      onClick={() => toggleContextFile(file)}
-                      disabled={!selected && selectedContextFiles.length >= 8}
-                    >
-                      <span>{selected ? '✓' : '+'}</span>
-                      <code>{file.relativePath}</code>
-                      <small>{Math.max(1, Math.ceil(file.size / 1024))} KiB</small>
-                    </button>
-                  );
-                })}
+                {!filesLoading && renderContextFileTree(contextFileTree)}
                 {!filesLoading && visibleContextFiles.length === 0 && <p>没有匹配的可附加文本文件。</p>}
               </div>
-              {(contextFilesTruncated || visibleContextFiles.length === 100) && (
+              {contextFilesTruncated && (
                 <small className="chat-file-limit-note">文件较多，请通过路径搜索缩小范围。</small>
               )}
             </section>

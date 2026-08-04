@@ -115,6 +115,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .chat-appearance-settings input, .chat-appearance-settings select { width: 100%; min-width: 0; padding: .7rem .8rem; border: 1px solid #315048; border-radius: .55rem; outline: 0; color: #eef4f2; background: #0d201c; font: inherit; }
 .chat-appearance-settings input:focus, .chat-appearance-settings select:focus { border-color: #5ce0b6; }
 .chat-appearance-settings button { grid-column: 1 / -1; color: #a8c2ba; background: transparent; border-color: #38564f; }
+.chat-appearance-settings .chat-appearance-reset:disabled { cursor: default; }
 .chat-repository-card { display: grid; gap: .35rem; margin-top: .5rem; padding: 1rem; border: 1px solid #29433d; border-radius: .75rem; background: #0e211d; }
 .chat-repository-card small { color: #78938c; }
 .chat-repository-card span { color: #8ca59e; font: .78rem "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
@@ -164,11 +165,16 @@ tbody tr:last-child td { border-bottom: 0; }
 .chat-file-picker > input:focus { border-color: #5ce0b6; }
 .chat-file-list { min-height: 4rem; overflow-y: auto; border: 1px solid #233d37; border-radius: .6rem; }
 .chat-file-list > p { margin: 0; padding: 1rem; color: #78938c; text-align: center; }
-.chat-file-list > button { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) auto; align-items: center; gap: .55rem; width: 100%; padding: .6rem .7rem; border: 0; border-bottom: 1px solid #1c322d; border-radius: 0; color: #bfd1cc; background: transparent; text-align: left; }
-.chat-file-list > button:last-child { border-bottom: 0; }
-.chat-file-list > button:hover, .chat-file-list > button.selected { background: #123229; }
-.chat-file-list code { min-width: 0; color: inherit; font: .75rem "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
-.chat-file-list small { color: #718a83; white-space: nowrap; }
+.chat-file-tree { margin: 0; padding: 0; list-style: none; }
+.chat-file-tree .chat-file-tree { margin-left: 1rem; border-left: 1px solid #1c322d; }
+.chat-file-tree li > button { width: 100%; border: 0; border-radius: 0; color: #bfd1cc; background: transparent; text-align: left; }
+.chat-file-tree li > button:hover, .chat-file-tree li > button.selected { background: #123229; }
+.chat-file-tree li.directory > button { display: flex; align-items: center; gap: .5rem; padding: .55rem .7rem; }
+.chat-file-tree li.directory > button > span { width: 1rem; color: #78938c; text-align: center; }
+.chat-file-tree li.directory > button > strong { min-width: 0; overflow-wrap: anywhere; }
+.chat-file-tree li.file > button { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) auto; align-items: center; gap: .55rem; padding: .55rem .7rem; }
+.chat-file-tree code { min-width: 0; color: inherit; font: .75rem "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+.chat-file-tree small { color: #718a83; white-space: nowrap; }
 .chat-selected-files { display: flex; gap: .4rem; padding: .65rem .75rem 0; overflow-x: auto; }
 .chat-selected-files button { display: inline-flex; align-items: center; gap: .45rem; max-width: 18rem; padding: .35rem .5rem; border-color: #38564f; color: #b9d3cb; background: #102c25; font: .7rem "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
 .chat-selected-files button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
