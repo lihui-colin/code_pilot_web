@@ -65,7 +65,7 @@
 3. 写入 Token 后 `config.json` 权限为 `0600`，更新使用同目录临时文件和原子替换。
 4. 配置中保存的 Token 名称仍存在于 Zellij 时直接复用名称和值。
 5. 配置中的 Token 名称已被撤销时自动创建并保存替代名称和值。
-6. 专用 API 和主页 Token 区域显示名称和值，并可复制 Token 值。
+6. 主页默认隐藏 Token 名称、值及管理操作；打开 Token 管理侧边栏后显示名称和值并可复制，侧边栏可通过关闭按钮、遮罩和 Esc 关闭。
 7. 删除操作使用配置保存的名称调用 `web --revoke-token <name>`，成功后同时移除名称和值。
 8. 重新创建先持久化新名称和值，再按旧名称撤销旧 Token。
 9. 普通日志、错误响应和其他 API 不包含 Token 值或可能含 Token 的原始命令输出。
@@ -115,6 +115,7 @@
 8. Session URL 使用主服务同源 `/zellij/<session>`，不包含 Zellij 上游端口。
 9. Zellij Web 只监听 localhost；入口 HTML 的 base 被改写为 `/zellij/`，登录 HTTP 和终端 WebSocket 均通过主服务代理。
 10. 防火墙只需公开主服务端口，Zellij Web、code-viewer 和 OpenVSCode 端口从外部不可访问。
+11. Session 表格默认隐藏；Workspace 管理区的“会话列表”按钮打开弹窗，弹窗可通过关闭按钮、遮罩和 Esc 关闭，并在打开或成功删除 Session 后自动关闭。
 
 ## MVP-2：Session 操作
 
@@ -191,6 +192,7 @@
 20. 30 分钟超时和 4 MiB stdout 超限会清理进程组并返回脱敏错误，stderr 保留量不超过 64 KiB且不返回浏览器。
 21. 管理服务关闭会取消所有活动 Codex turn，且不删除任何 Zellij Session。
 22. 再次进入同一 repository 时恢复服务端快照；运行中通过同源 SSE 接收 app-server `item/agentMessage/delta` 对应的脱敏快照，密集 delta 在不超过 40 毫秒的窗口内合并发送且最终状态立即发送，断线重连后恢复完整助手文本；浏览器对运行中快照的持久化不超过每 100 毫秒一次，最终状态立即保存；首段文本到达前显示等待动画，部分文本到达后最新助手消息持续显示动态生成提示，完成后提示消失；停留底部时自动跟随流式输出，向上阅读历史时保持当前滚动位置并提供回到最新消息入口。
+23. Codex 页面通过 `pagehide` 和组件卸载释放 EventSource；服务端在 SSE 响应关闭、错误或请求中止时释放订阅和心跳，且这些断线路径都不停止后台 turn。管理首页读取 `/api/codex/activity`，在窗口重新获得焦点或定时刷新时把对应 repository 的 Codex 按钮显示为“生成中”。失败或停止且没有助手文本时不显示等待动画。
 23. 管理服务重启后，本地 `running` 快照转换为已中断状态，保留消息和 conversation ID，下一条消息使用原生 resume。
 24. “新对话”在无运行中 turn 时清空服务端和浏览器快照；运行中请求返回冲突。
 25. Codex turn 成功完成后才持久化 repository ID 到 conversation ID；运行中、失败、停止和超时不写入新 ID。

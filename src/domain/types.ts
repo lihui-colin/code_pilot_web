@@ -143,6 +143,7 @@ export interface CodexConversationSnapshot {
   conversationId: string | null;
   messages: CodexChatMessageSnapshot[];
   status: 'idle' | 'running' | 'failed' | 'stopped';
+  phase?: 'starting' | 'generating';
   error: string | null;
   updatedAt: string;
 }
@@ -150,3 +151,7 @@ export interface CodexConversationSnapshot {
 export type CodexConversationStreamEvent = {
   conversation: CodexConversationSnapshot | null;
 };
+
+export interface CodexConversationActivity {
+  runningRepositoryIds: string[];
+}

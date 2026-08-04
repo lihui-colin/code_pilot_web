@@ -2,6 +2,7 @@ import type {
   CodexChatAppearance,
   CodexChatRequest,
   CodexCliStatus,
+  CodexConversationActivity,
   CodexConversationSnapshot,
   ReadinessResult,
   RepositoryContextFileListing,
@@ -112,6 +113,10 @@ export function getCodexAppearance(): Promise<CodexChatAppearance> {
   return getJson<CodexChatAppearance>('/api/codex/appearance');
 }
 
+export function getCodexActivity(): Promise<CodexConversationActivity> {
+  return getJson<CodexConversationActivity>('/api/codex/activity');
+}
+
 export function getRepositoryContextFiles(repositoryId: string): Promise<RepositoryContextFileListing> {
   return getJson<RepositoryContextFileListing>(`/api/repositories/${encodeURIComponent(repositoryId)}/files`);
 }
@@ -139,7 +144,16 @@ export function subscribeCodexConversation(
     }
   };
   source.onerror = () => onError?.();
-  return () => source.close();
+  const page = typeof window === 'undefined' ? null : window;
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    page?.removeEventListener('pagehide', close);
+    source.close();
+  };
+  page?.addEventListener('pagehide', close, { once: true });
+  return close;
 }
 
 export async function startCodexMessage(request: CodexChatRequest): Promise<CodexConversationSnapshot> {

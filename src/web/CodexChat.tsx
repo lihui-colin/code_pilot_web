@@ -18,6 +18,7 @@ import {
   startCodexMessage,
   stopCodexConversation,
 } from './api.js';
+import { errorMessage, readBrowserStorage, writeBrowserStorage } from './browser-utils.js';
 
 const suggestions = [
   '介绍这个项目的架构和主要模块',
@@ -91,6 +92,7 @@ interface ChatMessageProps {
   displayName: string;
   displayAvatar: string;
   streaming: boolean;
+  starting: boolean;
 }
 
 const ChatMessage = memo(function ChatMessage({
@@ -98,6 +100,7 @@ const ChatMessage = memo(function ChatMessage({
   displayName,
   displayAvatar,
   streaming,
+  starting,
 }: ChatMessageProps) {
   return (
     <article className={`chat-message ${message.role}`}>
@@ -121,7 +124,11 @@ const ChatMessage = memo(function ChatMessage({
               )}
             </div>
           )
-          : <div className="chat-thinking"><i /><i /><i /></div>}
+          : starting
+            ? <div className="chat-starting" role="status"><i />正在启动 Codex app-server…</div>
+            : streaming
+            ? <div className="chat-thinking"><i /><i /><i /></div>
+            : <div className="chat-message-empty">未收到回复</div>}
       </div>
     </article>
   );
@@ -158,16 +165,12 @@ function buildContextFileTree(files: RepositoryContextFile[]): ContextFileTreeNo
 }
 
 function readStoredDisplayName(): string {
-  try {
-    return window.localStorage?.getItem?.(displayNameStorageKey) ?? '';
-  } catch {
-    return '';
-  }
+  return readBrowserStorage(displayNameStorageKey) ?? '';
 }
 
 function readStoredAppearance(): CodexChatAppearance | null {
   try {
-    const value = window.localStorage?.getItem?.(appearanceStorageKey);
+    const value = readBrowserStorage(appearanceStorageKey);
     if (!value) return null;
     const stored = JSON.parse(value) as Partial<CodexChatAppearance>;
     if (typeof stored.fontFamily !== 'string' || !stored.fontFamily.trim()) return null;
@@ -184,7 +187,7 @@ function conversationStorageKey(repositoryId: string): string {
 
 function readStoredConversation(repositoryId: string): CodexConversationSnapshot | null {
   try {
-    const value = window.localStorage?.getItem?.(conversationStorageKey(repositoryId));
+    const value = readBrowserStorage(conversationStorageKey(repositoryId));
     if (!value) return null;
     const snapshot = JSON.parse(value) as CodexConversationSnapshot;
     return snapshot.status === 'running'
@@ -234,6 +237,7 @@ export function CodexChat() {
   const appearance = appearanceOverride ?? configuredAppearance;
   const messages = conversation?.messages ?? [];
   const conversationId = conversation?.conversationId ?? null;
+  const starting = startingTurn || (conversation?.status === 'running' && conversation.phase === 'starting');
   const running = startingTurn || conversation?.status === 'running';
   const error = requestError
     ?? conversation?.error
@@ -245,30 +249,17 @@ export function CodexChat() {
   const updateDisplayName = (value: string) => {
     const nextValue = value.slice(0, 24);
     setDisplayNameInput(nextValue);
-    try {
-      if (nextValue.trim()) window.localStorage?.setItem?.(displayNameStorageKey, nextValue.trim());
-      else window.localStorage?.removeItem?.(displayNameStorageKey);
-    } catch {
-      // The preference remains active for this page when browser storage is unavailable.
-    }
+    writeBrowserStorage(displayNameStorageKey, nextValue.trim() || null);
   };
 
   const updateAppearance = (nextAppearance: CodexChatAppearance) => {
     setAppearanceOverride(nextAppearance);
-    try {
-      window.localStorage?.setItem?.(appearanceStorageKey, JSON.stringify(nextAppearance));
-    } catch {
-      // The preference remains active for this page when browser storage is unavailable.
-    }
+    writeBrowserStorage(appearanceStorageKey, JSON.stringify(nextAppearance));
   };
 
   const resetAppearance = () => {
     setAppearanceOverride(null);
-    try {
-      window.localStorage?.removeItem?.(appearanceStorageKey);
-    } catch {
-      // The server defaults still apply for this page when browser storage is unavailable.
-    }
+    writeBrowserStorage(appearanceStorageKey, null);
   };
 
   const flushStoredConversation = () => {
@@ -279,12 +270,7 @@ export function CodexChat() {
     const pending = pendingStorageRef.current;
     pendingStorageRef.current = null;
     if (!pending) return;
-    try {
-      if (pending.snapshot === null) window.localStorage?.removeItem?.(pending.key);
-      else window.localStorage?.setItem?.(pending.key, JSON.stringify(pending.snapshot));
-    } catch {
-      // Conversation recovery still works from the server when browser storage is unavailable.
-    }
+    writeBrowserStorage(pending.key, pending.snapshot === null ? null : JSON.stringify(pending.snapshot));
   };
 
   const storeConversation = (snapshot: CodexConversationSnapshot | null) => {
@@ -351,7 +337,7 @@ export function CodexChat() {
         : serverConversation ?? storedConversation;
       applySnapshot(restoredConversation);
     }).catch(caught => {
-      setRequestError(caught instanceof Error ? caught.message : '仓库加载失败');
+      setRequestError(errorMessage(caught, '仓库加载失败'));
     }).finally(() => setLoading(false));
   }, [repositoryId]);
 
@@ -438,7 +424,7 @@ export function CodexChat() {
       setContextFiles(listing.files);
       setContextFilesTruncated(listing.truncated);
     } catch (caught) {
-      setRequestError(caught instanceof Error ? caught.message : '仓库文件加载失败');
+      setRequestError(errorMessage(caught, '仓库文件加载失败'));
       setFilePickerOpen(false);
     } finally {
       setFilesLoading(false);
@@ -483,7 +469,7 @@ export function CodexChat() {
       });
       applySnapshot(snapshot);
     } catch (caught) {
-      setRequestError(caught instanceof Error ? caught.message : 'Codex 请求失败');
+      setRequestError(errorMessage(caught, 'Codex 请求失败'));
     } finally {
       setStartingTurn(false);
     }
@@ -512,7 +498,7 @@ export function CodexChat() {
       setRequestError(null);
       setPanelOpen(false);
     } catch (caught) {
-      setRequestError(caught instanceof Error ? caught.message : '新对话创建失败');
+      setRequestError(errorMessage(caught, '新对话创建失败'));
     }
   };
 
@@ -523,7 +509,7 @@ export function CodexChat() {
       const snapshot = await getCodexConversation(repositoryId);
       applySnapshot(snapshot);
     } catch (caught) {
-      setRequestError(caught instanceof Error ? caught.message : 'Codex 停止失败');
+      setRequestError(errorMessage(caught, 'Codex 停止失败'));
     }
   };
 
@@ -672,7 +658,7 @@ export function CodexChat() {
             <div><small>CODING AGENT</small><h1>{repository?.name ?? 'Codex'}</h1></div>
           </div>
           <span className={running ? 'chat-status busy' : `chat-status${codexStatus && !codexStatus.available ? ' unavailable' : ''}`}>
-            {running ? '处理中' : codexStatus?.available ? '就绪' : loading ? '检测中' : '不可用'}
+            {starting ? '正在启动 Codex…' : running ? '生成中' : codexStatus?.available ? '就绪' : loading ? '检测中' : '不可用'}
           </span>
         </header>
 
@@ -698,6 +684,7 @@ export function CodexChat() {
                 displayName={displayName}
                 displayAvatar={displayAvatar}
                 streaming={running && message.role === 'assistant' && index === messages.length - 1}
+                starting={starting && message.role === 'assistant' && index === messages.length - 1}
               />
             ))}
           </div>
@@ -763,7 +750,9 @@ export function CodexChat() {
                 <span>{selectedContextFiles.length > 0 ? `已选 ${selectedContextFiles.length}/8` : 'Enter 发送 · Shift+Enter 换行'}</span>
               </div>
               {running ? (
-                <button className="danger-button" type="button" onClick={() => void stop()}>停止</button>
+                <button className="danger-button" type="button" onClick={() => void stop()}>
+                  {starting ? '取消启动' : '停止'}
+                </button>
               ) : (
                 <button type="submit" disabled={!draft.trim() || !repository || !codexStatus?.available}>发送</button>
               )}

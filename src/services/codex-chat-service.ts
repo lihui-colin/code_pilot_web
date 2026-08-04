@@ -314,6 +314,7 @@ export interface CodexChatServiceLike {
   status(): Promise<CodexCliStatus>;
   send(turn: CodexChatTurn): Promise<void>;
   getConversation(repositoryId: string): CodexConversationSnapshot | null;
+  getRunningRepositoryIds?(): string[];
   subscribe?(repositoryId: string, listener: (event: CodexConversationStreamEvent) => void): () => void;
   clearConversation(repositoryId: string): Promise<void> | void;
   stopConversation(repositoryId: string): void;
@@ -394,6 +395,12 @@ export class CodexChatService implements CodexChatServiceLike {
       error: null,
       updatedAt: new Date(0).toISOString(),
     } : null;
+  }
+
+  getRunningRepositoryIds(): string[] {
+    return [...this.snapshots]
+      .filter(([, snapshot]) => snapshot.status === 'running')
+      .map(([repositoryId]) => repositoryId);
   }
 
   subscribe(repositoryId: string, listener: (event: CodexConversationStreamEvent) => void): () => void {
@@ -495,6 +502,7 @@ export class CodexChatService implements CodexChatServiceLike {
       conversationId: conversationId ?? null,
       messages: [...(currentSnapshot?.messages ?? []), userMessage, assistantMessage],
       status: 'running',
+      phase: 'starting',
       error: null,
       updatedAt: new Date().toISOString(),
     };
@@ -516,10 +524,12 @@ export class CodexChatService implements CodexChatServiceLike {
       conversationId = id;
       this.conversations.set(id, turn.repositoryId);
       this.activeConversations.add(id);
+      snapshot.phase = 'generating';
       updateSnapshot(true);
     };
 
     const appendAssistantDelta = (itemId: string, delta: string) => {
+      snapshot.phase = 'generating';
       const sanitizedDelta = sanitizedAssistantText(delta, turn.repositoryRealPath);
       assistantTextByItem.set(itemId, `${assistantTextByItem.get(itemId) ?? ''}${sanitizedDelta}`);
       assistantMessage.content += sanitizedDelta;
@@ -584,12 +594,14 @@ export class CodexChatService implements CodexChatServiceLike {
       if (!conversationId) throw new ApiError(502, 'CODEX_PROTOCOL_ERROR', 'Codex did not start a conversation');
       if (turnFailed) throw new ApiError(502, 'CODEX_TURN_FAILED', 'Codex could not complete the request');
       snapshot.status = 'idle';
+      delete snapshot.phase;
       updateSnapshot(true);
       this.persistedConversations.set(turn.repositoryId, conversationId);
       await this.persistConversations(this.persistedConversations);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         snapshot.status = 'stopped';
+        delete snapshot.phase;
         if (!assistantMessage.content) assistantMessage.content = '（本次响应已停止）';
         updateSnapshot(true);
         throw error;
@@ -598,6 +610,7 @@ export class CodexChatService implements CodexChatServiceLike {
         ? error
         : new ApiError(502, 'CODEX_UNAVAILABLE', 'Codex is temporarily unavailable');
       snapshot.status = 'failed';
+      delete snapshot.phase;
       snapshot.error = apiError.message;
       if (!assistantMessage.content) {
         snapshot.messages = snapshot.messages.filter(message => message.id !== assistantMessage.id);

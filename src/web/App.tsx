@@ -13,6 +13,7 @@ import {
   deleteManualRepository,
   deleteSession,
   deleteZellijToken,
+  getCodexActivity,
   getReadiness,
   getRepositoryFolders,
   getRepositories,
@@ -21,6 +22,7 @@ import {
   regenerateZellijToken,
   restartServices,
 } from './api.js';
+import { errorMessage } from './browser-utils.js';
 
 interface DashboardState {
   readiness: ReadinessResult;
@@ -31,12 +33,15 @@ interface DashboardState {
 export function App() {
   const [dashboard, setDashboard] = useState<DashboardState | null>(null);
   const [repositories, setRepositories] = useState<RepositoryListingResponse | null>(null);
+  const [runningCodexRepositoryIds, setRunningCodexRepositoryIds] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyRepositoryId, setBusyRepositoryId] = useState<string | null>(null);
   const [busySessionName, setBusySessionName] = useState<string | null>(null);
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
+  const [tokenPanelOpen, setTokenPanelOpen] = useState(false);
+  const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [servicesRestarting, setServicesRestarting] = useState(false);
   const [folderPicker, setFolderPicker] = useState<RepositoryFolderListing | null>(null);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
@@ -62,6 +67,17 @@ export function App() {
     };
   }, [openRepositoryMenuId]);
 
+  useEffect(() => {
+    if (!tokenPanelOpen && !sessionPanelOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setTokenPanelOpen(false);
+      setSessionPanelOpen(false);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [sessionPanelOpen, tokenPanelOpen]);
+
   const refreshDashboard = useCallback(async () => {
     try {
       const [readiness, sessions, zellijToken] = await Promise.all([
@@ -70,7 +86,7 @@ export function App() {
       setDashboard({ readiness, sessions, zellijToken });
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '加载失败');
+      setError(errorMessage(caught, '加载失败'));
     } finally {
       setLoading(false);
     }
@@ -83,41 +99,42 @@ export function App() {
       await Promise.all([refreshDashboard(), refreshRepositories()]);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Zellij Session 创建失败');
+      setError(errorMessage(caught, 'Zellij Session 创建失败'));
     } finally {
       setBusyRepositoryId(null);
     }
   };
 
-  const removeRepositorySession = async (repositoryId: string, sessionName: string) => {
+  const removeSession = async (
+    sessionName: string,
+    setBusy: (busy: boolean) => void,
+    onSuccess?: () => void,
+  ) => {
     const confirmation = window.prompt(`删除会终止 Session 中的所有进程。请输入 ${sessionName} 确认删除：`);
     if (confirmation !== sessionName) return;
-    setBusyRepositoryId(repositoryId);
+    setBusy(true);
     try {
       await deleteSession(sessionName);
       await Promise.all([refreshDashboard(), refreshRepositories()]);
       setError(null);
+      onSuccess?.();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Zellij Session 删除失败');
+      setError(errorMessage(caught, 'Zellij Session 删除失败'));
     } finally {
-      setBusyRepositoryId(null);
+      setBusy(false);
     }
   };
 
-  const removeManagedSession = async (sessionName: string) => {
-    const confirmation = window.prompt(`删除会终止 Session 中的所有进程。请输入 ${sessionName} 确认删除：`);
-    if (confirmation !== sessionName) return;
-    setBusySessionName(sessionName);
-    try {
-      await deleteSession(sessionName);
-      await Promise.all([refreshDashboard(), refreshRepositories()]);
-      setError(null);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Zellij Session 删除失败');
-    } finally {
-      setBusySessionName(null);
-    }
-  };
+  const removeRepositorySession = (repositoryId: string, sessionName: string) => removeSession(
+    sessionName,
+    busy => setBusyRepositoryId(busy ? repositoryId : null),
+  );
+
+  const removeManagedSession = (sessionName: string) => removeSession(
+    sessionName,
+    busy => setBusySessionName(busy ? sessionName : null),
+    () => setSessionPanelOpen(false),
+  );
 
   const browseCode = async (repositoryId: string) => {
     const viewerWindow = window.open('about:blank', '_blank');
@@ -133,7 +150,7 @@ export function App() {
       setError(null);
     } catch (caught) {
       viewerWindow.close();
-      setError(caught instanceof Error ? caught.message : 'code-viewer 启动失败');
+      setError(errorMessage(caught, 'code-viewer 启动失败'));
     } finally {
       setBusyRepositoryId(null);
     }
@@ -172,7 +189,7 @@ export function App() {
       setDashboard(current => current ? { ...current, zellijToken } : current);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Token 创建失败');
+      setError(errorMessage(caught, 'Token 创建失败'));
     } finally {
       setTokenBusy(false);
     }
@@ -186,7 +203,7 @@ export function App() {
       setDashboard(current => current ? { ...current, zellijToken: null } : current);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Token 删除失败');
+      setError(errorMessage(caught, 'Token 删除失败'));
     } finally {
       setTokenBusy(false);
     }
@@ -197,7 +214,16 @@ export function App() {
       setRepositories(await getRepositories());
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '目录加载失败');
+      setError(errorMessage(caught, '目录加载失败'));
+    }
+  }, []);
+
+  const refreshCodexActivity = useCallback(async () => {
+    try {
+      const activity = await getCodexActivity();
+      setRunningCodexRepositoryIds(new Set(activity.runningRepositoryIds));
+    } catch {
+      // Keep the last known activity state when this optional status refresh fails.
     }
   }, []);
 
@@ -207,7 +233,7 @@ export function App() {
       setFolderPicker(await getRepositoryFolders(directoryId));
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '服务器目录加载失败');
+      setError(errorMessage(caught, '服务器目录加载失败'));
     } finally {
       setFolderPickerBusy(false);
     }
@@ -227,7 +253,7 @@ export function App() {
       setFolderPicker(null);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Git 仓库添加失败');
+      setError(errorMessage(caught, 'Git 仓库添加失败'));
     } finally {
       setFolderPickerBusy(false);
     }
@@ -241,7 +267,7 @@ export function App() {
       await refreshRepositories();
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '手动仓库移除失败');
+      setError(errorMessage(caught, '手动仓库移除失败'));
     } finally {
       setBusyRepositoryId(null);
     }
@@ -269,7 +295,7 @@ export function App() {
       }
       throw new Error('服务重启超时，请检查后台重启日志。');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '服务重启失败');
+      setError(errorMessage(caught, '服务重启失败'));
       setServicesRestarting(false);
     }
   };
@@ -277,23 +303,33 @@ export function App() {
   useEffect(() => {
     void refreshDashboard();
     void refreshRepositories();
+    void refreshCodexActivity();
     let timer: number | undefined;
     const updateTimer = () => {
       if (timer !== undefined) window.clearInterval(timer);
-      timer = document.hidden ? undefined : window.setInterval(() => void refreshDashboard(), 10_000);
+      timer = document.hidden ? undefined : window.setInterval(() => {
+        void refreshDashboard();
+        void refreshCodexActivity();
+      }, 10_000);
     };
     const onVisibilityChange = () => {
       updateTimer();
-      if (!document.hidden) void refreshDashboard();
+      if (!document.hidden) {
+        void refreshDashboard();
+        void refreshCodexActivity();
+      }
     };
+    const onFocus = () => void refreshCodexActivity();
     updateTimer();
     document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', onFocus);
     return () => {
       if (timer !== undefined) window.clearInterval(timer);
       if (copyFeedbackTimer.current !== undefined) window.clearTimeout(copyFeedbackTimer.current);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onFocus);
     };
-  }, [refreshDashboard, refreshRepositories]);
+  }, [refreshCodexActivity, refreshDashboard, refreshRepositories]);
 
   return (
     <main className="shell">
@@ -303,13 +339,125 @@ export function App() {
           <p className="hero-title-subtitle">Zellij管理与代码浏览</p>
           <p className="subtitle">通过公司内网 HTTPS 入口管理 Zellij Session 并浏览代码。</p>
         </div>
-        <button
-          className="restart-button"
-          type="button"
-          disabled={servicesRestarting}
-          onClick={() => void restartAllServices()}
-        >{servicesRestarting ? '服务重启中…' : '重启后台服务'}</button>
+        <div className="hero-actions">
+          <button
+            className="token-panel-trigger"
+            type="button"
+            aria-label="打开 Token 管理"
+            aria-expanded={tokenPanelOpen}
+            onClick={() => setTokenPanelOpen(true)}
+          >Token 管理 <span>{dashboard?.zellijToken ? '已配置' : '未配置'}</span></button>
+          <button
+            className="restart-button"
+            type="button"
+            disabled={servicesRestarting}
+            onClick={() => void restartAllServices()}
+          >{servicesRestarting ? '服务重启中…' : '重启后台服务'}</button>
+        </div>
       </header>
+
+      {tokenPanelOpen && (
+        <>
+          <button
+            className="token-panel-backdrop"
+            type="button"
+            aria-label="关闭 Token 管理"
+            onClick={() => setTokenPanelOpen(false)}
+          />
+          <aside className="token-sidebar" role="dialog" aria-modal="true" aria-label="Zellij Web Token 管理">
+            <div className="token-sidebar-heading">
+              <div><p className="eyebrow">ZELLIJ WEB</p><h2>Token 管理</h2></div>
+              <button type="button" aria-label="关闭 Token 管理" onClick={() => setTokenPanelOpen(false)}>×</button>
+            </div>
+            <div className="token-sidebar-status">
+              <small>当前状态</small>
+              <strong className={dashboard?.zellijToken ? 'status-ok' : 'status-warn'}>
+                {dashboard?.zellijToken ? '已配置' : '未配置'}
+              </strong>
+            </div>
+            {dashboard?.zellijToken ? (
+              <div className="token-content">
+                <span>名称：<strong>{dashboard.zellijToken.name}</strong></span>
+                <code>{dashboard.zellijToken.value}</code>
+              </div>
+            ) : <p className="empty">当前没有 Zellij Web Token。</p>}
+            <div className="token-sidebar-actions">
+              {dashboard?.zellijToken && (
+                <button type="button" onClick={() => void copyToken()}>{tokenCopied ? '已复制' : '复制 Token'}</button>
+              )}
+              <button type="button" onClick={() => void regenerateToken()} disabled={tokenBusy}>
+                {dashboard?.zellijToken ? '重新创建' : '创建 Token'}
+              </button>
+              {dashboard?.zellijToken && (
+                <button className="danger-button" type="button" onClick={() => void removeToken()} disabled={tokenBusy}>
+                  删除 Token
+                </button>
+              )}
+            </div>
+            <p className="token-security-note">Token 仅用于登录同源 Zellij Web，请勿发送给不受信任的人员。</p>
+          </aside>
+        </>
+      )}
+      <span className={`token-copy-feedback${tokenCopied ? ' visible' : ''}`} role="status" aria-live="polite">
+        {tokenCopied ? 'Token 已复制' : ''}
+      </span>
+
+      {sessionPanelOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setSessionPanelOpen(false);
+          }}
+        >
+          <section className="session-dialog" role="dialog" aria-modal="true" aria-label="Zellij 会话列表">
+            <div className="panel-heading">
+              <div><p className="eyebrow">SESSIONS</p><h2>Zellij 会话</h2></div>
+              <button type="button" aria-label="关闭会话列表" onClick={() => setSessionPanelOpen(false)}>×</button>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>名称</th><th>来源</th><th>目录</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody>
+                  {dashboard?.sessions.map(session => (
+                    <tr key={session.name}>
+                      <td className="mono">{session.name}</td>
+                      <td>{session.origin === 'managed' ? '托管' : '外部'}</td>
+                      <td className="path">{session.relativePath ?? '—'}</td>
+                      <td><span className="pill">运行中</span></td>
+                      <td>
+                        <div className="session-actions">
+                          <a
+                            className="button-link"
+                            href={session.webUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => {
+                              if (session.repositoryId) void copyToken();
+                              setSessionPanelOpen(false);
+                            }}
+                          >
+                            打开
+                          </a>
+                          <button
+                            className="danger-button"
+                            type="button"
+                            disabled={busySessionName === session.name}
+                            onClick={() => void removeManagedSession(session.name)}
+                          >
+                            {busySessionName === session.name ? '删除中…' : '删除'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!loading && dashboard?.sessions.length === 0 && <tr><td colSpan={5} className="empty">暂无会话</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
 
       {error && <div className="error" role="alert">{error}</div>}
       <section className="status-grid" aria-label="服务状态">
@@ -331,84 +479,27 @@ export function App() {
         </article>
       </section>
 
-      <section className="panel token-panel" aria-label="Zellij Web Token">
-        <div className="panel-heading">
-          <div><p className="eyebrow">ZELLIJ WEB</p><h2>登录 Token</h2></div>
-          <div className="token-actions">
-            {dashboard?.zellijToken && (
-              <button type="button" onClick={() => void copyToken()}>{tokenCopied ? '已复制' : '复制 Token'}</button>
-            )}
-            <span className="copy-feedback" role="status" aria-live="polite">
-              {tokenCopied ? 'Token 已复制' : ''}
-            </span>
-            <button type="button" onClick={() => void regenerateToken()} disabled={tokenBusy}>
-              {dashboard?.zellijToken ? '重新创建' : '创建 Token'}
-            </button>
-            {dashboard?.zellijToken && <button className="danger-button" type="button" onClick={() => void removeToken()} disabled={tokenBusy}>删除 Token</button>}
-          </div>
-        </div>
-        {dashboard?.zellijToken ? (
-          <div className="token-content">
-            <span>名称：<strong>{dashboard.zellijToken.name}</strong></span>
-            <code>{dashboard.zellijToken.value}</code>
-          </div>
-        ) : <p className="empty">当前没有 Zellij Web Token。</p>}
-      </section>
-
-      <section className="panel">
-        <div className="panel-heading">
-          <div><p className="eyebrow">SESSIONS</p><h2>Zellij 会话</h2></div>
-          <button type="button" onClick={() => void refreshDashboard()} disabled={loading}>刷新</button>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>名称</th><th>来源</th><th>目录</th><th>状态</th><th>操作</th></tr></thead>
-            <tbody>
-              {dashboard?.sessions.map(session => (
-                <tr key={session.name}>
-                  <td className="mono">{session.name}</td>
-                  <td>{session.origin === 'managed' ? '托管' : '外部'}</td>
-                  <td className="path">{session.relativePath ?? '—'}</td>
-                  <td><span className="pill">运行中</span></td>
-                  <td>
-                    <div className="session-actions">
-                      <a
-                        className="button-link"
-                        href={session.webUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={session.repositoryId ? () => void copyToken() : undefined}
-                      >
-                        打开
-                      </a>
-                      <button
-                        className="danger-button"
-                        type="button"
-                        disabled={busySessionName === session.name}
-                        onClick={() => void removeManagedSession(session.name)}
-                      >
-                        {busySessionName === session.name ? '删除中…' : '删除'}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!loading && dashboard?.sessions.length === 0 && <tr><td colSpan={5} className="empty">暂无会话</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
       <section className="panel repository-panel">
         <div className="panel-heading directory-heading">
-          <div><p className="eyebrow">WORKSPACE</p><h2>Git 仓库</h2></div>
-          <div className="directory-heading-actions">
+          <div className="workspace-heading-copy">
+            <p className="eyebrow">WORKSPACE</p>
+            <h2>Git 仓库</h2>
             <span className="workspace-root">{repositories?.current.name ?? '—'}</span>
+          </div>
+          <div className="directory-heading-actions">
+            <button
+              type="button"
+              aria-label="打开会话列表"
+              aria-expanded={sessionPanelOpen}
+              onClick={() => setSessionPanelOpen(true)}
+            >会话列表 <span className="action-count">{dashboard?.sessions.length ?? 0}</span></button>
             <button type="button" onClick={() => void openFolderPicker()}>添加文件夹</button>
           </div>
         </div>
         <div className="directory-list">
-          {repositories?.entries.map(entry => (
+          {repositories?.entries.map(entry => {
+            const codexRunning = runningCodexRepositoryIds.has(entry.id);
+            return (
             <article className="directory-row" key={entry.id}>
               <div className="kind-icon repository">&lt;/&gt;</div>
               <div className="directory-copy">
@@ -437,11 +528,11 @@ export function App() {
                   >创建 Zellij Session</button>
                 )}
                 <a
-                  className="button-link codex-chat-link"
+                  className={`button-link codex-chat-link${codexRunning ? ' running' : ''}`}
                   href={`/codex-chat?repositoryId=${encodeURIComponent(entry.id)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                >与 Codex 对话</a>
+                >{codexRunning ? <><span className="codex-running-dot" aria-hidden="true" />Codex 生成中…</> : '与 Codex 对话'}</a>
                 <div
                   className="repository-more"
                   data-repository-menu-id={entry.id}
@@ -497,7 +588,8 @@ export function App() {
                 </div>
               </div>
             </article>
-          ))}
+            );
+          })}
           {repositories?.entries.length === 0 && <p className="empty">Workspace 下没有找到 Git 仓库。</p>}
         </div>
       </section>

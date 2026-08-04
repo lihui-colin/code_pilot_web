@@ -157,6 +157,7 @@ describe('web API', () => {
       }
     }
     vi.stubGlobal('EventSource', FakeEventSource);
+    vi.stubGlobal('window', new EventTarget());
     const received: unknown[] = [];
     const unsubscribe = subscribeCodexConversation(
       `dir_${'a'.repeat(43)}`,
@@ -164,10 +165,24 @@ describe('web API', () => {
     );
 
     source!.onmessage?.({ data: JSON.stringify({ conversation: { repositoryId: 'repo', status: 'running' } }) } as MessageEvent);
+    window.dispatchEvent(new Event('pagehide'));
     unsubscribe();
 
     expect(source!.url).toBe(`/api/codex/conversations/dir_${'a'.repeat(43)}/events`);
     expect(received).toEqual([{ repositoryId: 'repo', status: 'running' }]);
     expect(source!.close).toHaveBeenCalledOnce();
+  });
+
+  it('reads running Codex repository activity', async () => {
+    const activity = { runningRepositoryIds: [`dir_${'a'.repeat(43)}`] };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(activity), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { getCodexActivity } = await import('../src/web/api.js');
+    await expect(getCodexActivity()).resolves.toEqual(activity);
+    expect(fetchMock).toHaveBeenCalledWith('/api/codex/activity', { credentials: 'same-origin' });
   });
 });

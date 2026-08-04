@@ -43,7 +43,9 @@ terminal_web/
 |   |   |-- repositories.ts
 |   |   |-- viewers.ts
 |   |   |-- health.ts
-|   |   `-- ready.ts
+|   |   |-- ready.ts
+|   |   |-- codex.ts
+|   |   `-- schemas.ts
 |   |-- services/
 |   |   |-- zellij-service.ts
 |   |   |-- repository-service.ts
@@ -137,7 +139,7 @@ terminal_web/
 
 ## MVP-1：只读管理
 
-当前进度：首版已实现项目脚手架、Node 26 构建、无用户凭据的直接 HTTPS/IP 监听、项目托管 Zellij 首次安装、Zellij Web 证书和 Token 初始化、Token 主页管理、健康/就绪、Session 查询、目录浏览和响应式页面。
+当前进度：首版已实现项目脚手架、Node 26 构建、无用户凭据的直接 HTTPS/IP 监听、项目托管 Zellij 首次安装、Zellij Web 证书和 Token 初始化、Token 侧边栏管理、健康/就绪、Session 查询、目录浏览和响应式页面。
 
 实施范围：
 

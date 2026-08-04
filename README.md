@@ -116,7 +116,7 @@ npm run dev -- --workspace-root /实际/workspace/路径
 
 `--workspace-root` 是必填参数；未传入时服务会报错退出。该目录必须存在、可读，并且自身是 Git repository 或包含需要管理的 Git repository。
 
-如需打开 workspace 之外的仓库，在主页 Git 仓库区域点击“添加文件夹”，从服务器根目录逐层进入目标目录，然后点击“选择 Git 仓库”。浏览器只提交服务端签发的不透明目录 ID，不提交绝对路径；只有包含 `.git` 的目录可选择。手动仓库会写入 `data/state.json` 并在服务重启后保留。“移除仓库”只从列表移除记录，不删除服务器文件或 Zellij Session。
+主页 Workspace 管理区通过“会话列表”按钮打开默认隐藏的 Zellij Session 弹窗；打开或成功删除会话后弹窗自动关闭。如需打开 workspace 之外的仓库，在主页 Git 仓库区域点击“添加文件夹”，从服务器根目录逐层进入目标目录，然后点击“选择 Git 仓库”。浏览器只提交服务端签发的不透明目录 ID，不提交绝对路径；只有包含 `.git` 的目录可选择。手动仓库会写入 `data/state.json` 并在服务重启后保留。“移除仓库”只从列表移除记录，不删除服务器文件或 Zellij Session。
 
 ### 正式模式
 
@@ -192,7 +192,7 @@ npm run service:restart -- /实际/workspace/路径
 
 `zellij.webTokenDatabaseFile` 必须指向同一 Zellij 用户的数据目录中的 `tokens.db`。项目使用固定版本数据库契约生成唯一 Token，规避 Zellij `0.44.3` 删除 Token 后默认名称冲突的问题。
 
-若 `config.json` 尚未包含 `zellij.webToken`，后端首次启动会创建专用 Zellij Web Token，并以 `name`、`value` 形式写入配置，同时把配置文件权限设为 `0600`。主页显示 Token 并提供复制、删除和重新创建按钮；Token 不写入普通日志。
+若 `config.json` 尚未包含 `zellij.webToken`，后端首次启动会创建专用 Zellij Web Token，并以 `name`、`value` 形式写入配置，同时把配置文件权限设为 `0600`。主页通过默认隐藏的 Token 管理侧边栏显示名称和值，并提供复制、删除和重新创建按钮；Token 不写入普通日志。
 
 浏览器直接访问 `publicBaseUrl`，无需登录。必须通过防火墙确保该地址只允许 VPN/公司内网访问。
 

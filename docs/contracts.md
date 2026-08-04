@@ -81,7 +81,7 @@ Zellij Web Token 初始化和管理遵循：
 4. 配置已有 Token 时，通过 `web --list-tokens` 确认名称仍存在；名称已被撤销时自动创建并保存替代 Token。
 5. 重新创建时先创建并保存新名称和值，再使用旧名称调用 `web --revoke-token <old-name>`，避免创建失败导致无可用 Token。
 6. 删除时使用配置保存的名称撤销 Token，并从配置删除名称和值。
-7. Token 值只能出现在受 VPN/内网保护的专用只读 API 和主页 Token 区域；普通日志、错误响应和其他 API 不得包含 Token。
+7. Token 值只能出现在受 VPN/内网保护的专用只读 API 和主页默认隐藏的 Token 管理侧边栏；普通日志、错误响应和其他 API 不得包含 Token。
 
 只有管理服务 `listenPort` 对外监听，并必须通过主机防火墙限制在 VPN/公司内网网段。Zellij Web、code-viewer 和 OpenVSCode 上游端口只监听 `127.0.0.1`，不得加入防火墙允许列表；Codex Chat 直接运行在管理服务进程内。写请求仍需校验 `Origin`，目录与命令边界不因取消登录或 TLS 而放宽。
 
@@ -491,7 +491,7 @@ app-server 进程使用独立进程组，浏览器不能控制可执行文件、
 
 服务端按 repository ID 保存进程内对话快照，包括 conversation ID、用户与助手消息、运行状态、脱敏错误和更新时间。浏览器关闭、刷新或网络断开不得取消后台 turn；只有显式停止、30 分钟超时、输出超限或管理服务关闭才终止进程组。同一 repository 同时只能有一个运行中的 turn。只有 Codex turn 成功完成并返回合法 thread ID 后，服务端才把 repository ID 到 conversation ID 的映射原子写入状态文件；运行中、失败、停止或超时的 turn 不得覆盖已持久化 ID。管理服务重启后从状态文件恢复该映射，页面无需依赖浏览器缓存即可获得可继续的 conversation ID。
 
-`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`。页面进入时先读取该快照，并建立同源 `GET /api/codex/conversations/:repositoryId/events` SSE 连接。服务端在连接建立和状态改变时立即发送当前脱敏快照；密集的 app-server `item/agentMessage/delta` 可以在不超过 40 毫秒的窗口内合并为一次快照发送。连接断开不得取消后台 turn，浏览器自动重连后重新收到当前快照。浏览器以不超过每 100 毫秒一次的频率把运行中快照保存到 `localStorage`，最终状态必须立即保存；快照不含服务器路径和文件内容。管理服务重启后服务端快照为空时，页面使用本地快照恢复消息和 conversation ID；旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 app-server 的 `thread/resume` 继续该 conversation。
+`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`。`GET /api/codex/activity` 返回当前仍在运行的 repository ID 列表，供管理首页在 Codex 对话页关闭后显示“生成中”状态；该状态只来自服务端活动 turn，不依赖浏览器缓存。页面进入时先读取该快照，并建立同源 `GET /api/codex/conversations/:repositoryId/events` SSE 连接。服务端在连接建立和状态改变时立即发送当前脱敏快照；密集的 app-server `item/agentMessage/delta` 可以在不超过 40 毫秒的窗口内合并为一次快照发送。连接断开不得取消后台 turn，浏览器自动重连后重新收到当前快照；服务端必须在响应关闭、响应错误或客户端请求中止时释放该 SSE 订阅和心跳定时器。浏览器以不超过每 100 毫秒一次的频率把运行中快照保存到 `localStorage`，最终状态必须立即保存；快照不含服务器路径和文件内容。管理服务重启后服务端快照为空时，页面使用本地快照恢复消息和 conversation ID；旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 app-server 的 `thread/resume` 继续该 conversation。
 
 `POST /api/codex/messages` 成功启动后台 turn 时返回 `202` 和启动后的对话快照。`POST /api/codex/conversations/:repositoryId/stop` 显式停止当前 turn；`DELETE /api/codex/conversations/:repositoryId` 仅在没有运行中 turn 时清空快照，供“新对话”使用。Codex app-server 原始 JSONL/JSON-RPC 事件只在服务端用于更新快照，不直接返回浏览器。
 
@@ -514,7 +514,7 @@ app-server 进程使用独立进程组，浏览器不能控制可执行文件、
 | `GET` | `/api/repository-folders` | `200` | 通过不透明目录 ID 逐层浏览服务器目录 |
 | `POST` | `/api/repositories` | `201` | 添加手动 Git repository |
 | `DELETE` | `/api/repositories/:repositoryId` | `204` | 从列表移除手动 repository |
-| `GET` | `/api/zellij-token` | `200` | 读取主页展示的 Zellij Web Token 名称和值 |
+| `GET` | `/api/zellij-token` | `200` | 读取主页 Token 管理侧边栏展示的名称和值 |
 | `POST` | `/api/zellij-token/regenerate` | `201` | 创建或重新创建 Zellij Web Token |
 | `DELETE` | `/api/zellij-token` | `204` | 撤销并删除当前 Zellij Web Token |
 | `GET` | `/api/viewers` | `200` | 当前进程的 viewer 列表 |
@@ -522,6 +522,7 @@ app-server 进程使用独立进程组，浏览器不能控制可执行文件、
 | `DELETE` | `/api/viewers/:id` | `204` | 停止 viewer |
 | `GET` | `/api/codex/status` | `200` | 检查后台服务能否调用 Codex CLI 并返回版本 |
 | `GET` | `/api/codex/appearance` | `200` | 返回 Codex 页面配置的字体族和字号 |
+| `GET` | `/api/codex/activity` | `200` | 返回仍在运行 Codex turn 的 repository ID |
 | `GET` | `/api/codex/conversations/:repositoryId` | `200` | 获取 repository 当前 Codex 对话快照 |
 | `GET` | `/api/codex/conversations/:repositoryId/events` | `200` | 通过同源 SSE 实时推送 Codex 对话快照 |
 | `GET` | `/api/repositories/:repositoryId/files` | `200` | 返回可作为 Codex 上下文的 repository 文件 opaque ID |
@@ -647,6 +648,7 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 ## 8. 前端契约
 
 - 每个 repository 只对应一个由服务端命名的 Session，前端不要求用户输入 Session 名称。
+- Workspace 管理区提供“会话列表”按钮；Session 表格默认隐藏在弹窗中，弹窗支持关闭按钮、遮罩和 Esc 关闭，并在打开会话或成功删除会话后自动关闭。
 - repository 没有对应 Session 时显示创建操作；创建成功后刷新 Session 和 repository 列表，不自动打开新标签页。
 - repository 已有对应 Session 时显示后端返回的 Zellij Web 打开链接和删除操作。
 - 点击浏览时同步执行 `window.open("about:blank", "_blank")`。
@@ -658,6 +660,6 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 - 轮询不得覆盖本地 `starting`、`stopping` 或删除中状态。
 - 相对路径只作为文本渲染，不使用 `dangerouslySetInnerHTML`。
 - viewer URL 不持久化到 localStorage。
-- 主页明确显示 Zellij Web Token 名称和值，并提供复制、删除和重新创建操作。
+- 主页默认不显示 Zellij Web Token 名称和值；通过 Token 管理按钮打开侧边栏后显示名称和值，并提供复制、删除和重新创建操作。侧边栏支持关闭按钮、遮罩和 Esc 关闭。
 - 删除和重新创建 Token 必须二次确认；Token 操作完成后立即更新页面状态。
 - 页面提供“重启后台服务”操作并二次确认，明确提示现有 Web/编辑连接会断开但 Zellij Session 会保留。请求被接受后按钮保持禁用，前端等待管理服务实际离线并恢复健康后刷新页面。

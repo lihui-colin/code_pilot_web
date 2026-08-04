@@ -420,8 +420,49 @@ describe('CodexChat', () => {
 
     expect(await screen.findByText('继续分析')).toBeInTheDocument();
     expect(screen.getByText('后台仍在处理')).toBeInTheDocument();
-    expect(screen.getByText('处理中')).toBeInTheDocument();
+    expect(screen.getByText('生成中')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument();
+  });
+
+  it('shows app-server startup status until the Codex handshake completes', async () => {
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId: null,
+      messages: [
+        { id: 'user-starting', role: 'user', content: '开始任务' },
+        { id: 'assistant-starting', role: 'assistant', content: '' },
+      ],
+      status: 'running',
+      phase: 'starting',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    });
+
+    render(<CodexChat />);
+
+    expect(await screen.findByText('正在启动 Codex app-server…')).toBeInTheDocument();
+    expect(screen.getByText('正在启动 Codex…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '取消启动' })).toBeInTheDocument();
+  });
+
+  it('does not keep the thinking animation after an empty failed response', async () => {
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [{ id: 'user-failed', role: 'user', content: '执行任务' }, {
+        id: 'assistant-failed', role: 'assistant', content: '',
+      }],
+      status: 'failed',
+      error: 'Codex is temporarily unavailable',
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    });
+
+    const { container } = render(<CodexChat />);
+
+    expect(await screen.findByText('执行任务')).toBeInTheDocument();
+    expect(screen.getByText('未收到回复')).toBeInTheDocument();
+    expect(container.querySelector('.chat-thinking')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Codex is temporarily unavailable');
   });
 
   it('combines a server-persisted conversation ID with browser message history after restart', async () => {

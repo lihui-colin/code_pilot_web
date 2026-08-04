@@ -9,8 +9,10 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError, z } from 'zod';
 import type { AppConfig } from './config.js';
-import type { CodexConversationStreamEvent, ReadinessResult } from './domain/types.js';
+import type { ReadinessResult } from './domain/types.js';
 import { ApiError } from './errors.js';
+import { registerCodexRoutes } from './routes/codex.js';
+import { emptyBodySchema, noBodySchema, repositoryIdSchema, repositoryParamsSchema } from './routes/schemas.js';
 import { CodexChatService, SpawnCodexAppServerAdapter, type CodexChatServiceLike } from './services/codex-chat-service.js';
 import { RepositoryService } from './services/repository-service.js';
 import type { ServiceRestarter } from './services/service-restarter.js';
@@ -20,29 +22,15 @@ import { ExecFileZellijAdapter, repositorySessionName, ZellijService, type Manag
 import type { ZellijTokenService } from './services/zellij-token-service.js';
 
 const repositoryQuerySchema = z.object({}).strict();
-const repositoryIdSchema = z.string().regex(/^dir_[A-Za-z0-9_-]{43}$/u);
 const folderIdSchema = z.string().regex(/^folder_[A-Za-z0-9_-]{43}$/u);
 const repositoryFolderQuerySchema = z.object({ directoryId: folderIdSchema.optional() }).strict();
 const addManualRepositorySchema = z.object({ directoryId: folderIdSchema }).strict();
-const repositoryParamsSchema = z.object({ repositoryId: repositoryIdSchema }).strict();
-const contextFileIdSchema = z.string().regex(/^file_[A-Za-z0-9_-]{43}$/u);
 const createSessionSchema = z.object({
   repositoryId: repositoryIdSchema,
   command: z.literal('codex'),
 }).strict();
 const sessionParamsSchema = z.object({ name: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u) }).strict();
 const createViewerSchema = z.object({ repositoryId: repositoryIdSchema }).strict();
-const codexChatSchema = z.object({
-  repositoryId: repositoryIdSchema,
-  conversationId: z.uuid().optional(),
-  contextFileIds: z.array(contextFileIdSchema).max(8).refine(
-    fileIds => new Set(fileIds).size === fileIds.length,
-    'context file IDs must be unique',
-  ).optional(),
-  message: z.string().trim().min(1).max(20_000),
-}).strict();
-const emptyBodySchema = z.object({}).strict();
-const noBodySchema = z.undefined();
 
 function openVSCodeWebUrl(config: AppConfig, repositoryRealPath: string): string {
   const url = new URL(config.publicBaseUrl);
@@ -313,88 +301,11 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     const result = await viewerManager.create(body.repositoryId, repository.realPath);
     await reply.code(result.created ? 201 : 200).send(result.instance);
   });
-  app.get('/api/codex/status', async () => codexChatService.status());
-  app.get('/api/codex/appearance', async () => config.codexChatAppearance);
-  app.get('/api/codex/conversations/:repositoryId', async request => {
-    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
-    const params = repositoryParamsSchema.parse(request.params);
-    await repositoryService.resolveRepository(params.repositoryId);
-    return { conversation: codexChatService.getConversation(params.repositoryId) };
-  });
-  app.get('/api/codex/conversations/:repositoryId/events', async (request, reply) => {
-    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
-    const params = repositoryParamsSchema.parse(request.params);
-    await repositoryService.resolveRepository(params.repositoryId);
-    if (!codexChatService.subscribe) {
-      return { conversation: codexChatService.getConversation(params.repositoryId) };
-    }
-
-    reply.hijack();
-    const response = reply.raw;
-    response.writeHead(200, {
-      'cache-control': 'no-cache, no-transform',
-      connection: 'keep-alive',
-      'content-type': 'text/event-stream; charset=utf-8',
-      'x-accel-buffering': 'no',
-    });
-    const send = (event: CodexConversationStreamEvent) => {
-      if (!response.destroyed) response.write(`data: ${JSON.stringify(event)}\n\n`);
-    };
-    const unsubscribe = codexChatService.subscribe(params.repositoryId, send);
-    const heartbeat = setInterval(() => {
-      if (!response.destroyed) response.write(': keep-alive\n\n');
-    }, 15_000);
-    heartbeat.unref();
-    const cleanup = () => {
-      clearInterval(heartbeat);
-      unsubscribe();
-    };
-    response.once('close', cleanup);
-  });
-  app.post('/api/codex/messages', async (request, reply) => {
-    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
-    requireSameOrigin(request.headers.origin);
-    const body = codexChatSchema.parse(request.body);
-    const repository = await repositoryService.resolveRepository(body.repositoryId);
-    const codexStatus = await codexChatService.status();
-    if (!codexStatus.available) {
-      throw new ApiError(503, 'CODEX_CLI_UNAVAILABLE', 'Codex CLI is not available on the server');
-    }
-    const contextFiles = await repositoryService.resolveContextFiles(
-      body.repositoryId,
-      body.contextFileIds ?? [],
-    );
-    const execution = codexChatService.send({
-      repositoryId: body.repositoryId,
-      repositoryRealPath: repository.realPath,
-      ...(body.conversationId ? { conversationId: body.conversationId } : {}),
-      ...(contextFiles.length > 0 ? { contextFiles } : {}),
-      message: body.message,
-    });
-    void execution.catch(error => {
-      if (!(error instanceof Error && error.name === 'AbortError')) {
-        request.log.warn({ code: error instanceof ApiError ? error.code : 'CODEX_UNAVAILABLE' }, 'Codex background turn failed');
-      }
-    });
-    return reply.code(202).send({ conversation: codexChatService.getConversation(body.repositoryId) });
-  });
-  app.post('/api/codex/conversations/:repositoryId/stop', async (request, reply) => {
-    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
-    requireSameOrigin(request.headers.origin);
-    emptyBodySchema.parse(request.body ?? {});
-    const params = repositoryParamsSchema.parse(request.params);
-    await repositoryService.resolveRepository(params.repositoryId);
-    codexChatService.stopConversation(params.repositoryId);
-    return reply.code(202).send({ status: 'stopping' });
-  });
-  app.delete('/api/codex/conversations/:repositoryId', async (request, reply) => {
-    if (!repositoryService) throw new ApiError(503, 'SERVICE_NOT_READY', 'Codex chat is not ready');
-    requireSameOrigin(request.headers.origin);
-    noBodySchema.parse(request.body);
-    const params = repositoryParamsSchema.parse(request.params);
-    await repositoryService.resolveRepository(params.repositoryId);
-    await codexChatService.clearConversation(params.repositoryId);
-    return reply.code(204).send();
+  registerCodexRoutes(app, {
+    repositoryService,
+    codexChatService,
+    appearance: config.codexChatAppearance,
+    requireSameOrigin,
   });
   app.post('/api/zellij-token/regenerate', async (request, reply) => {
     requireSameOrigin(request.headers.origin);

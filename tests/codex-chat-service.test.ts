@@ -395,6 +395,7 @@ describe('CodexChatService', () => {
     expect(service.getConversation(repositoryId)).toMatchObject({
       repositoryId,
       status: 'running',
+      phase: 'starting',
       messages: [{ role: 'user', content: 'Keep working' }, { role: 'assistant', content: '' }],
     });
     expect(executionRequest).toBeDefined();

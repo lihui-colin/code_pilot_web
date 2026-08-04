@@ -61,6 +61,7 @@ describe('MVP-1 routes', () => {
           receivedPath = turn.repositoryRealPath;
         },
         getConversation: () => null,
+        getRunningRepositoryIds: () => [],
         clearConversation: () => undefined,
         stopConversation: () => undefined,
         close: async () => undefined,
@@ -192,6 +193,7 @@ describe('MVP-1 routes', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-sse-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
+    let unsubscribeCalls = 0;
     const app = await createApp(createTestConfig(root), {
       readiness: ready,
       directoryIdSecret: Buffer.from('route test secret'),
@@ -199,6 +201,7 @@ describe('MVP-1 routes', () => {
         status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
         send: async () => undefined,
         getConversation: () => null,
+        getRunningRepositoryIds: () => [],
         subscribe: (repositoryId, listener) => {
           listener({
             conversation: {
@@ -210,7 +213,7 @@ describe('MVP-1 routes', () => {
               updatedAt: '2026-08-04T00:00:00.000Z',
             },
           });
-          return () => undefined;
+          return () => { unsubscribeCalls += 1; };
         },
         clearConversation: () => undefined,
         stopConversation: () => undefined,
@@ -227,9 +230,42 @@ describe('MVP-1 routes', () => {
     const reader = response.body!.getReader();
     const chunk = await reader.read();
     await reader.cancel();
+    for (let attempt = 0; attempt < 20 && unsubscribeCalls === 0; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
 
     expect(response.headers.get('content-type')).toContain('text/event-stream');
     expect(new TextDecoder().decode(chunk.value)).toContain('实时输出');
+    expect(unsubscribeCalls).toBe(1);
+    const reentry = await fetch(`${address}/api/codex/conversations/${repositoryId}`);
+    expect(reentry.status).toBe(200);
+    await app.close();
+  });
+
+  it('reports repositories with active Codex turns', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-activity-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      codexChatService: {
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
+        send: async () => undefined,
+        getConversation: () => null,
+        getRunningRepositoryIds: () => [`dir_${'a'.repeat(43)}`],
+        clearConversation: () => undefined,
+        stopConversation: () => undefined,
+        close: async () => undefined,
+      },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/api/codex/activity' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ runningRepositoryIds: [`dir_${'a'.repeat(43)}`] });
     await app.close();
   });
 

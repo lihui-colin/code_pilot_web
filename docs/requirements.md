@@ -32,7 +32,7 @@ Management Web Application
 
 ## Zellij Session 体验
 
-Session 列表至少展示：
+Workspace 管理区提供“会话列表”按钮，点击后以默认隐藏的弹出窗口展示 Session。弹窗至少展示：
 
 - Session 名称。
 - 创建时间，未知时显示为空。
@@ -43,7 +43,7 @@ Session 列表至少展示：
 
 每个 Git repository 固定对应一个由服务端命名的 Session。用户不需要输入 Session 名称：没有对应 Session 时可以创建 Codex Session，已有对应 Session 时可以直接打开 Zellij Web，也可以删除该 Session。
 
-创建成功后立即刷新列表，但不自动打开 Session。用户点击“打开”时，在新的浏览器标签页中访问后端返回的 Zellij Web HTTPS 地址；管理页面不内嵌 Zellij Web，也不在打开操作中创建或修改 Session。
+创建成功后立即刷新列表，但不自动打开 Session。用户点击“打开”时，在新的浏览器标签页中访问后端返回的 Zellij Web HTTPS 地址；管理页面不内嵌 Zellij Web，也不在打开操作中创建或修改 Session。会话弹窗支持关闭按钮、遮罩和 Esc 关闭；打开会话或成功删除会话后自动关闭。
 
 删除 Session 会终止其中运行的 Codex 和其他进程，因此必须展示完整 Session 名称，并要求用户再次输入准确名称确认。
 
@@ -111,15 +111,14 @@ Codex 对话快照只包含 conversation ID、用户与助手文本、运行状�
 
 - 管理服务状态。
 - Zellij Web 状态。
-- Session 表格。
-- workspace 和 Git repository 列表。
+- Workspace 和 Git repository 列表，以及其中的“会话列表”弹窗入口。
 - viewer 状态和操作。
 
 每个 Git repository 只常驻显示两个主要操作：已有 Session 时显示“打开 Zellij Web”，否则显示“创建 Zellij Session”；另一个为“与 Codex 对话”。编辑代码、code-viewer、删除 Session 和移除手动仓库收纳在“更多操作”菜单中，危险操作与普通操作视觉分隔。
 
 只读数据默认每 10 秒刷新。页面不可见时暂停轮询，重新可见时立即刷新。创建、删除和停止操作完成后立即重新查询对应资源。
 
-部分工具未就绪时，页面仍展示能够读取的 Zellij Session 和 Zellij Web Token；未就绪状态只阻止依赖缺失工具的操作。
+部分工具未就绪时，页面仍允许从 Workspace 区域打开能够读取的 Zellij Session 列表和 Zellij Web Token 管理侧边栏；未就绪状态只阻止依赖缺失工具的操作。
 
 桌面和移动浏览器均不能出现文字溢出、控件重叠或依赖 hover 才能完成的核心操作。
 
@@ -128,7 +127,7 @@ Codex 对话快照只包含 conversation ID、用户与助手文本、运行状�
 页面错误需要包含可理解的操作结果，但不能泄露：
 
 - 服务器绝对路径。
-- 除主页专用 Token 展示区之外的 Zellij Token。
+- 除主页默认隐藏的 Token 管理侧边栏之外的 Zellij Token。
 - 环境变量。
 - 原始外部命令输出。
 - 未经处理的异常堆栈。
@@ -138,7 +137,7 @@ Codex 对话快照只包含 conversation ID、用户与助手文本、运行状�
 ## 安全边界
 
 - 页面、API、Zellij Web、viewer、OpenVSCode 和 Codex Chat 使用主服务端口的同源 HTTPS，并由 VPN 和防火墙限制访问网段。
-- Zellij Web 保留自身 Token 验证；管理服务首次启动创建专用 Token，同时保存名称和值并在主页提供复制、删除和重新创建操作。
+- Zellij Web 保留自身 Token 验证；管理服务首次启动创建专用 Token，同时保存名称和值，并在主页默认隐藏的侧边栏中提供复制、删除和重新创建操作。侧边栏通过明确的 Token 管理按钮打开，可通过关闭按钮、遮罩和 Esc 关闭。
 - Token 成功写入浏览器剪贴板后，主页显示“已复制”反馈。
 - 自动扫描只允许访问启动时配置的工作目录；workspace 外目录只能通过服务器目录选择器主动加入。
 - 每次目录相关操作都重新执行真实路径和对应来源边界校验。
