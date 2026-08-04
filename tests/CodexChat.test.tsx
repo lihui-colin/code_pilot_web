@@ -184,6 +184,48 @@ describe('CodexChat', () => {
     expect(conversationWrites()).toHaveLength(2);
   });
 
+  it('rechecks a transient unavailable CLI status when a background turn finishes', async () => {
+    let onSnapshot: ((snapshot: import('../src/domain/types.js').CodexConversationSnapshot | null) => void) | undefined;
+    vi.mocked(api.getCodexStatus)
+      .mockResolvedValueOnce({ available: false, version: null, mode: 'yolo' })
+      .mockResolvedValueOnce({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' });
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-background', role: 'user', content: '后台任务' },
+        { id: 'assistant-background', role: 'assistant', content: '正在处理' },
+      ],
+      status: 'running',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    });
+    vi.mocked(api.subscribeCodexConversation).mockImplementation((_repositoryId, listener) => {
+      onSnapshot = listener;
+      return () => undefined;
+    });
+
+    render(<CodexChat />);
+
+    expect(await screen.findByText('生成中')).toBeInTheDocument();
+    act(() => onSnapshot?.({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-background', role: 'user', content: '后台任务' },
+        { id: 'assistant-background', role: 'assistant', content: '处理完成' },
+      ],
+      status: 'idle',
+      error: null,
+      updatedAt: '2026-08-04T00:00:01.000Z',
+    }));
+
+    expect(screen.getByText('检测中')).toBeInTheDocument();
+    expect(await screen.findByText('就绪')).toBeInTheDocument();
+    expect(api.getCodexStatus).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('不可用')).not.toBeInTheDocument();
+  });
+
   it('does not pull the reader away from history while Codex is streaming', async () => {
     let onSnapshot: ((snapshot: import('../src/domain/types.js').CodexConversationSnapshot | null) => void) | undefined;
     vi.mocked(api.getCodexConversation).mockResolvedValue({

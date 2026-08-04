@@ -212,6 +212,7 @@ export function CodexChat() {
   const [displayNameInput, setDisplayNameInput] = useState(readStoredDisplayName);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
+  const [checkingCodexStatus, setCheckingCodexStatus] = useState(false);
   const [startingTurn, setStartingTurn] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
@@ -241,7 +242,7 @@ export function CodexChat() {
   const running = startingTurn || conversation?.status === 'running';
   const error = requestError
     ?? conversation?.error
-    ?? (!loading && codexStatus && !codexStatus.available ? codexUnavailableMessage : null);
+    ?? (!loading && !checkingCodexStatus && codexStatus && !codexStatus.available ? codexUnavailableMessage : null);
   const availableFontOptions = fontOptions.some(option => option.value === appearance.fontFamily)
     ? fontOptions
     : [{ label: '当前自定义字体', value: appearance.fontFamily }, ...fontOptions];
@@ -286,8 +287,19 @@ export function CodexChat() {
     }
   };
 
+  const refreshCodexStatus = () => {
+    setCheckingCodexStatus(true);
+    void getCodexStatus()
+      .then(setCodexStatus)
+      .catch(() => undefined)
+      .finally(() => setCheckingCodexStatus(false));
+  };
+
   const applySnapshot = (snapshot: CodexConversationSnapshot | null, preserveHistory = true) => {
     const previous = conversationRef.current;
+    if (previous?.status === 'running' && snapshot?.status !== 'running') {
+      refreshCodexStatus();
+    }
     const sameConversation = snapshot?.conversationId
       && previous?.conversationId
       && snapshot.conversationId === previous.conversationId;
@@ -658,8 +670,14 @@ export function CodexChat() {
             >☰</button>
             <div><small>CODING AGENT</small><h1>{repository?.name ?? 'Codex'}</h1></div>
           </div>
-          <span className={running ? 'chat-status busy' : `chat-status${codexStatus && !codexStatus.available ? ' unavailable' : ''}`}>
-            {starting ? '正在启动 Codex…' : running ? '生成中' : codexStatus?.available ? '就绪' : loading ? '检测中' : '不可用'}
+          <span className={running ? 'chat-status busy' : `chat-status${!checkingCodexStatus && codexStatus && !codexStatus.available ? ' unavailable' : ''}`}>
+            {starting
+              ? '正在启动 Codex…'
+              : running
+                ? '生成中'
+                : loading || checkingCodexStatus
+                  ? '检测中'
+                  : codexStatus?.available ? '就绪' : '不可用'}
           </span>
         </header>
 
