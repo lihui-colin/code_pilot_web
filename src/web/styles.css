@@ -209,6 +209,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .chat-message { display: grid; grid-template-columns: 2.35rem minmax(0, 1fr); gap: .8rem; width: min(52rem, 100%); margin: 0 auto 1.6rem; }
 .chat-message.user { grid-template-columns: minmax(0, 1fr) 2.35rem; }
 .chat-avatar { display: grid; place-items: center; width: 2.35rem; height: 2.35rem; border-radius: .65rem; color: #07110f; background: #5ce0b6; font-size: .78rem; font-weight: 800; }
+.chat-message.assistant .chat-avatar { border: 1px solid #38564f; background: #101916; }
+.chat-message.assistant .chat-avatar img { width: 1.45rem; height: 1.45rem; }
 .chat-message.user .chat-avatar { grid-column: 2; grid-row: 1; color: #e7e3ff; background: #504292; }
 .chat-message-body { min-width: 0; padding-top: .12rem; }
 .chat-message.user .chat-message-body { grid-column: 1; grid-row: 1; text-align: right; }

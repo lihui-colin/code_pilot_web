@@ -109,6 +109,7 @@ describe('CodexChat', () => {
     await waitFor(() => expect(api.startCodexMessage).toHaveBeenCalledWith({ repositoryId, message: '分析项目结构' }));
     expect(screen.getByText('分析项目结构')).toBeInTheDocument();
     expect(await screen.findByText('这是 Codex 的回答。')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Codex' })).toHaveAttribute('src', '/codex-icon.svg');
     expect(screen.getByText('me')).toBeInTheDocument();
     expect(screen.getByText('M')).toBeInTheDocument();
   });

@@ -104,7 +104,11 @@ const ChatMessage = memo(function ChatMessage({
 }: ChatMessageProps) {
   return (
     <article className={`chat-message ${message.role}`}>
-      <div className="chat-avatar">{message.role === 'user' ? displayAvatar : 'C'}</div>
+      <div className="chat-avatar">
+        {message.role === 'user'
+          ? displayAvatar
+          : <img src="/codex-icon.svg" alt="Codex" />}
+      </div>
       <div className="chat-message-body">
         <strong>{message.role === 'user' ? displayName : 'Codex'}</strong>
         {message.content
