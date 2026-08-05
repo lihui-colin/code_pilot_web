@@ -60,12 +60,11 @@ async function main(): Promise<void> {
     codexChatService,
     zellijTokenService,
     serviceRestarter: new SpawnServiceRestarter(
-      path.join(projectRoot, 'scripts/restart-service.sh'),
-      loaded.config.workspaceRootRealPath,
-      loaded.configFilePath,
+      path.join(projectRoot, 'dist/cli.js'),
+      projectRoot,
       path.join(projectRoot, 'data/codepilot-web-restart.log'),
     ),
-    staticRoot: path.resolve('dist/web'),
+    staticRoot: path.join(projectRoot, 'dist/web'),
   });
 
   app.log.info({

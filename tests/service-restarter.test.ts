@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 describe('SpawnServiceRestarter', () => {
-  it('spawns only the fixed restart script with the configured workspace and config file', async () => {
+  it('spawns only the fixed Node CLI restart command', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-restarter-'));
     temporaryDirectories.push(root);
     const logFile = path.join(root, 'restart.log');
@@ -24,9 +24,8 @@ describe('SpawnServiceRestarter', () => {
       return child;
     });
     const restarter = new SpawnServiceRestarter(
-      '/project/scripts/restart-service.sh',
-      '/workspace/root',
-      '/project/config.json',
+      '/project/dist/cli.js',
+      '/project',
       logFile,
       spawnProcess,
     );
@@ -34,10 +33,10 @@ describe('SpawnServiceRestarter', () => {
     await restarter.restart();
 
     expect(spawnProcess).toHaveBeenCalledWith(
-      '/project/scripts/restart-service.sh',
-      ['/workspace/root', '/project/config.json'],
+      process.execPath,
+      ['/project/dist/cli.js', 'restart'],
       expect.objectContaining({
-        cwd: '/workspace/root',
+        cwd: '/project',
         detached: true,
         shell: false,
         env: expect.objectContaining({ CODEPILOT_WEB_RESTART_DELAY_MS: '750' }),

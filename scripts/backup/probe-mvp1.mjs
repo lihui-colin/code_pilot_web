@@ -115,7 +115,7 @@ async function main() {
     }, null, 2));
 
     child = spawn(process.execPath, [
-      path.join(projectRoot, 'dist/server.js'),
+      path.join(projectRoot, 'dist/codepilot-server.js'),
       '--config', configFile,
       '--workspace-root', workspace,
     ], {

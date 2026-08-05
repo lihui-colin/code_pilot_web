@@ -18,7 +18,7 @@ function resolveConfigPath(configDirectory, value) {
   return path.resolve(configDirectory, value);
 }
 
-async function loadRuntime(configFile, workspaceRoot) {
+async function loadRuntime(configFile, workspaceRoot, managementPortOverride) {
   const resolvedConfigFile = await realpath(configFile);
   const configDirectory = path.dirname(resolvedConfigFile);
   const config = JSON.parse(await readFile(resolvedConfigFile, 'utf8'));
@@ -27,7 +27,9 @@ async function loadRuntime(configFile, workspaceRoot) {
   if (!workspaceStat.isDirectory()) throw new Error('workspace root is not a directory');
   return {
     configFile: resolvedConfigFile,
-    managementPort: Number(config.listenPort),
+    managementPort: managementPortOverride === undefined
+      ? Number(config.listenPort)
+      : Number(managementPortOverride),
     openVSCodeExecutable: resolveConfigPath(configDirectory, config.openVSCode.executableFile),
     openVSCodePort: Number(config.openVSCode.port),
     viewerPorts: Array.from(
@@ -110,8 +112,9 @@ function hasOption(arguments_, option, value) {
 async function processKind(pid, runtime) {
   const arguments_ = await commandArguments(pid);
   if (arguments_.length === 0) return null;
-  const managementEntry = path.join(projectRoot, 'dist/server.js');
-  if (arguments_.includes(managementEntry) && hasOption(arguments_, '--config', runtime.configFile)) return 'management';
+  const managementEntry = path.join(projectRoot, 'dist/codepilot-server.js');
+  if (arguments_.includes(managementEntry)
+    && hasOption(arguments_, '--config', runtime.configFile)) return 'management';
 
   const viewerEntry = path.join(projectRoot, 'node_modules/@youtyan/code-viewer/dist/code-viewer.js');
   if (arguments_.includes(viewerEntry)
@@ -360,11 +363,11 @@ async function ensureSupport(runtime) {
 }
 
 async function main() {
-  const [operation, configFile, workspaceRoot] = process.argv.slice(2);
+  const [operation, configFile, workspaceRoot, managementPortOverride] = process.argv.slice(2);
   if (!['cleanup', 'start-support', 'ensure-support'].includes(operation) || !configFile || !workspaceRoot) {
     throw new Error('usage: service-runtime.mjs <cleanup|start-support|ensure-support> <config-file> <workspace-root>');
   }
-  const runtime = await loadRuntime(configFile, workspaceRoot);
+  const runtime = await loadRuntime(configFile, workspaceRoot, managementPortOverride);
   if (operation === 'cleanup') await cleanup(runtime);
   else if (operation === 'start-support') await startSupport(runtime);
   else await ensureSupport(runtime);

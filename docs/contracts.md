@@ -15,11 +15,11 @@
 
 code-viewer 以固定生产依赖 `@youtyan/code-viewer@0.10.0` 写入 `package.json` 和锁文件，由 `npm install` 自动安装。管理服务必须解析并使用项目本地包中的 `dist/code-viewer.js`，版本检查和实例启动使用同一文件，不依赖全局安装或 PATH 中的同名命令。
 
-OpenVSCode Server 使用独立脚本 `scripts/download-openvscode.sh` 从官方 GitHub Release 下载固定版本。脚本必须显示下载进度，按 Linux x64、arm64 或 armhf 选择官方归档，验证官方发布页固定的 SHA-256 摘要和解压后的 `bin/openvscode-server --version`，再安装到 `data/openvscode/openvscode-server-v1.109.5-linux-<arch>/`，并原子更新 `data/openvscode/current` 符号链接。`init.sh` 必须调用该脚本并把 `current/bin/openvscode-server` 及配置端口写入 `config.json`。
+OpenVSCode Server 使用独立脚本 `scripts/download-openvscode.sh` 从官方 GitHub Release 下载固定版本。脚本必须显示下载进度，按 Linux x64、arm64 或 armhf 选择官方归档，验证官方发布页固定的 SHA-256 摘要和解压后的 `bin/openvscode-server --version`，再安装到 `data/openvscode/openvscode-server-v1.109.5-linux-<arch>/`，并原子更新 `data/openvscode/current` 符号链接。`scripts/install.sh` 必须调用该脚本并把 `current/bin/openvscode-server` 及配置端口写入 `config.json`。
 
 Zellij `0.44.3` 同时作为项目管理的固定二进制依赖：
 
-1. `npm install` 的 `postinstall` 与管理服务启动都先检查配置的项目托管路径，再检查 PATH 中的 `zellij`。
+1. 管理服务启动时先检查配置的项目托管路径，再检查 PATH 中的 `zellij`。
 2. 任一位置存在版本精确为 `0.44.3` 的 Zellij 时直接复用，不重复下载。
 3. 两处都不存在可执行的 Zellij 时，从 Zellij 官方 GitHub Release 下载与当前操作系统、CPU 架构匹配的 `0.44.3` 归档，验证解压后程序的版本，并以 `0755` 原子安装到项目托管路径。
 4. 已安装但版本错误时不得静默替换，仍按版本不匹配处理并由 ready 报告失败。
@@ -41,11 +41,11 @@ Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。
 
 ### 1.3 HTTPS 监听与访问边界
 
-管理服务提供 HTTPS，`listenPort` 默认使用 `8020`，可以把 `listenHost` 配置为具体 IP 或 `0.0.0.0`。使用 `0.0.0.0` 时，`publicBaseUrl` 必须填写浏览器实际访问的 HTTPS IP 或域名，不得使用通配地址生成前端 URL。
+管理服务提供 HTTPS。唯一生命周期入口是 Node.js 可执行应用 `codepilot-server`，支持 `start`、`stop`、`restart`、`status` 和 `run` 子命令，不依赖 Bash 启停脚本。启动命令为 `codepilot-server start --host <browser-host> --port <port> --workspace <directory>`。管理服务默认监听 `0.0.0.0`；`--host` 表示浏览器实际访问的 IP 或域名，用于生成 `publicBaseUrl`，并作为 Zellij HTTPS 证书必须覆盖的 SAN。省略 `--host` 时沿用配置中的 `publicBaseUrl` 主机。`--host` 不接受 `0.0.0.0`、`::` 等通配地址。`--port` 和 `--workspace` 覆盖配置中的对应运行值；旧的 `--workspace-root` 参数保持兼容。
 
 启动脚本必须在构建和拉起进程前检查 PID 文件、管理服务 `listenHost:listenPort`，以及 `viewerPortRange` 中所有 localhost code-viewer 端口。本项目服务已在运行、PID 文件指向其他存活进程，或管理服务或 code-viewer 端口已被占用时，启动脚本必须以非零状态退出，且不得覆盖 PID 文件或启动新服务进程。Zellij Web 是独立服务，其端口即使已在运行也不得阻止管理服务启动。
 
-统一重启通过固定的 `scripts/restart-service.sh <workspace-root> [config-file]` 执行。网页只能调用不接受路径、命令、参数或环境变量的 `POST /api/services/restart`；后端只向脚本传入启动时已校验的 workspace root 和配置文件。接口返回 `202` 后，脚本必须：
+统一重启通过固定的 Node.js CLI `codepilot-server restart` 执行。网页只能调用不接受路径、命令、参数或环境变量的 `POST /api/services/restart`；后端只启动已安装应用自身的 `dist/cli.js restart`，并使用启动时保存且已校验的运行元数据。接口返回 `202` 后，CLI 必须：
 
 1. 向管理服务发送 `SIGTERM`，等待其停止当前 code-viewer 进程组。
 2. 调用固定 Zellij CLI 的 `web --stop`，只停止 Zellij Web，不删除任何 Zellij Session。
@@ -633,9 +633,9 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 
 首版不接管历史 viewer。历史 PID 只在同时验证命令和启动时间属于本服务时终止，随后清空 viewer 和端口记录。用户下次访问时重新创建。
 
-`scripts/start-service.sh` 必须以 `0600` 原子保存启动时已校验的配置文件和 workspace root。`scripts/stop-service.sh` 必须先验证 PID 文件指向本项目的管理服务，再发送 `SIGTERM`；管理服务的 Fastify close hook 必须停止所有 code-viewer 和活动 Codex CLI 进程组。在最多 10 秒的优雅退出等待期内，交互终端必须显示单行百分比和耗时进度，非交互输出必须至少每秒记录一次进度。管理进程退出后，停止脚本必须使用已保存的配置与 workspace root 调用统一 runtime cleanup，按进程身份和固定端口停止 Zellij Web、残留 code-viewer、OpenVSCode 和其他本项目托管后台进程。即使 PID 文件缺失或失效，只要运行元数据存在也必须执行该 cleanup。服务提前退出时显示实际耗时并删除 PID 与运行元数据；超时后明确显示升级为 `SIGKILL`。任何停止路径都不得删除 Zellij Session。
+Node.js CLI 必须以 `0600` 原子保存启动时已校验的配置文件、workspace root、浏览器 host 和管理端口。`codepilot-server stop` 必须先验证 PID 文件指向本应用的管理服务，再发送 `SIGTERM`；管理服务的 Fastify close hook 必须停止所有 code-viewer 和活动 Codex CLI 进程组。最多等待 10 秒优雅退出，超时后明确升级为 `SIGKILL`。管理进程退出后，CLI 必须使用已保存的运行元数据调用统一 runtime cleanup，按进程身份和固定端口停止 Zellij Web、残留 code-viewer、OpenVSCode 和其他本项目托管后台进程。即使 PID 文件缺失或失效，只要运行元数据存在也必须执行 cleanup。任何停止路径都不得删除 Zellij Session。
 
-`scripts/start-service.sh` 在启动管理进程前必须执行幂等的 support-service ensure：Zellij Web 或 OpenVSCode 端口空闲时启动对应服务；已由配置匹配的本项目进程监听时复用并重建 `0600` PID 文件；被无关进程占用时拒绝启动。该检查不要求管理端口或按需 code-viewer 端口空闲，因此既可用于单独启动管理服务，也可安全衔接统一重启流程。
+`codepilot-server start` 在启动管理进程前必须执行幂等的 support-service ensure：Zellij Web 或 OpenVSCode 端口空闲时启动对应服务；已由配置匹配的本项目进程监听时复用并重建 `0600` PID 文件；被无关进程占用时拒绝启动。该检查不要求管理端口或按需 code-viewer 端口空闲，因此既可用于单独启动管理服务，也可安全衔接统一重启流程。
 
 收到 `SIGTERM` 时：
 

@@ -114,24 +114,40 @@ export async function loadConfiguration(argv = process.argv.slice(2), cwd = proc
     args: argv,
     options: {
       config: { type: 'string', default: 'config.json' },
+      host: { type: 'string' },
+      port: { type: 'string' },
+      workspace: { type: 'string' },
       'workspace-root': { type: 'string' },
     },
     strict: true,
     allowPositionals: false,
   });
-  const workspaceRoot = parsed.values['workspace-root'];
-  if (!workspaceRoot) throw new Error('--workspace-root is required');
+  const workspaceRoot = parsed.values.workspace ?? parsed.values['workspace-root'];
+  if (!workspaceRoot) throw new Error('--workspace is required');
 
   const workspaceRootRealPath = await realpath(path.resolve(cwd, workspaceRoot));
   const workspaceStat = await stat(workspaceRootRealPath);
-  if (!workspaceStat.isDirectory()) throw new Error('--workspace-root must resolve to a directory');
+  if (!workspaceStat.isDirectory()) throw new Error('--workspace must resolve to a directory');
   await access(workspaceRootRealPath, constants.R_OK);
 
   const configPath = path.resolve(cwd, parsed.values.config ?? 'config.json');
   const configDirectory = path.dirname(configPath);
   const raw = FileConfigSchema.parse(JSON.parse(await readFile(configPath, 'utf8')));
-  const publicBaseUrl = validateBaseUrl(raw.publicBaseUrl, 'publicBaseUrl');
-  const reservedPorts = new Set([raw.listenPort, raw.zellij.webPort]);
+  const listenHost = '0.0.0.0';
+  const parsedPort = parsed.values.port === undefined ? raw.listenPort : Number(parsed.values.port);
+  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65_535) {
+    throw new Error('--port must be an integer between 1 and 65535');
+  }
+  const configuredPublicUrl = new URL(validateBaseUrl(raw.publicBaseUrl, 'publicBaseUrl'));
+  if (parsed.values.host) {
+    if (parsed.values.host === '0.0.0.0' || parsed.values.host === '::' || parsed.values.host === '[::]') {
+      throw new Error('--host must be the IP address or hostname used by browsers');
+    }
+    configuredPublicUrl.hostname = parsed.values.host.replace(/^\[|\]$/gu, '');
+  }
+  configuredPublicUrl.port = String(parsedPort);
+  const publicBaseUrl = validateBaseUrl(configuredPublicUrl.toString(), 'publicBaseUrl');
+  const reservedPorts = new Set([parsedPort, raw.zellij.webPort]);
   for (let port = raw.viewerPortRange.start; port <= raw.viewerPortRange.end; port += 1) reservedPorts.add(port);
   if (reservedPorts.has(raw.openVSCode.port)) {
     throw new Error('OpenVSCode port must be different from management, Zellij, and viewer ports');
@@ -141,8 +157,8 @@ export async function loadConfiguration(argv = process.argv.slice(2), cwd = proc
 
   return {
     config: {
-      listenHost: raw.listenHost,
-      listenPort: raw.listenPort,
+      listenHost,
+      listenPort: parsedPort,
       publicBaseUrl,
       zellijWebPort: raw.zellij.webPort,
       zellijManagedBinaryFile: resolveConfigPath(raw.zellij.managedBinaryFile),

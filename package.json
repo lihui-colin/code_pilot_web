@@ -3,24 +3,32 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "codepilot-server": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "scripts/service-runtime.mjs",
+    "config.example.json",
+    "README.md"
+  ],
   "engines": {
     "node": "26.x"
   },
   "scripts": {
-    "build": "npm run clean && tsc -p tsconfig.server.json && vite build",
+    "build": "npm run clean && tsc -p tsconfig.server.json && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\" && vite build",
     "build:web": "vite build",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "npm run build:web && concurrently --kill-others --passthrough-arguments \"npm run dev:web\" \"npm run dev:server -- {@}\" --",
-    "dev:server": "tsx watch src/server.ts --config config.json",
+    "dev:server": "tsx watch src/codepilot-server.ts --config config.json",
     "dev:web": "vite build --watch",
-    "postinstall": "node src/services/zellij-installer.ts --install-only",
     "probe:mvp0": "node scripts/probe-mvp0.mjs",
     "probe:mvp1": "node scripts/probe-mvp1.mjs",
     "probe:zellij-web-attach": "node scripts/probe-zellij-web-attach.mjs",
-    "service:start": "scripts/start-service.sh",
-    "service:restart": "scripts/restart-service.sh",
-    "service:stop": "scripts/stop-service.sh",
-    "start": "node dist/server.js --config config.json",
+    "service:start": "node dist/cli.js start",
+    "service:restart": "node dist/cli.js restart",
+    "service:stop": "node dist/cli.js stop",
+    "start": "node dist/cli.js",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },

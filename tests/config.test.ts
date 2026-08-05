@@ -47,7 +47,57 @@ afterEach(async () => {
 describe('loadConfiguration', () => {
   it('requires a workspace root', async () => {
     const { root } = await fixture();
-    await expect(loadConfiguration(['--config', 'config.json'], root)).rejects.toThrow('--workspace-root is required');
+    await expect(loadConfiguration(['--config', 'config.json'], root)).rejects.toThrow('--workspace is required');
+  });
+
+  it('accepts concise host, port, and workspace options', async () => {
+    const { root, workspace } = await fixture();
+    const loaded = await loadConfiguration([
+      '--config', 'config.json',
+      '--host', '192.0.2.20',
+      '--port', '9443',
+      '--workspace', workspace,
+    ], root);
+
+    expect(loaded.config.listenHost).toBe('0.0.0.0');
+    expect(loaded.config.listenPort).toBe(9443);
+    expect(loaded.config.publicBaseUrl).toBe('https://192.0.2.20:9443');
+    expect(loaded.config.workspaceRootRealPath).toBe(workspace);
+  });
+
+  it('defaults the listen address to 0.0.0.0', async () => {
+    const { root, workspace } = await fixture();
+    const configPath = path.join(root, 'config.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    config.listenHost = '127.0.0.1';
+    await writeFile(configPath, JSON.stringify(config));
+
+    const loaded = await loadConfiguration([
+      '--config', 'config.json',
+      '--workspace', workspace,
+    ], root);
+
+    expect(loaded.config.listenHost).toBe('0.0.0.0');
+    expect(loaded.config.publicBaseUrl).toBe('https://192.0.2.10:8024');
+  });
+
+  it('rejects a wildcard browser host', async () => {
+    const { root, workspace } = await fixture();
+    await expect(loadConfiguration([
+      '--config', 'config.json',
+      '--host', '0.0.0.0',
+      '--port', '9443',
+      '--workspace', workspace,
+    ], root)).rejects.toThrow('--host must be the IP address or hostname used by browsers');
+  });
+
+  it('rejects an invalid command-line port', async () => {
+    const { root, workspace } = await fixture();
+    await expect(loadConfiguration([
+      '--config', 'config.json',
+      '--port', '70000',
+      '--workspace', workspace,
+    ], root)).rejects.toThrow('--port must be an integer between 1 and 65535');
   });
 
   it('accepts 0.0.0.0 and stores the workspace real path', async () => {

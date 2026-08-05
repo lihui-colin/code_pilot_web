@@ -56,13 +56,13 @@ Workspace 管理区提供“会话列表”按钮，点击后以默认隐藏的�
 管理服务启动时必须传入工作目录：
 
 ```bash
-npm start -- --workspace-root /home/lihui/projects
+codepilot-server start --host 192.168.1.20 --port 8020 --workspace /home/lihui/projects
 ```
 
-也可以使用编译后的入口：
+服务默认监听 `0.0.0.0`。`--host` 表示浏览器访问的 IP 或域名，并用于 Zellij HTTPS 证书的 SAN；省略时沿用配置中的 `publicBaseUrl` 主机：
 
 ```bash
-node dist/server.js --workspace-root /home/lihui/projects
+codepilot-server start --port 8020 --workspace /home/lihui/projects
 ```
 
 未传参数、目录不存在或目录不可读时，服务启动失败，不回退到当前目录、用户主目录或服务器根目录。
