@@ -30,12 +30,29 @@ describe('Zellij Web same-origin proxy', () => {
   it('rewrites the HTML base and proxies HTTP and WebSocket paths', async () => {
     let httpRequest: IncomingMessage | undefined;
     let upgradeRequest: IncomingMessage | undefined;
+    let loginBody = '';
     let resolveUpgrade: (() => void) | undefined;
     let xtermAssetRequests = 0;
     const xtermAsset = `export const payload = "${'x'.repeat(4096)}";`;
     const upgradeSeen = new Promise<void>(resolve => { resolveUpgrade = resolve; });
     const upstream = createServer((request, response) => {
       httpRequest = request;
+      if (request.url === '/command/login' && request.method === 'POST') {
+        let requestBody = '';
+        request.setEncoding('utf8');
+        request.on('data', chunk => { requestBody += chunk; });
+        request.on('end', () => {
+          if (requestBody) {
+            loginBody = requestBody;
+            response.writeHead(200, { 'set-cookie': 'zellij-auth=test-session; Path=/; HttpOnly; SameSite=Strict' });
+            response.end('{}');
+          } else {
+            response.writeHead(200, { 'content-type': 'application/json' });
+            response.end(JSON.stringify({ path: request.url }));
+          }
+        });
+        return;
+      }
       if (request.url === '/session-name') {
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
         response.end('<html><head><base href="/" /></head><body>Zellij</body></html>');
@@ -93,7 +110,18 @@ describe('Zellij Web same-origin proxy', () => {
       await app.listen({ host: '127.0.0.1', port: 0 });
       const appPort = (app.server.address() as AddressInfo).port;
       const sessions = await fetch(`http://127.0.0.1:${appPort}/api/sessions`);
-      expect((await sessions.json()).sessions[0].webUrl).toBe(`https://192.0.2.10:8024/zellij/${sessionName}`);
+      expect((await sessions.json()).sessions[0].webUrl).toBe(`https://192.0.2.10:8024/zellij/open/${sessionName}`);
+
+      const openSession = await fetch(`http://127.0.0.1:${appPort}/zellij/open/${sessionName}`, {
+        redirect: 'manual',
+      });
+      expect(openSession.status).toBe(302);
+      expect(openSession.headers.get('location')).toBe(`/zellij/${sessionName}`);
+      expect(openSession.headers.get('set-cookie')).toBe('zellij-auth=test-session; Path=/; HttpOnly; SameSite=Strict');
+      expect(JSON.parse(loginBody)).toEqual({
+        auth_token: '123e4567-e89b-42d3-a456-426614174000',
+        remember_me: false,
+      });
 
       const html = await fetch(`http://127.0.0.1:${appPort}/zellij/session-name`);
       expect(await html.text()).toContain('<base href="/zellij/" />');

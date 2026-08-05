@@ -72,7 +72,7 @@ beforeEach(() => {
     relativePath: null,
     createdAt: null,
     command: null,
-    webUrl: 'https://192.0.2.10:8024/zellij/alpha',
+    webUrl: 'https://192.0.2.10:8024/zellij/open/alpha',
   }]);
   vi.mocked(api.getZellijToken).mockResolvedValue({
     name: 'terminal-web-test',
@@ -87,7 +87,7 @@ beforeEach(() => {
   vi.mocked(api.createSession).mockResolvedValue({
     name: 'terminal-web', status: 'running', origin: 'managed', repositoryId: `dir_${'a'.repeat(43)}`,
     relativePath: 'terminal-web', createdAt: '2026-08-02T00:00:00.000Z', command: 'codex',
-    webUrl: 'https://192.0.2.10:8024/zellij/terminal-web',
+    webUrl: 'https://192.0.2.10:8024/zellij/open/terminal-web',
   });
   vi.mocked(api.createViewer).mockResolvedValue({
     id: `viewer_${'b'.repeat(22)}`, repositoryId: `dir_${'a'.repeat(43)}`, pid: 123,
@@ -148,7 +148,7 @@ describe('App', () => {
     const link = within(sessionPanel).getByRole('link', { name: '打开' });
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(link).toHaveAttribute('href', 'https://192.0.2.10:8024/zellij/alpha');
+    expect(link).toHaveAttribute('href', 'https://192.0.2.10:8024/zellij/open/alpha');
     fireEvent.click(link);
     expect(screen.queryByRole('dialog', { name: 'Zellij 会话列表' })).not.toBeInTheDocument();
 
@@ -531,13 +531,13 @@ describe('App', () => {
       entries: [{
         id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
         kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null,
-        session: { name: sessionName, status: 'running', webUrl: `https://192.0.2.10:8024/zellij/${sessionName}` },
+        session: { name: sessionName, status: 'running', webUrl: `https://192.0.2.10:8024/zellij/open/${sessionName}` },
       }],
     });
     vi.spyOn(window, 'prompt').mockReturnValue(sessionName);
     render(<App />);
     const link = await screen.findByRole('link', { name: '打开 Zellij Web' });
-    expect(link).toHaveAttribute('href', `https://192.0.2.10:8024/zellij/${sessionName}`);
+    expect(link).toHaveAttribute('href', `https://192.0.2.10:8024/zellij/open/${sessionName}`);
     expect(link).toHaveAttribute('target', '_blank');
     fireEvent.click(link);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('123e4567-e89b-42d3-a456-426614174000'));

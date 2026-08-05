@@ -112,7 +112,7 @@
 5. Session 打开链接使用新标签页和 `noopener noreferrer`。
 6. 桌面和移动尺寸无文字溢出和控件重叠。
 7. 页面隐藏时停止轮询，恢复时立即刷新。
-8. Session URL 使用主服务同源 `/zellij/<session>`，不包含 Zellij 上游端口。
+8. Session URL 使用主服务同源 `/zellij/open/<session>`，不包含 Zellij 上游端口；打开时由管理服务使用服务端 Token 登录 localhost 上游，转发认证 Cookie 并重定向到 `/zellij/<session>`，Token 不出现在浏览器 URL、HTML 或响应正文中。
 9. Zellij Web 只监听 localhost；入口 HTML 的 base 被改写为 `/zellij/`，登录 HTTP 和终端 WebSocket 均通过主服务代理。
 10. Zellij `0.44.3` 已知静态资源返回一天的私有 immutable 缓存、版本化弱 ETag 和 gzip；匹配 `If-None-Match` 时直接返回 `304` 且不请求上游。HTML、登录/API 和 WebSocket 不使用该静态缓存策略。
 11. 防火墙只需公开主服务端口，Zellij Web、code-viewer 和 OpenVSCode 端口从外部不可访问。

@@ -664,7 +664,7 @@ describe('MVP-1 routes', () => {
     const listingWithSession = await app.inject({ method: 'GET', url: '/api/repositories' });
     expect(listingWithSession.json().entries[0].session).toMatchObject({
       name: sessionName,
-      webUrl: `https://192.0.2.10:8024/zellij/${sessionName}`,
+      webUrl: `https://192.0.2.10:8024/zellij/open/${sessionName}`,
     });
 
     const reused = await app.inject({

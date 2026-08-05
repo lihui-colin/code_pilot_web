@@ -184,10 +184,10 @@ Session 出现在结果中即为 `running`。MVP 不探测 Session 内 Codex 是
 
 `zellij.webPort` 必须是 `1-65535` 的整数，且不得与管理、OpenVSCode 或 code-viewer 端口冲突。
 
-Session URL 由服务端生成：
+Session URL 由服务端生成。打开入口先由同源管理服务使用服务端保存的 Token 登录 localhost Zellij Web，把上游认证 Cookie 写入浏览器响应，再重定向到实际 Session 页面；Token 不得出现在 URL、HTML 或重定向响应中：
 
 ```typescript
-new URL(`${encodeURIComponent(name)}`, `${baseUrl}/`).toString()
+new URL(`${encodeURIComponent(name)}`, `${baseUrl}/open/`).toString()
 ```
 
 前端不得自行拼接主机或端口。

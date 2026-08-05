@@ -76,6 +76,34 @@ function openVSCodeWebUrl(config: AppConfig, repositoryRealPath: string): string
   return url.toString();
 }
 
+async function requestZellijWebLogin(destination: string, token: string) {
+  const url = new URL(destination);
+  const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
+  const body = JSON.stringify({ auth_token: token, remember_me: false });
+  return new Promise<{ statusCode: number; cookies: string[] }>((resolve, reject) => {
+    const upstream = request(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(body),
+      },
+      rejectUnauthorized: false,
+    }, response => {
+      response.resume();
+      response.once('error', reject);
+      response.once('end', () => {
+        const setCookie = response.headers['set-cookie'];
+        resolve({
+          statusCode: response.statusCode ?? 502,
+          cookies: Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [],
+        });
+      });
+    });
+    upstream.once('error', reject);
+    upstream.end(body);
+  });
+}
+
 async function proxyZellijHtml(destination: string, cookie: string | undefined) {
   const url = new URL(destination);
   const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
@@ -192,6 +220,22 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     },
     handler: async (request, reply, destination, options) => {
       const pathname = new URL(request.raw.url ?? '/', config.publicBaseUrl).pathname;
+      const loginPath = pathname.match(/^\/zellij\/open\/([A-Za-z0-9_-]{1,64})\/?$/u);
+      if (request.method === 'GET' && loginPath?.[1]) {
+        const token = dependencies.zellijTokenService?.get() ?? config.zellijWebToken;
+        if (!token) throw new ApiError(503, 'SERVICE_NOT_READY', 'Zellij Web login is not ready');
+        const login = await requestZellijWebLogin(
+          new URL('/command/login', zellijProxyUpstream).toString(),
+          token.value,
+        );
+        if (login.statusCode !== 200 || login.cookies.length === 0) {
+          throw new ApiError(502, 'ZELLIJ_WEB_LOGIN_FAILED', 'Zellij Web login failed');
+        }
+        return reply.code(302).headers({
+          location: `/zellij/${encodeURIComponent(loginPath[1])}`,
+          'set-cookie': login.cookies,
+        }).send();
+      }
       if (request.method === 'GET' && (/^\/zellij\/?$/u.test(pathname) || /^\/zellij\/[A-Za-z0-9_-]{1,64}\/?$/u.test(pathname))) {
         const response = await proxyZellijHtml(new URL(destination, `${zellijProxyUpstream}/`).toString(), request.headers.cookie);
         return reply.code(response.statusCode).headers(response.headers).send(response.body);
@@ -233,7 +277,7 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     : null;
   const zellijService = new ZellijService(
     dependencies.zellijAdapter ?? new ExecFileZellijAdapter(dependencies.zellijExecutablePath),
-    new URL('/zellij/', config.publicBaseUrl).toString().replace(/\/$/u, ''),
+    new URL('/zellij/open/', config.publicBaseUrl).toString().replace(/\/$/u, ''),
     app.log,
     dependencies.managedSessions ?? new Map(),
     path.join(path.dirname(config.directoryIdSecretFile), 'layouts'),
