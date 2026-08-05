@@ -8,7 +8,7 @@ import { RepositoryService } from '../src/services/repository-service.js';
 const temporaryDirectories: string[] = [];
 
 async function makeRoot(): Promise<string> {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-repositories-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-repositories-'));
   temporaryDirectories.push(root);
   return root;
 }

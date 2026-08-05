@@ -36,8 +36,8 @@ beforeEach(() => {
     breadcrumbs: [],
     entries: [{
       id: repositoryId,
-      name: 'terminal-web',
-      relativePath: 'terminal-web',
+      name: 'codepilot-web',
+      relativePath: 'codepilot-web',
       kind: 'repository',
       source: 'workspace',
       markers: ['git', 'node'],
@@ -85,14 +85,14 @@ afterEach(() => {
 describe('CodexChat', () => {
   it('keeps repository details in a hidden drawer that can be opened and closed', async () => {
     render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
     expect(screen.queryByRole('dialog', { name: '对话信息' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '打开对话面板' }));
     const drawer = screen.getByRole('dialog', { name: '对话信息' });
     expect(drawer).toHaveTextContent('当前仓库');
     expect(drawer).toHaveTextContent('codex-cli 0.146.0 · 当前仓库 · YOLO 模式');
-    expect(within(drawer).getAllByText('terminal-web')).toHaveLength(1);
+    expect(within(drawer).getAllByText('codepilot-web')).toHaveLength(1);
     expect(screen.getByRole('button', { name: '＋ 新对话' })).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -101,7 +101,7 @@ describe('CodexChat', () => {
 
   it('loads the selected repository and renders a background conversation snapshot', async () => {
     render(<CodexChat />);
-    expect(await screen.findByRole('heading', { name: 'terminal-web' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'codepilot-web' })).toBeInTheDocument();
     const input = screen.getByRole('textbox', { name: '发送给 Codex 的消息' });
     fireEvent.change(input, { target: { value: '分析项目结构' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
@@ -121,7 +121,7 @@ describe('CodexChat', () => {
       return () => undefined;
     });
     render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
     await waitFor(() => expect(api.subscribeCodexConversation).toHaveBeenCalledWith(repositoryId, expect.any(Function)));
 
     act(() => onSnapshot?.({
@@ -291,7 +291,7 @@ describe('CodexChat', () => {
       mode: 'sandbox',
     });
     render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
 
     fireEvent.click(screen.getByRole('button', { name: '打开对话面板' }));
     expect(screen.getByRole('dialog', { name: '对话信息' }))
@@ -300,7 +300,7 @@ describe('CodexChat', () => {
 
   it('uses a locally persisted personalized display name for user messages', async () => {
     render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
     fireEvent.click(screen.getByRole('button', { name: '打开对话面板' }));
     fireEvent.change(screen.getByRole('textbox', { name: '我的显示名' }), { target: { value: 'Colin' } });
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -320,7 +320,7 @@ describe('CodexChat', () => {
     });
 
     const { container } = render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
 
     expect(container.querySelector('.chat-shell')).toHaveStyle({
       fontFamily: '"Noto Sans SC", sans-serif',
@@ -330,7 +330,7 @@ describe('CodexChat', () => {
 
   it('configures and persists typography from any Codex page drawer', async () => {
     const { container } = render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
     fireEvent.click(screen.getByRole('button', { name: '打开对话面板' }));
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Codex 页面字体' }), {
@@ -362,7 +362,7 @@ describe('CodexChat', () => {
 
   it('starts the message input at one line and grows with wrapped content', async () => {
     render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
     const input = screen.getByRole('textbox', { name: '发送给 Codex 的消息' });
     Object.defineProperty(input, 'scrollHeight', { configurable: true, value: 72 });
 
@@ -381,7 +381,7 @@ describe('CodexChat', () => {
       truncated: false,
     });
     render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
     fireEvent.click(screen.getByRole('button', { name: '＋ Add file' }));
     const sourceDirectory = await screen.findByRole('button', { name: '展开目录 src' });
     expect(screen.queryByText('app.ts')).not.toBeInTheDocument();
@@ -390,7 +390,7 @@ describe('CodexChat', () => {
     fireEvent.click(screen.getByText('config.ts').closest('button')!);
     expect(screen.getByRole('dialog', { name: '选择上下文文件' })).toBeInTheDocument();
     expect(screen.getByText('已选 2/8')).toBeInTheDocument();
-    fireEvent.mouseDown(screen.getByRole('heading', { name: 'terminal-web' }));
+    fireEvent.mouseDown(screen.getByRole('heading', { name: 'codepilot-web' }));
     expect(screen.queryByRole('dialog', { name: '选择上下文文件' })).not.toBeInTheDocument();
     const input = screen.getByRole('textbox', { name: '发送给 Codex 的消息' });
     fireEvent.change(input, { target: { value: '解释附件' } });
@@ -415,7 +415,7 @@ describe('CodexChat', () => {
       truncated: false,
     });
     render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
     fireEvent.click(screen.getByRole('button', { name: '＋ Add file' }));
     await screen.findByRole('button', { name: '展开目录 src' });
 
@@ -431,7 +431,7 @@ describe('CodexChat', () => {
 
   it('continues the server-issued Codex conversation on the next message', async () => {
     render(<CodexChat />);
-    await screen.findByRole('heading', { name: 'terminal-web' });
+    await screen.findByRole('heading', { name: 'codepilot-web' });
     const input = screen.getByRole('textbox', { name: '发送给 Codex 的消息' });
     fireEvent.change(input, { target: { value: '第一条' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));

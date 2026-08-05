@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ViewerManager } from './viewer-manager.js';
 
-export const VIEWER_COOKIE_NAME = 'terminal_web_viewer';
+export const VIEWER_COOKIE_NAME = 'codepilot_web_viewer';
 
 export function viewerIdFromCookie(cookieHeader: string | undefined): string | null {
   if (!cookieHeader) return null;

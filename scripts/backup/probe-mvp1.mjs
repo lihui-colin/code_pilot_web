@@ -85,7 +85,7 @@ async function revokeProbeToken(configFile) {
 }
 
 async function main() {
-  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-mvp1-'));
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-mvp1-'));
   const workspace = path.join(fixtureRoot, 'workspace');
   const configFile = path.join(fixtureRoot, 'config.json');
   const port = await freePort();
@@ -136,7 +136,7 @@ async function main() {
     assert.equal(health.statusCode, 200);
     const page = await request(`${baseUrl}/`);
     assert.equal(page.statusCode, 200, page.body);
-    assert.match(page.body, /<title>Terminal Web<\/title>/u);
+    assert.match(page.body, /<title>CodePilot Web<\/title>/u);
     const ready = await request(`${baseUrl}/api/ready`);
     assert.equal(ready.statusCode, 200, ready.body);
     const repositories = await request(`${baseUrl}/api/repositories`);

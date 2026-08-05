@@ -27,7 +27,7 @@ export class SpawnServiceRestarter implements ServiceRestarter {
       const child = this.spawnProcess(this.scriptFile, [this.workspaceRoot, this.configFile], {
         cwd: this.workspaceRoot,
         detached: true,
-        env: { ...process.env, TERMINAL_WEB_RESTART_DELAY_MS: '750' },
+        env: { ...process.env, CODEPILOT_WEB_RESTART_DELAY_MS: '750' },
         shell: false,
         stdio: ['ignore', logDescriptor, logDescriptor],
       });

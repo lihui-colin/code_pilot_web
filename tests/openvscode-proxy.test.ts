@@ -26,7 +26,7 @@ function websocketAccept(key: string): string {
 
 describe('OpenVSCode same-origin proxy', () => {
   it('preserves the base path and proxies HTTP and WebSocket traffic', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-openvscode-proxy-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-openvscode-proxy-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
 

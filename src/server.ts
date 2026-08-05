@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   try {
     actualSessionNames = parseSessionNames(await zellijAdapter.listSessions());
   } catch {
-    process.stderr.write('Terminal Web warning: unable to reconcile managed Sessions during startup\n');
+    process.stderr.write('CodePilot Web warning: unable to reconcile managed Sessions during startup\n');
   }
   const managedSessions = await stateStore.initialize(actualSessionNames);
   const zellijTokenService = new ZellijTokenService(
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     loaded.config.zellijWebToken,
     {
       persist: token => persistZellijWebToken(loaded.configFilePath, token),
-      warn: message => process.stderr.write(`Terminal Web warning: ${message}\n`),
+      warn: message => process.stderr.write(`CodePilot Web warning: ${message}\n`),
     },
   );
   const tokenInitialization = await zellijTokenService.initialize();
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
       path.join(projectRoot, 'scripts/restart-service.sh'),
       loaded.config.workspaceRootRealPath,
       loaded.configFilePath,
-      path.join(projectRoot, 'data/service-restart.log'),
+      path.join(projectRoot, 'data/codepilot-web-restart.log'),
     ),
     staticRoot: path.resolve('dist/web'),
   });
@@ -87,6 +87,6 @@ async function main(): Promise<void> {
 }
 
 main().catch(error => {
-  process.stderr.write(`Terminal Web failed to start: ${error instanceof Error ? error.message : 'unknown error'}\n`);
+  process.stderr.write(`CodePilot Web failed to start: ${error instanceof Error ? error.message : 'unknown error'}\n`);
   process.exitCode = 1;
 });

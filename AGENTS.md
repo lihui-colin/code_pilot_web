@@ -1,4 +1,4 @@
-# Terminal Web Agent Guide
+# CodePilot Web Agent Guide
 
 ## Project
 

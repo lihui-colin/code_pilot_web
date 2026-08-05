@@ -7,7 +7,7 @@ import { loadConfiguration, persistZellijWebToken } from '../src/config.js';
 const temporaryDirectories: string[] = [];
 
 async function fixture() {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-config-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-config-'));
   temporaryDirectories.push(root);
   const workspace = path.join(root, 'workspace');
   const workspaceLink = path.join(root, 'workspace-link');
@@ -178,7 +178,7 @@ describe('loadConfiguration', () => {
   it('atomically persists the Zellij Web token name and value with secure permissions', async () => {
     const { root, workspace } = await fixture();
     const configPath = path.join(root, 'config.json');
-    const token = { name: 'terminal-web-test', value: '123e4567-e89b-42d3-a456-426614174000' };
+    const token = { name: 'codepilot-web-test', value: '123e4567-e89b-42d3-a456-426614174000' };
     await persistZellijWebToken(configPath, token);
     const loaded = await loadConfiguration([
       '--config', 'config.json',

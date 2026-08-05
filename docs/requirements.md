@@ -162,6 +162,6 @@ Codex 对话快照只包含 conversation ID、用户与助手文本、运行状�
 
 - `run_zellij.sh` 继续用于本地验证，正式部署由 systemd 守护 Zellij Web。
 - `start-code-viewer-proxy.sh` 只用于单实例探测，其进程和代理逻辑迁移到常驻管理服务。
-- `run_ttyd.sh` 和 `run_code_server.sh` 不属于 Terminal Web 正式运行链路。
+- `run_ttyd.sh` 和 `run_code_server.sh` 不属于 CodePilot Web 正式运行链路。
 
 精确 API、路径、进程和状态行为见 [实施契约](contracts.md)。

@@ -12,7 +12,7 @@ afterEach(async () => {
 
 describe('StateStore', () => {
   it('removes managed Session records that no longer exist during startup', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-state-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-state-'));
     temporaryDirectories.push(root);
     const dataDirectory = path.join(root, 'data');
     const stateFile = path.join(dataDirectory, 'state.json');
@@ -48,7 +48,7 @@ describe('StateStore', () => {
   });
 
   it('persists manual repositories without losing managed Sessions', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-state-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-state-'));
     temporaryDirectories.push(root);
     const stateFile = path.join(root, 'data/state.json');
     const store = new StateStore(stateFile);

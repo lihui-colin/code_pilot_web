@@ -65,8 +65,8 @@ async function listSessions() {
 }
 
 async function probeZellij() {
-  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-mvp0-zellij-'));
-  const sessionName = `terminal_web_mvp0_${process.pid}`;
+  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-mvp0-zellij-'));
+  const sessionName = `codepilot_web_mvp0_${process.pid}`;
   const markerPath = path.join(tempDirectory, 'codex-started.json');
   const wrapperPath = path.join(tempDirectory, 'codex');
   const layoutPath = path.join(tempDirectory, 'codex.kdl');

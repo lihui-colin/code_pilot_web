@@ -14,7 +14,7 @@ afterEach(async () => {
 
 describe('SpawnServiceRestarter', () => {
   it('spawns only the fixed restart script with the configured workspace and config file', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-restarter-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-restarter-'));
     temporaryDirectories.push(root);
     const logFile = path.join(root, 'restart.log');
     const child = new EventEmitter() as ChildProcess;
@@ -40,7 +40,7 @@ describe('SpawnServiceRestarter', () => {
         cwd: '/workspace/root',
         detached: true,
         shell: false,
-        env: expect.objectContaining({ TERMINAL_WEB_RESTART_DELAY_MS: '750' }),
+        env: expect.objectContaining({ CODEPILOT_WEB_RESTART_DELAY_MS: '750' }),
       }),
     );
     expect(child.unref).toHaveBeenCalled();

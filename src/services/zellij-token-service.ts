@@ -129,7 +129,7 @@ export class ZellijTokenService {
 }
 
 export async function createTokenInDatabase(tokenDatabaseFile: string): Promise<ZellijWebToken> {
-  const name = `terminal-web-${Date.now()}-${randomBytes(6).toString('hex')}`;
+  const name = `codepilot-web-${Date.now()}-${randomBytes(6).toString('hex')}`;
   const value = randomUUID();
   const tokenHash = createHash('sha256').update(value).digest('hex');
   const database = new DatabaseSync(tokenDatabaseFile);

@@ -585,7 +585,7 @@ export function App() {
               <article className="status-card">
                 <span>管理服务</span>
                 <strong className="status-ok">在线</strong>
-                <small className="status-detail">terminal-web 0.1.0</small>
+                <small className="status-detail">codepilot-web 0.1.0</small>
               </article>
               <article className="status-card">
                 <span>就绪状态</span>

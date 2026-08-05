@@ -10,7 +10,7 @@
 PATH=/home/lihui/.nvm/versions/node/v26.5.1/bin:$PATH \
 ZELLIJ_WEB_BASE_URL=https://127.0.0.1:8021 \
 ZELLIJ_WEB_INSECURE=1 \
-node scripts/probe-mvp0.mjs /home/lihui/terminal_web
+node scripts/probe-mvp0.mjs /home/lihui/code_pilot_web
 ```
 
 `ZELLIJ_WEB_INSECURE=1` 仅用于本机自签名证书探测，不属于正式服务配置。

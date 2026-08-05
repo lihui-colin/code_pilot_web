@@ -30,7 +30,7 @@ afterEach(async () => {
 
 describe('stop-service.sh', () => {
   it('reports graceful shutdown progress and removes the PID file', async () => {
-    const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-stop-script-'));
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-stop-script-'));
     temporaryDirectories.push(projectRoot);
     const scriptsDirectory = path.join(projectRoot, 'scripts');
     const dataDirectory = path.join(projectRoot, 'data');
@@ -69,24 +69,24 @@ setInterval(() => {}, 1_000);`,
     childProcesses.push(service);
     await waitForFile(readyFile);
 
-    const pidFile = path.join(dataDirectory, 'terminal-web.pid');
+    const pidFile = path.join(dataDirectory, 'codepilot-web.pid');
     await writeFile(pidFile, `${service.pid}\n`);
     const { stdout } = await execFileAsync(stopScript, { encoding: 'utf8' });
 
-    expect(stdout).toContain(`Sending SIGTERM to Terminal Web (PID ${service.pid})`);
+    expect(stdout).toContain(`Sending SIGTERM to CodePilot Web (PID ${service.pid})`);
     expect(stdout).toContain('Waiting for graceful shutdown:   0% (0.0s/10.0s)');
     expect(stdout).toContain('Waiting for graceful shutdown:  10% (1.0s/10.0s)');
     expect(stdout).toMatch(/Graceful shutdown completed after \d+\.\ds/u);
     expect(stdout).toContain('Stopping Zellij Web, code-viewer, OpenVSCode, and remaining managed services');
-    expect(stdout).toContain('Terminal Web support services stopped');
-    expect(stdout).toContain('Terminal Web stopped');
+    expect(stdout).toContain('CodePilot Web support services stopped');
+    expect(stdout).toContain('CodePilot Web stopped');
     await expect(readFile(pidFile, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(runtimeFile, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     expect(JSON.parse(await readFile(cleanupRecord, 'utf8'))).toEqual(['cleanup', configFile, workspaceRoot]);
   });
 
   it('cleans support services when the management PID file is missing', async () => {
-    const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-stop-orphaned-'));
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-stop-orphaned-'));
     temporaryDirectories.push(projectRoot);
     const scriptsDirectory = path.join(projectRoot, 'scripts');
     const dataDirectory = path.join(projectRoot, 'data');
@@ -107,8 +107,8 @@ writeFileSync(${JSON.stringify(cleanupRecord)}, JSON.stringify(process.argv.slic
 
     const { stdout } = await execFileAsync(stopScript, { encoding: 'utf8' });
 
-    expect(stdout).toContain('Terminal Web is not running (PID file not found)');
-    expect(stdout).toContain('Terminal Web support services stopped');
+    expect(stdout).toContain('CodePilot Web is not running (PID file not found)');
+    expect(stdout).toContain('CodePilot Web support services stopped');
     expect(JSON.parse(await readFile(cleanupRecord, 'utf8'))).toEqual(['cleanup', configFile, workspaceRoot]);
   });
 });

@@ -3,14 +3,14 @@
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-pid_file="$project_root/data/terminal-web.pid"
+pid_file="$project_root/data/codepilot-web.pid"
 runtime_file="$project_root/data/service-runtime.json"
 graceful_stop_steps=100
 progress_width=20
 
 cleanup_support_services() {
     if [[ ! -f "$runtime_file" ]]; then
-        echo "Terminal Web runtime metadata was not found; support services were not cleaned" >&2
+        echo "CodePilot Web runtime metadata was not found; support services were not cleaned" >&2
         return 1
     fi
     mapfile -t runtime_values < <(node --input-type=module - "$runtime_file" <<'NODE'
@@ -21,13 +21,13 @@ process.stdout.write(`${runtime.configFile}\n${runtime.workspaceRoot}\n`);
 NODE
     )
     if [[ ${#runtime_values[@]} -ne 2 ]]; then
-        echo "Invalid Terminal Web runtime metadata" >&2
+        echo "Invalid CodePilot Web runtime metadata" >&2
         return 1
     fi
     echo "Stopping Zellij Web, code-viewer, OpenVSCode, and remaining managed services"
     node "$project_root/scripts/service-runtime.mjs" cleanup "${runtime_values[0]}" "${runtime_values[1]}"
     rm -f "$runtime_file"
-    echo "Terminal Web support services stopped"
+    echo "CodePilot Web support services stopped"
 }
 
 backfill_runtime_metadata() {
@@ -91,33 +91,33 @@ finish_stop_progress() {
 }
 
 if [[ ! -f "$pid_file" ]]; then
-    echo "Terminal Web is not running (PID file not found)"
+    echo "CodePilot Web is not running (PID file not found)"
     cleanup_support_services
     exit 0
 fi
 
 service_pid="$(<"$pid_file")"
 if [[ ! "$service_pid" =~ ^[0-9]+$ ]]; then
-    echo "Invalid Terminal Web PID file" >&2
+    echo "Invalid CodePilot Web PID file" >&2
     exit 1
 fi
 
 if ! kill -0 "$service_pid" 2>/dev/null; then
     rm -f "$pid_file"
-    echo "Removed stale Terminal Web PID file"
+    echo "Removed stale CodePilot Web PID file"
     cleanup_support_services
     exit 0
 fi
 
 command_line="$(tr '\0' ' ' < "/proc/$service_pid/cmdline" 2>/dev/null || true)"
 if [[ "$command_line" != *"$project_root/dist/server.js"* ]]; then
-    echo "PID $service_pid does not belong to this Terminal Web service" >&2
+    echo "PID $service_pid does not belong to this CodePilot Web service" >&2
     exit 1
 fi
 
 backfill_runtime_metadata "$service_pid"
 
-echo "Sending SIGTERM to Terminal Web (PID $service_pid)"
+echo "Sending SIGTERM to CodePilot Web (PID $service_pid)"
 kill -TERM "$service_pid"
 print_stop_progress 0
 for ((step = 1; step <= graceful_stop_steps; step += 1)); do
@@ -125,7 +125,7 @@ for ((step = 1; step <= graceful_stop_steps; step += 1)); do
         finish_stop_progress "$step" "completed"
         rm -f "$pid_file"
         cleanup_support_services
-        echo "Terminal Web stopped"
+        echo "CodePilot Web stopped"
         exit 0
     fi
     sleep 0.1
@@ -136,13 +136,13 @@ if ! kill -0 "$service_pid" 2>/dev/null; then
     finish_stop_progress "$graceful_stop_steps" "completed"
     rm -f "$pid_file"
     cleanup_support_services
-    echo "Terminal Web stopped"
+    echo "CodePilot Web stopped"
     exit 0
 fi
 
 finish_stop_progress "$graceful_stop_steps" "timed out"
-echo "Sending SIGKILL to Terminal Web (PID $service_pid)" >&2
+echo "Sending SIGKILL to CodePilot Web (PID $service_pid)" >&2
 kill -KILL "$service_pid" 2>/dev/null || true
 rm -f "$pid_file"
 cleanup_support_services
-echo "Terminal Web did not stop within 10 seconds and was killed" >&2
+echo "CodePilot Web did not stop within 10 seconds and was killed" >&2

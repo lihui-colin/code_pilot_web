@@ -4,12 +4,12 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 config_file="${2:-$project_root/config.json}"
-pid_file="$project_root/data/terminal-web.pid"
+pid_file="$project_root/data/codepilot-web.pid"
 runtime_file="$project_root/data/service-runtime.json"
-log_file="$project_root/data/terminal-web.log"
+log_file="$project_root/data/codepilot-web.log"
 
 print_started() {
-    echo "Terminal Web started with PID $service_pid"
+    echo "CodePilot Web started with PID $service_pid"
     echo "Access URL: $access_url"
     echo "Workspace: $workspace_root"
     echo "Log: $log_file"
@@ -28,7 +28,7 @@ import net from 'node:net';
 
 const config = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const ports = [
-    { name: 'Terminal Web', host: config.listenHost, port: config.listenPort },
+    { name: 'CodePilot Web', host: config.listenHost, port: config.listenPort },
     { name: 'code-viewer', host: '127.0.0.1', port: config.viewerPortRange.start },
 ];
 
@@ -62,7 +62,7 @@ NODE
 )"
 
 if [[ -z "$access_url" ]]; then
-    echo "Unable to determine Terminal Web access URL" >&2
+    echo "Unable to determine CodePilot Web access URL" >&2
     exit 1
 fi
 
@@ -79,7 +79,7 @@ if [[ -f "$pid_file" ]]; then
     if [[ "$existing_pid" =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
         command_line="$(tr '\0' ' ' < "/proc/$existing_pid/cmdline" 2>/dev/null || true)"
         if [[ "$command_line" == *"$project_root/dist/server.js"* ]]; then
-            echo "Terminal Web is already running with PID $existing_pid" >&2
+            echo "CodePilot Web is already running with PID $existing_pid" >&2
         else
             echo "PID file points to another running process: $existing_pid" >&2
         fi
@@ -116,7 +116,7 @@ for _ in {1..100}; do
     if ! kill -0 "$service_pid" 2>/dev/null; then
         rm -f "$pid_file"
         rm -f "$runtime_file"
-        echo "Terminal Web failed to start. Recent log output:" >&2
+        echo "CodePilot Web failed to start. Recent log output:" >&2
         tail -n 20 "$log_file" >&2
         exit 1
     fi
@@ -127,5 +127,5 @@ for _ in {1..100}; do
     sleep 0.1
 done
 
-echo "Terminal Web is still starting with PID $service_pid"
+echo "CodePilot Web is still starting with PID $service_pid"
 echo "Log: $log_file"

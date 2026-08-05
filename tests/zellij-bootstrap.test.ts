@@ -22,7 +22,7 @@ afterEach(async () => {
 
 describe('ensureZellij', () => {
   it('reuses a matching system Zellij without downloading it', async () => {
-    const root = await temporaryDirectory('terminal-web-zellij-');
+    const root = await temporaryDirectory('codepilot-web-zellij-');
     const installer = vi.fn();
     const result = await ensureZellij(path.join(root, 'bin/zellij'), {
       readVersion: async executablePath => executablePath === 'zellij' ? ZELLIJ_VERSION_OUTPUT : null,
@@ -39,7 +39,7 @@ describe('ensureZellij', () => {
   });
 
   it('downloads a fixed release into the managed project path when Zellij is absent', async () => {
-    const root = await temporaryDirectory('terminal-web-zellij-');
+    const root = await temporaryDirectory('codepilot-web-zellij-');
     const managedBinary = path.join(root, 'data/bin/zellij');
     const installer = vi.fn(async (url: string, destination: string) => {
       expect(url).toBe('https://github.com/zellij-org/zellij/releases/download/v0.44.3/zellij-x86_64-unknown-linux-musl.tar.gz');
@@ -60,7 +60,7 @@ describe('ensureZellij', () => {
   });
 
   it('does not silently replace a Zellij installation with a mismatched version', async () => {
-    const root = await temporaryDirectory('terminal-web-zellij-');
+    const root = await temporaryDirectory('codepilot-web-zellij-');
     const managedBinary = path.join(root, 'data/bin/zellij');
     const installer = vi.fn();
     const result = await ensureZellij(managedBinary, {
@@ -83,7 +83,7 @@ describe('ensureZellijWebCertificate', () => {
   };
 
   it('reuses an existing valid certificate and private key', async () => {
-    const root = await temporaryDirectory('terminal-web-cert-');
+    const root = await temporaryDirectory('codepilot-web-cert-');
     const certificateFile = path.join(root, 'cert.pem');
     const privateKeyFile = path.join(root, 'key.pem');
     await writeFile(certificateFile, 'certificate', { mode: 0o644 });
@@ -98,7 +98,7 @@ describe('ensureZellijWebCertificate', () => {
   });
 
   it('creates a certificate with the configured Zellij Web hostname when both files are absent', async () => {
-    const root = await temporaryDirectory('terminal-web-cert-');
+    const root = await temporaryDirectory('codepilot-web-cert-');
     const certificateFile = path.join(root, 'certs/cert.pem');
     const privateKeyFile = path.join(root, 'keys/key.pem');
     const generator = vi.fn(async (temporaryCertificate: string, temporaryKey: string) => {
@@ -121,7 +121,7 @@ describe('ensureZellijWebCertificate', () => {
   });
 
   it('rejects an existing certificate that does not cover the configured hostname', async () => {
-    const root = await temporaryDirectory('terminal-web-cert-');
+    const root = await temporaryDirectory('codepilot-web-cert-');
     const certificateFile = path.join(root, 'cert.pem');
     const privateKeyFile = path.join(root, 'key.pem');
     await writeFile(certificateFile, 'certificate', { mode: 0o644 });
@@ -141,7 +141,7 @@ describe('ensureZellijWebCertificate', () => {
   });
 
   it('uses hostname validation for DNS names', async () => {
-    const root = await temporaryDirectory('terminal-web-cert-');
+    const root = await temporaryDirectory('codepilot-web-cert-');
     const certificateFile = path.join(root, 'cert.pem');
     const privateKeyFile = path.join(root, 'key.pem');
     await writeFile(certificateFile, 'certificate', { mode: 0o644 });
@@ -161,7 +161,7 @@ describe('ensureZellijWebCertificate', () => {
   });
 
   it('fails without overwriting a partial certificate state', async () => {
-    const root = await temporaryDirectory('terminal-web-cert-');
+    const root = await temporaryDirectory('codepilot-web-cert-');
     const certificateFile = path.join(root, 'cert.pem');
     const privateKeyFile = path.join(root, 'key.pem');
     await mkdir(path.dirname(certificateFile), { recursive: true });
@@ -178,7 +178,7 @@ describe('ensureZellijWebCertificate', () => {
 
 describe('ensureZellijWebSharing', () => {
   it('adds web sharing when the Zellij config only contains the commented default', async () => {
-    const root = await temporaryDirectory('terminal-web-zellij-config-');
+    const root = await temporaryDirectory('codepilot-web-zellij-config-');
     const configFile = path.join(root, 'config.kdl');
     await writeFile(configFile, [
       '// web_sharing "off"',
@@ -197,7 +197,7 @@ describe('ensureZellijWebSharing', () => {
   });
 
   it('replaces active startup values and then reuses the corrected config', async () => {
-    const root = await temporaryDirectory('terminal-web-zellij-config-');
+    const root = await temporaryDirectory('codepilot-web-zellij-config-');
     const configFile = path.join(root, 'config.kdl');
     await writeFile(configFile, [
       'web_sharing "off"',

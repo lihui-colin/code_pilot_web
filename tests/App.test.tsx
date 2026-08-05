@@ -33,7 +33,7 @@ const repositories = {
   breadcrumbs: [{ id: null, name: 'workspace', relativePath: '' }],
   entries: [],
 };
-const openVSCodeUrl = 'https://192.0.2.10:8024/openvscode/?folder=%2Fworkspace%2Fterminal-web';
+const openVSCodeUrl = 'https://192.0.2.10:8024/openvscode/?folder=%2Fworkspace%2Fcodepilot-web';
 let localStorageValues: Map<string, string>;
 
 async function openTokenPanel() {
@@ -75,19 +75,19 @@ beforeEach(() => {
     webUrl: 'https://192.0.2.10:8024/zellij/open/alpha',
   }]);
   vi.mocked(api.getZellijToken).mockResolvedValue({
-    name: 'terminal-web-test',
+    name: 'codepilot-web-test',
     value: '123e4567-e89b-42d3-a456-426614174000',
   });
   vi.mocked(api.regenerateZellijToken).mockResolvedValue({
-    name: 'terminal-web-new',
+    name: 'codepilot-web-new',
     value: '123e4567-e89b-42d3-a456-426614174001',
   });
   vi.mocked(api.deleteZellijToken).mockResolvedValue(undefined);
   vi.mocked(api.deleteSession).mockResolvedValue(undefined);
   vi.mocked(api.createSession).mockResolvedValue({
-    name: 'terminal-web', status: 'running', origin: 'managed', repositoryId: `dir_${'a'.repeat(43)}`,
-    relativePath: 'terminal-web', createdAt: '2026-08-02T00:00:00.000Z', command: 'codex',
-    webUrl: 'https://192.0.2.10:8024/zellij/open/terminal-web',
+    name: 'codepilot-web', status: 'running', origin: 'managed', repositoryId: `dir_${'a'.repeat(43)}`,
+    relativePath: 'codepilot-web', createdAt: '2026-08-02T00:00:00.000Z', command: 'codex',
+    webUrl: 'https://192.0.2.10:8024/zellij/open/codepilot-web',
   });
   vi.mocked(api.createViewer).mockResolvedValue({
     id: `viewer_${'b'.repeat(22)}`, repositoryId: `dir_${'a'.repeat(43)}`, pid: 123,
@@ -116,7 +116,7 @@ describe('App', () => {
     expect(within(statusPanel).getByText('code-viewer')).toBeInTheDocument();
     expect(within(statusPanel).getByText('OpenVSCode')).toBeInTheDocument();
     expect(within(statusPanel).getByText('Codex CLI')).toBeInTheDocument();
-    expect(within(statusPanel).getByText('terminal-web 0.1.0')).toBeInTheDocument();
+    expect(within(statusPanel).getByText('codepilot-web 0.1.0')).toBeInTheDocument();
     expect(within(statusPanel).getByText('zellij 0.44.3')).toBeInTheDocument();
     expect(within(statusPanel).getByText('0.10.0')).toBeInTheDocument();
     expect(within(statusPanel).getByText('openvscode-server 1.109.5')).toBeInTheDocument();
@@ -168,9 +168,9 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开会话列表' }));
     expect(await screen.findByText('alpha')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByText('terminal-web-test')).not.toBeInTheDocument();
+    expect(screen.queryByText('codepilot-web-test')).not.toBeInTheDocument();
     const tokenPanel = await openTokenPanel();
-    expect(within(tokenPanel).getByText('terminal-web-test')).toBeInTheDocument();
+    expect(within(tokenPanel).getByText('codepilot-web-test')).toBeInTheDocument();
     expect(within(tokenPanel).getByRole('button', { name: '复制 Token' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: '打开系统状态' }));
@@ -203,13 +203,13 @@ describe('App', () => {
     render(<App />);
     const trigger = await screen.findByRole('button', { name: '打开系统设置' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('terminal-web-test')).not.toBeInTheDocument();
+    expect(screen.queryByText('codepilot-web-test')).not.toBeInTheDocument();
     expect(screen.queryByText('123e4567-e89b-42d3-a456-426614174000')).not.toBeInTheDocument();
 
     fireEvent.click(trigger);
     const tokenPanel = await screen.findByRole('dialog', { name: '系统设置' });
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(within(tokenPanel).getByText('terminal-web-test')).toBeInTheDocument();
+    expect(within(tokenPanel).getByText('codepilot-web-test')).toBeInTheDocument();
     expect(within(tokenPanel).getByText('123e4567-e89b-42d3-a456-426614174000')).toBeInTheDocument();
     expect(within(tokenPanel).getByRole('button', { name: '复制 Token' })).toBeInTheDocument();
     expect(within(tokenPanel).getByRole('button', { name: '重新创建' })).toBeInTheDocument();
@@ -243,7 +243,7 @@ describe('App', () => {
     const tokenPanel = await openTokenPanel();
     fireEvent.click(within(tokenPanel).getByRole('button', { name: '重新创建' }));
     await waitFor(() => expect(api.regenerateZellijToken).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText('terminal-web-new')).toBeInTheDocument();
+    expect(await screen.findByText('codepilot-web-new')).toBeInTheDocument();
     expect(screen.getByText('123e4567-e89b-42d3-a456-426614174001')).toBeInTheDocument();
   });
 
@@ -286,8 +286,8 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`,
-        name: 'terminal-web',
-        relativePath: 'terminal-web',
+        name: 'codepilot-web',
+        relativePath: 'codepilot-web',
         kind: 'repository',
         source: 'workspace',
         markers: ['git', 'node'],
@@ -298,13 +298,13 @@ describe('App', () => {
     });
     render(<App />);
     expect(await screen.findByText('WORKSPACE')).toBeInTheDocument();
-    expect((await screen.findAllByText('terminal-web')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('codepilot-web')).length).toBeGreaterThan(0);
     expect(screen.getByText('WORKSPACE')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '进入' })).not.toBeInTheDocument();
     const zellijAction = screen.getByRole('button', { name: '创建 Zellij Session' });
-    const moreActions = screen.getByLabelText('terminal-web 更多操作').closest('.repository-more');
+    const moreActions = screen.getByLabelText('codepilot-web 更多操作').closest('.repository-more');
     expect(zellijAction.closest('.repository-more')).toBeNull();
-    fireEvent.click(screen.getByLabelText('terminal-web 更多操作'));
+    fireEvent.click(screen.getByLabelText('codepilot-web 更多操作'));
     expect(screen.getByRole('button', { name: 'code-viewer' }).closest('.repository-more')).toBe(moreActions);
     expect(screen.getByRole('link', { name: '编辑代码' }).closest('.repository-more')).toBe(moreActions);
     const codexLink = screen.getByRole('link', { name: '与 Codex 对话' });
@@ -318,7 +318,7 @@ describe('App', () => {
     vi.mocked(api.getRepositories).mockResolvedValue({
       ...repositories,
       entries: [{
-        id: repositoryId, name: 'terminal-web', relativePath: 'terminal-web',
+        id: repositoryId, name: 'codepilot-web', relativePath: 'codepilot-web',
         kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl,
         viewer: null, session: null,
       }],
@@ -340,8 +340,8 @@ describe('App', () => {
       ...repositories,
       entries: [{
         id: `dir_${'a'.repeat(43)}`,
-        name: 'terminal-web',
-        relativePath: 'terminal-web',
+        name: 'codepilot-web',
+        relativePath: 'codepilot-web',
         kind: 'repository',
         source: 'workspace',
         markers: ['git', 'node'],
@@ -351,7 +351,7 @@ describe('App', () => {
       }],
     });
     render(<App />);
-    const trigger = await screen.findByLabelText('terminal-web 更多操作');
+    const trigger = await screen.findByLabelText('codepilot-web 更多操作');
 
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -494,12 +494,12 @@ describe('App', () => {
     vi.mocked(api.getRepositories).mockResolvedValue({
       ...repositories,
       entries: [{
-        id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
+        id: `dir_${'a'.repeat(43)}`, name: 'codepilot-web', relativePath: 'codepilot-web',
         kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null, session: null,
       }],
     });
     render(<App />);
-    fireEvent.click(await screen.findByLabelText('terminal-web 更多操作'));
+    fireEvent.click(await screen.findByLabelText('codepilot-web 更多操作'));
     const link = await screen.findByRole('link', { name: '编辑代码' });
     expect(link).toHaveAttribute('href', openVSCodeUrl);
     expect(link).toHaveAttribute('target', '_blank');
@@ -510,7 +510,7 @@ describe('App', () => {
     vi.mocked(api.getRepositories).mockResolvedValue({
       ...repositories,
       entries: [{
-        id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
+        id: `dir_${'a'.repeat(43)}`, name: 'codepilot-web', relativePath: 'codepilot-web',
         kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null, session: null,
       }],
     });
@@ -520,7 +520,7 @@ describe('App', () => {
   });
 
   it('copies the token when opening and can delete an existing repository Session', async () => {
-    const sessionName = 'terminal-web';
+    const sessionName = 'codepilot-web';
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -529,7 +529,7 @@ describe('App', () => {
     vi.mocked(api.getRepositories).mockResolvedValue({
       ...repositories,
       entries: [{
-        id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
+        id: `dir_${'a'.repeat(43)}`, name: 'codepilot-web', relativePath: 'codepilot-web',
         kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null,
         session: { name: sessionName, status: 'running', webUrl: `https://192.0.2.10:8024/zellij/open/${sessionName}` },
       }],
@@ -542,7 +542,7 @@ describe('App', () => {
     fireEvent.click(link);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('123e4567-e89b-42d3-a456-426614174000'));
     expect(screen.getByRole('status')).toHaveTextContent('Token 已复制');
-    fireEvent.click(screen.getByLabelText('terminal-web 更多操作'));
+    fireEvent.click(screen.getByLabelText('codepilot-web 更多操作'));
     fireEvent.click(screen.getByRole('button', { name: '删除 Session' }));
     await waitFor(() => expect(api.deleteSession).toHaveBeenCalledWith(sessionName));
   });
@@ -551,7 +551,7 @@ describe('App', () => {
     vi.mocked(api.getRepositories).mockResolvedValue({
       ...repositories,
       entries: [{
-        id: `dir_${'a'.repeat(43)}`, name: 'terminal-web', relativePath: 'terminal-web',
+        id: `dir_${'a'.repeat(43)}`, name: 'codepilot-web', relativePath: 'codepilot-web',
         kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null, session: null,
       }],
     });
@@ -561,7 +561,7 @@ describe('App', () => {
       close: vi.fn(),
     } as unknown as Window);
     render(<App />);
-    fireEvent.click(await screen.findByLabelText('terminal-web 更多操作'));
+    fireEvent.click(await screen.findByLabelText('codepilot-web 更多操作'));
     fireEvent.click(await screen.findByRole('button', { name: 'code-viewer' }));
     expect(open).toHaveBeenCalledWith('about:blank', '_blank');
     await waitFor(() => expect(replace).toHaveBeenCalledWith(`http://192.0.2.10:8024/viewer/viewer_${'b'.repeat(22)}/`));

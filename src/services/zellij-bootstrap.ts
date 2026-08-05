@@ -130,7 +130,7 @@ async function generateCertificate(certificateFile: string, privateKeyFile: stri
     '-days', '3650',
     '-keyout', privateKeyFile,
     '-out', certificateFile,
-    '-subj', '/CN=Terminal Web Zellij',
+    '-subj', '/CN=CodePilot Web Zellij',
     '-addext', `subjectAltName=${certificateSubjectAltName(hostname)}`,
   ]);
 }

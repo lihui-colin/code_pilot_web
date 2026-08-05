@@ -20,7 +20,7 @@ function fixture(initialToken: ZellijWebToken | null = null) {
   const persist = vi.fn(async () => undefined);
   const createToken = vi.fn(async () => {
     const token = {
-      name: `terminal-web-${tokenCounter}`,
+      name: `codepilot-web-${tokenCounter}`,
       value: `123e4567-e89b-42d3-a456-42661417400${tokenCounter++}`,
     };
     names.add(token.name);
@@ -50,14 +50,14 @@ describe('ZellijTokenService', () => {
     const { service, persist, createToken } = fixture();
     const result = await service.initialize();
     expect(result.created).toBe(true);
-    expect(result.token.name).toBe('terminal-web-1');
+    expect(result.token.name).toBe('codepilot-web-1');
     expect(result.token.value).toBe('123e4567-e89b-42d3-a456-426614174001');
     expect(persist).toHaveBeenCalledWith(result.token);
     expect(createToken).toHaveBeenCalledTimes(1);
   });
 
   it('reuses a configured token when its name still exists in Zellij', async () => {
-    const existing = { name: 'terminal-web-existing', value: '123e4567-e89b-42d3-a456-426614174000' };
+    const existing = { name: 'codepilot-web-existing', value: '123e4567-e89b-42d3-a456-426614174000' };
     const { service, persist, run } = fixture(existing);
     await expect(service.initialize()).resolves.toEqual({ token: existing, created: false });
     expect(persist).not.toHaveBeenCalled();
@@ -65,7 +65,7 @@ describe('ZellijTokenService', () => {
   });
 
   it('replaces a configured token when its saved name no longer exists in Zellij', async () => {
-    const existing = { name: 'terminal-web-missing', value: '123e4567-e89b-42d3-a456-426614174000' };
+    const existing = { name: 'codepilot-web-missing', value: '123e4567-e89b-42d3-a456-426614174000' };
     const { service, names, persist } = fixture(existing);
     names.delete(existing.name);
     const result = await service.initialize();
@@ -75,7 +75,7 @@ describe('ZellijTokenService', () => {
   });
 
   it('saves a replacement before revoking the previous token', async () => {
-    const existing = { name: 'terminal-web-existing', value: '123e4567-e89b-42d3-a456-426614174000' };
+    const existing = { name: 'codepilot-web-existing', value: '123e4567-e89b-42d3-a456-426614174000' };
     const { service, persist, run } = fixture(existing);
     const replacement = await service.regenerate();
     expect(persist).toHaveBeenCalledWith(replacement);
@@ -90,7 +90,7 @@ describe('ZellijTokenService', () => {
   });
 
   it('revokes by the saved token name and removes it from configuration', async () => {
-    const existing = { name: 'terminal-web-existing', value: '123e4567-e89b-42d3-a456-426614174000' };
+    const existing = { name: 'codepilot-web-existing', value: '123e4567-e89b-42d3-a456-426614174000' };
     const { service, persist, run } = fixture(existing);
     await expect(service.delete()).resolves.toBe(true);
     expect(run).toHaveBeenCalledWith(['--revoke-token', existing.name]);
@@ -109,7 +109,7 @@ describe('ZellijTokenService', () => {
   });
 
   it('stores only a hash in the Zellij token database and protects the file', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-token-db-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-token-db-'));
     temporaryDirectories.push(root);
     const databaseFile = path.join(root, 'tokens.db');
     const database = new DatabaseSync(databaseFile);

@@ -1,6 +1,6 @@
 # 实施契约
 
-本文档是 Terminal Web 运行时行为的唯一权威来源。产品文档和实施计划中的示例若与本文冲突，以本文和已验证的自动化测试为准。
+本文档是 CodePilot Web 运行时行为的唯一权威来源。产品文档和实施计划中的示例若与本文冲突，以本文和已验证的自动化测试为准。
 
 ## 1. 版本与外部进程
 
@@ -53,7 +53,7 @@ Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。
 4. 删除本项目的陈旧 PID 记录，并确认管理、viewer、Zellij Web 和 OpenVSCode 配置端口均已释放。端口属于无法验证的进程时重启失败，不得误杀或覆盖端口。
 5. 使用同一 workspace root 重新启动 Zellij Web、OpenVSCode 和管理服务，并原子重建权限为 `0600` 的 PID 文件。
 
-网页触发的重启输出追加到 `data/service-restart.log`。部分启动失败时必须再次执行相同的身份校验和端口清理；Zellij Session 始终保留。
+网页触发的重启输出追加到 `data/codepilot-web-restart.log`。部分启动失败时必须再次执行相同的身份校验和端口清理；Zellij Session 始终保留。
 
 管理应用不设置用户名、密码、Basic Auth、Bearer Token 或登录页面。页面、API 和后续 viewer 代理在 VPN/公司内网边界内通过 HTTPS 访问，并复用 Zellij Web 证书和私钥。
 

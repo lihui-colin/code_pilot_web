@@ -17,7 +17,7 @@ const ready: ReadinessResult = {
 };
 
 async function testApp(adapter: ZellijAdapter = { listSessions: async () => '' }) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-app-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-app-'));
   temporaryDirectories.push(root);
   return createApp(createTestConfig(root), {
     readiness: ready,
@@ -48,7 +48,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('starts a background Codex conversation for a validated repository ID', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-codex-route-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
     let receivedPath = '';
@@ -87,7 +87,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('adds only server-issued repository files to the Codex turn context', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-context-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-codex-context-route-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
     await mkdir(path.join(root, 'repository', 'src'));
@@ -136,7 +136,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('gets, stops, and clears a repository Codex conversation', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-lifecycle-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-codex-lifecycle-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
     let stoppedRepositoryId = '';
@@ -190,7 +190,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('streams sanitized Codex snapshots over the repository SSE endpoint', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-sse-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-codex-sse-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
     let unsubscribeCalls = 0;
@@ -243,7 +243,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('reports repositories with active Codex turns', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-activity-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-codex-activity-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
     const app = await createApp(createTestConfig(root), {
@@ -270,7 +270,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('reports Codex CLI availability and blocks chat when it is unavailable', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-unavailable-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-codex-unavailable-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
     let sends = 0;
@@ -330,7 +330,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('accepts a same-origin request to restart the managed backend services', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-restart-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-restart-route-'));
     temporaryDirectories.push(root);
     let restarts = 0;
     const app = await createApp(createTestConfig(root), {
@@ -356,7 +356,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('rejects cross-origin service restart requests', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-restart-origin-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-restart-origin-'));
     temporaryDirectories.push(root);
     const app = await createApp(createTestConfig(root), {
       readiness: ready,
@@ -380,7 +380,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('rejects service restart parameters from the frontend', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-restart-schema-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-restart-schema-'));
     temporaryDirectories.push(root);
     let restarts = 0;
     const app = await createApp(createTestConfig(root), {
@@ -448,7 +448,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('browses server folders by opaque ID and adds or removes an external Git repository', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-open-folder-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-open-folder-route-'));
     temporaryDirectories.push(root);
     const workspace = path.join(root, 'workspace');
     const external = path.join(root, 'external-repository');
@@ -498,7 +498,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('cleans repository components before removing a manual repository', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-remove-cleanup-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-remove-cleanup-route-'));
     temporaryDirectories.push(root);
     const workspace = path.join(root, 'workspace');
     const external = path.join(root, 'external-repository');
@@ -588,7 +588,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('accepts a relative initial directory for the folder picker', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-initial-folder-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-initial-folder-route-'));
     temporaryDirectories.push(root);
     const relativePath = path.relative(path.parse(root).root, root);
     const app = await createApp(createTestConfig(root), {
@@ -611,7 +611,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('returns 503 readiness without leaking details', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-not-ready-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-not-ready-'));
     temporaryDirectories.push(root);
     const app = await createApp(createTestConfig(root), {
       readiness: { ...ready, status: 'not_ready', checks: { ...ready.checks, codeViewer: false } },
@@ -627,7 +627,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('creates a Zellij Session for a repository ID without accepting a path', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-session-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-session-route-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
     let sessions = '';
@@ -686,7 +686,7 @@ describe('MVP-1 routes', () => {
   });
 
   it('starts code-viewer for a repository and returns its same-origin proxy URL', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-viewer-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-viewer-route-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
     const viewerAdapter: ViewerProcessAdapter = {
@@ -725,10 +725,10 @@ describe('MVP-1 routes', () => {
   });
 
   it('serves Codex Chat from the management SPA even when a viewer cookie is active', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-codex-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-codex-route-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'static'), { recursive: true });
-    await writeFile(path.join(root, 'static/index.html'), '<div id="management-spa">Terminal Web</div>');
+    await writeFile(path.join(root, 'static/index.html'), '<div id="management-spa">CodePilot Web</div>');
     const viewerId = `viewer_${'v'.repeat(22)}`;
     const viewerAdapter: ViewerProcessAdapter = {
       start: async () => ({
@@ -773,7 +773,7 @@ describe('MVP-1 routes', () => {
     const response = await app.inject({
       method: 'GET',
       url: `/codex-chat?repositoryId=dir_${'a'.repeat(43)}`,
-      headers: { cookie: `terminal_web_viewer=${viewerId}` },
+      headers: { cookie: `codepilot_web_viewer=${viewerId}` },
     });
 
     expect(response.statusCode).toBe(200);
@@ -782,14 +782,14 @@ describe('MVP-1 routes', () => {
   });
 
   it('returns, regenerates, and deletes the configured Zellij Web token', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-token-route-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-token-route-'));
     temporaryDirectories.push(root);
-    const initialToken = { name: 'terminal-web-test', value: '123e4567-e89b-42d3-a456-426614174000' };
+    const initialToken = { name: 'codepilot-web-test', value: '123e4567-e89b-42d3-a456-426614174000' };
     const persist = async () => undefined;
     const tokenService = new ZellijTokenService('/managed/zellij', '/managed/tokens.db', initialToken, {
       persist,
       createToken: async () => ({
-        name: 'terminal-web-new',
+        name: 'codepilot-web-new',
         value: '123e4567-e89b-42d3-a456-426614174001',
       }),
       run: async () => '',
@@ -813,7 +813,7 @@ describe('MVP-1 routes', () => {
     });
     expect(regenerated.statusCode).toBe(201);
     expect(regenerated.json().token).toEqual({
-      name: 'terminal-web-new',
+      name: 'codepilot-web-new',
       value: '123e4567-e89b-42d3-a456-426614174001',
     });
     const deleted = await app.inject({

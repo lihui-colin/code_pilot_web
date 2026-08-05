@@ -61,7 +61,7 @@ describe('ZellijService', () => {
   });
 
   it('creates a Codex Session in the selected repository with a temporary protected layout', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'terminal-web-zellij-session-'));
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-zellij-session-'));
     temporaryDirectories.push(root);
     let sessions = '';
     const createSession = vi.fn(async (arguments_: string[], cwd: string) => {

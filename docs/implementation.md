@@ -19,7 +19,7 @@
 ## 目标目录结构
 
 ```text
-terminal_web/
+code_pilot_web/
 |-- AGENTS.md
 |-- package.json
 |-- tsconfig.json
@@ -64,7 +64,7 @@ terminal_web/
 |   |-- viewer-manager.test.ts
 |   `-- integration/
 `-- deploy/
-    |-- terminal-web.service
+    |-- codepilot-web.service
     `-- zellij-web.service
 ```
 
@@ -232,7 +232,7 @@ systemd 服务至少设置：
 ```ini
 [Service]
 User=lihui
-WorkingDirectory=/home/lihui/terminal_web
+WorkingDirectory=/home/lihui/code_pilot_web
 Restart=on-failure
 NoNewPrivileges=true
 PrivateTmp=true
