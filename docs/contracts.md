@@ -428,6 +428,8 @@ Zellij Web 必须只监听 `127.0.0.1:<zellij-port>`。浏览器入口固定为 
 
 管理服务必须移除 `/zellij` 前缀并代理 Zellij Web 的普通 HTTP、登录请求和 WebSocket Upgrade。Zellij `0.44.3` 入口 HTML 固定包含 `<base href="/" />`，管理服务只对合法入口路径 `/zellij/` 和 `/zellij/<session-name>` 的 HTML 响应把它改为 `<base href="/zellij/" />`；静态资源、API 和 WebSocket 响应保持流式转发，不修改正文。入口 HTML 最大允许 1 MiB，超过限制时代理失败。
 
+固定 Zellij `0.44.3` 自带的已知 `/zellij/assets/*` 静态资源必须返回 `Cache-Control: private, max-age=86400, immutable` 和包含版本、文件名的弱 `ETag`。浏览器发送匹配的 `If-None-Match` 时，管理服务必须直接返回 `304`，不得访问 Zellij 上游。客户端声明接受 gzip 时，大于等于 1 KiB 的可压缩响应使用 gzip 传输并设置正确的 `Content-Encoding` 与 `Vary`；请求正文解压必须保持关闭。入口 HTML、登录/API 响应和 WebSocket 不得使用静态资源长期缓存策略。
+
 Zellij Web 保留自身 Token 与 Cookie 认证。通过同源 `/zellij` 入口登录后，浏览器只与主服务 HTTPS 端口通信；Zellij 上游端口不得加入防火墙允许列表。
 
 ### 4.6 OpenVSCode 编辑入口
@@ -484,7 +486,7 @@ interface CodexChatRequest {
 首次对话使用服务端固定的 Codex app-server JSON-RPC 调用。管理服务以参数数组
 `["app-server", "--listen", "stdio://"]`、`cwd` 为重新校验后的 repository 真实路径、
 `shell: false` 启动独立进程，并先完成 `initialize`/`initialized` 握手，再调用
-`thread/start`。继续对话调用 `thread/resume`。每个 turn 使用 `turn/start`，输入为服务端
+`thread/start`。继续对话调用 `thread/resume`。页面需要历史但服务端进程内没有快照时，必须调用 `thread/read` 并设置 `includeTurns: true`，从已保存的 thread turns 恢复脱敏的用户与助手消息；不得把原始历史事件、工具输出、附件内容、标准错误或服务器绝对路径返回浏览器。每个 turn 使用 `turn/start`，输入为服务端
 生成的 prompt 文本，固定 `approvalPolicy: "never"`、`sandboxPolicy.type: "workspaceWrite"`，
 可写根目录只包含当前 repository。前端不得提交任意 app-server 方法或字段。
 
@@ -492,7 +494,7 @@ app-server 进程使用独立进程组，浏览器不能控制可执行文件、
 
 服务端按 repository ID 保存进程内对话快照，包括 conversation ID、用户与助手消息、运行状态、脱敏错误和更新时间。浏览器关闭、刷新或网络断开不得取消后台 turn；只有显式停止、30 分钟超时、输出超限或管理服务关闭才终止进程组。同一 repository 同时只能有一个运行中的 turn。只有 Codex turn 成功完成并返回合法 thread ID 后，服务端才把 repository ID 到 conversation ID 的映射原子写入状态文件；运行中、失败、停止或超时的 turn 不得覆盖已持久化 ID。管理服务重启后从状态文件恢复该映射，页面无需依赖浏览器缓存即可获得可继续的 conversation ID。
 
-`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`。运行中的快照 `phase` 为 `starting` 或 `generating`：前者表示 Codex app-server 尚未完成 initialize/thread 握手，后者表示已建立 thread 并开始 turn；失败、停止或完成的快照不返回该字段。`GET /api/codex/activity` 返回当前仍在运行的 repository ID 列表，供管理首页在 Codex 对话页关闭后显示“生成中”状态；该状态只来自服务端活动 turn，不依赖浏览器缓存。页面进入时先读取该快照，并建立同源 `GET /api/codex/conversations/:repositoryId/events` SSE 连接。服务端在连接建立和状态改变时立即发送当前脱敏快照；密集的 app-server `item/agentMessage/delta` 可以在不超过 40 毫秒的窗口内合并为一次快照发送。连接断开不得取消后台 turn，浏览器自动重连后重新收到当前快照；服务端必须在响应关闭、响应错误或客户端请求中止时释放该 SSE 订阅和心跳定时器。浏览器以不超过每 100 毫秒一次的频率把运行中快照保存到 `localStorage`，最终状态必须立即保存；快照不含服务器路径和文件内容。管理服务重启后服务端快照为空时，页面使用本地快照恢复消息和 conversation ID；旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 app-server 的 `thread/resume` 继续该 conversation。
+`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`；如果只有状态文件中的 conversation ID，则服务端先通过 `thread/read` 恢复完整的脱敏历史后再返回。运行中的快照 `phase` 为 `starting` 或 `generating`：前者表示 Codex app-server 尚未完成 initialize/thread 握手，后者表示已建立 thread 并开始 turn；失败、停止或完成的快照不返回该字段。`GET /api/codex/activity` 返回当前仍在运行的 repository ID 列表，供管理首页在 Codex 对话页关闭后显示“生成中”状态；该状态只来自服务端活动 turn，不依赖浏览器缓存。页面进入时先读取该快照，并建立同源 `GET /api/codex/conversations/:repositoryId/events` SSE 连接。服务端在连接建立和状态改变时立即发送当前脱敏快照；密集的 app-server `item/agentMessage/delta` 可以在不超过 40 毫秒的窗口内合并为一次快照发送。连接断开不得取消后台 turn，浏览器自动重连后重新收到当前快照；服务端必须在响应关闭、响应错误或客户端请求中止时释放该 SSE 订阅和心跳定时器。浏览器以不超过每 100 毫秒一次的频率把运行中快照保存到 `localStorage`，最终状态必须立即保存；快照不含服务器路径和文件内容。浏览器快照只用于兼容回退和未完成流的短暂恢复，不得阻止新浏览器或新设备通过服务端 thread 历史恢复。旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 app-server 的 `thread/resume` 继续该 conversation。
 
 `POST /api/codex/messages` 成功启动后台 turn 时返回 `202` 和启动后的对话快照。`POST /api/codex/conversations/:repositoryId/stop` 显式停止当前 turn；`DELETE /api/codex/conversations/:repositoryId` 仅在没有运行中 turn 时清空快照，供“新对话”使用。Codex app-server 原始 JSONL/JSON-RPC 事件只在服务端用于更新快照，不直接返回浏览器。
 

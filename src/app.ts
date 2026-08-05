@@ -3,6 +3,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import fastifyCompress from '@fastify/compress';
 import fastifyHttpProxy from '@fastify/http-proxy';
 import fastifyReplyFrom from '@fastify/reply-from';
 import fastifyStatic from '@fastify/static';
@@ -18,6 +19,7 @@ import { RepositoryService } from './services/repository-service.js';
 import type { ServiceRestarter } from './services/service-restarter.js';
 import { SpawnViewerProcessAdapter, ViewerManager } from './services/viewer-manager.js';
 import { proxyViewerRequest, viewerIdFromCookie } from './services/viewer-proxy.js';
+import { ZELLIJ_VERSION } from './services/zellij-installer.js';
 import { ExecFileZellijAdapter, repositorySessionName, ZellijService, type ManagedSessionMetadata } from './services/zellij-service.js';
 import type { ZellijTokenService } from './services/zellij-token-service.js';
 
@@ -36,6 +38,34 @@ const createSessionSchema = z.object({
 }).strict();
 const sessionParamsSchema = z.object({ name: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u) }).strict();
 const createViewerSchema = z.object({ repositoryId: repositoryIdSchema }).strict();
+const ZELLIJ_WEB_ASSET_CACHE_CONTROL = 'private, max-age=86400, immutable';
+const ZELLIJ_WEB_ASSET_NAMES = new Set([
+  'addon-clipboard.js',
+  'addon-fit.js',
+  'addon-web-links.js',
+  'addon-webgl.js',
+  'auth.js',
+  'connection.js',
+  'favicon.ico',
+  'index.js',
+  'input.js',
+  'keyboard.js',
+  'links.js',
+  'modals.js',
+  'style.css',
+  'terminal.js',
+  'utils.js',
+  'websockets.js',
+  'xterm.css',
+  'xterm.js',
+]);
+
+function zellijWebAssetEtag(pathname: string): string | null {
+  const match = /^\/zellij\/assets\/([A-Za-z0-9._-]+)$/u.exec(pathname);
+  const assetName = match?.[1];
+  if (!assetName || !ZELLIJ_WEB_ASSET_NAMES.has(assetName)) return null;
+  return `W/"zellij-${ZELLIJ_VERSION}-${assetName}"`;
+}
 
 function openVSCodeWebUrl(config: AppConfig, repositoryRealPath: string): string {
   const url = new URL(config.publicBaseUrl);
@@ -114,6 +144,12 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
   const app = (https
     ? Fastify({ logger, https })
     : Fastify({ logger })) as unknown as FastifyInstance;
+  await app.register(fastifyCompress, {
+    encodings: ['gzip'],
+    global: true,
+    globalDecompression: false,
+    threshold: 1024,
+  });
   await app.register(fastifyReplyFrom, {
     base: `http://127.0.0.1:${config.viewerPortRange.start}`,
     disableRequestLogging: true,
@@ -127,6 +163,33 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     disableRequestLogging: true,
     undici: { connect: { rejectUnauthorized: false } },
     wsClientOptions: { rejectUnauthorized: false },
+    preValidation: async (request, reply) => {
+      if (request.method !== 'GET') return;
+      const pathname = new URL(request.raw.url ?? '/', config.publicBaseUrl).pathname;
+      const etag = zellijWebAssetEtag(pathname);
+      if (!etag) return;
+      const ifNoneMatch = request.headers['if-none-match'];
+      if (ifNoneMatch === '*' || ifNoneMatch?.split(',').map(value => value.trim()).includes(etag)) {
+        return reply.code(304).headers({
+          'cache-control': ZELLIJ_WEB_ASSET_CACHE_CONTROL,
+          etag,
+        }).send();
+      }
+    },
+    replyOptions: {
+      rewriteHeaders: (headers, request) => {
+        const pathname = new URL(request?.raw.url ?? '/', config.publicBaseUrl).pathname;
+        const etag = request?.method === 'GET' ? zellijWebAssetEtag(pathname) : null;
+        if (etag) {
+          return {
+            ...headers,
+            'cache-control': ZELLIJ_WEB_ASSET_CACHE_CONTROL,
+            etag,
+          };
+        }
+        return headers;
+      },
+    },
     handler: async (request, reply, destination, options) => {
       const pathname = new URL(request.raw.url ?? '/', config.publicBaseUrl).pathname;
       if (request.method === 'GET' && (/^\/zellij\/?$/u.test(pathname) || /^\/zellij\/[A-Za-z0-9_-]{1,64}\/?$/u.test(pathname))) {

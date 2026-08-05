@@ -31,12 +31,20 @@ describe('Zellij Web same-origin proxy', () => {
     let httpRequest: IncomingMessage | undefined;
     let upgradeRequest: IncomingMessage | undefined;
     let resolveUpgrade: (() => void) | undefined;
+    let xtermAssetRequests = 0;
+    const xtermAsset = `export const payload = "${'x'.repeat(4096)}";`;
     const upgradeSeen = new Promise<void>(resolve => { resolveUpgrade = resolve; });
     const upstream = createServer((request, response) => {
       httpRequest = request;
       if (request.url === '/session-name') {
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
         response.end('<html><head><base href="/" /></head><body>Zellij</body></html>');
+        return;
+      }
+      if (request.url === '/assets/xterm.js') {
+        xtermAssetRequests += 1;
+        response.writeHead(200, { 'content-type': 'application/javascript' });
+        response.end(xtermAsset);
         return;
       }
       response.writeHead(200, { 'content-type': 'application/json' });
@@ -93,6 +101,22 @@ describe('Zellij Web same-origin proxy', () => {
 
       const login = await fetch(`http://127.0.0.1:${appPort}/zellij/command/login`, { method: 'POST' });
       expect(await login.json()).toEqual({ path: '/command/login' });
+
+      const asset = await fetch(`http://127.0.0.1:${appPort}/zellij/assets/xterm.js`, {
+        headers: { 'accept-encoding': 'gzip' },
+      });
+      expect(asset.headers.get('cache-control')).toBe('private, max-age=86400, immutable');
+      expect(asset.headers.get('content-encoding')).toBe('gzip');
+      const etag = asset.headers.get('etag');
+      expect(etag).toBe('W/"zellij-0.44.3-xterm.js"');
+      expect(await asset.text()).toBe(xtermAsset);
+
+      const revalidatedAsset = await fetch(`http://127.0.0.1:${appPort}/zellij/assets/xterm.js`, {
+        headers: { 'if-none-match': etag ?? '' },
+      });
+      expect(revalidatedAsset.status).toBe(304);
+      expect(revalidatedAsset.headers.get('cache-control')).toBe('private, max-age=86400, immutable');
+      expect(xtermAssetRequests).toBe(1);
 
       client = new WebSocket(`ws://127.0.0.1:${appPort}/zellij/ws/terminal/${sessionName}`);
       await new Promise<void>((resolve, reject) => {

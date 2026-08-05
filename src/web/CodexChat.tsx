@@ -345,6 +345,7 @@ export function CodexChat() {
       setConfiguredAppearance(configuredAppearance);
       const storedConversation = readStoredConversation(repositoryId);
       const restoredConversation = serverConversation && storedConversation
+        && serverConversation.messages.length === 0
         && serverConversation.conversationId === storedConversation.conversationId
         ? { ...serverConversation, messages: storedConversation.messages }
         : serverConversation ?? storedConversation;

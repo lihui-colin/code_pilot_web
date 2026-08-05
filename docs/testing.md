@@ -114,8 +114,9 @@
 7. 页面隐藏时停止轮询，恢复时立即刷新。
 8. Session URL 使用主服务同源 `/zellij/<session>`，不包含 Zellij 上游端口。
 9. Zellij Web 只监听 localhost；入口 HTML 的 base 被改写为 `/zellij/`，登录 HTTP 和终端 WebSocket 均通过主服务代理。
-10. 防火墙只需公开主服务端口，Zellij Web、code-viewer 和 OpenVSCode 端口从外部不可访问。
-11. Session 表格默认隐藏；Workspace 管理区的“会话列表”按钮打开弹窗，弹窗可通过关闭按钮、遮罩和 Esc 关闭，并在打开或成功删除 Session 后自动关闭。
+10. Zellij `0.44.3` 已知静态资源返回一天的私有 immutable 缓存、版本化弱 ETag 和 gzip；匹配 `If-None-Match` 时直接返回 `304` 且不请求上游。HTML、登录/API 和 WebSocket 不使用该静态缓存策略。
+11. 防火墙只需公开主服务端口，Zellij Web、code-viewer 和 OpenVSCode 端口从外部不可访问。
+12. Session 表格默认隐藏；Workspace 管理区的“会话列表”按钮打开弹窗，弹窗可通过关闭按钮、遮罩和 Esc 关闭，并在打开或成功删除 Session 后自动关闭。
 
 ## MVP-2：Session 操作
 
@@ -196,7 +197,7 @@
 23. 管理服务重启后，本地 `running` 快照转换为已中断状态，保留消息和 conversation ID，下一条消息使用原生 resume。
 24. “新对话”在无运行中 turn 时清空服务端和浏览器快照；运行中请求返回冲突。
 25. Codex turn 成功完成后才持久化 repository ID 到 conversation ID；运行中、失败、停止和超时不写入新 ID。
-26. 管理服务重启后从状态文件恢复 conversation ID，页面无需依赖浏览器缓存即可显示可继续的会话，下一条消息固定使用 app-server `thread/resume` 恢复该 ID。
+26. 管理服务重启、换浏览器或换设备后，从状态文件恢复 conversation ID，并通过 app-server `thread/read`（`includeTurns: true`）恢复脱敏的历史用户/助手消息；页面无需依赖原浏览器缓存即可显示完整历史，下一条消息固定使用 app-server `thread/resume` 恢复该 ID。thread 历史读取失败、thread ID 与 repository cwd 不匹配或历史超限时返回脱敏错误，不得静默创建新 conversation。
 27. `codexChatAppearance` 只接受非空字体族和 `12` 到 `24` 的整数像素字号；`GET /api/codex/appearance` 只返回这两个字段，页面把配置应用到消息、输入和抽屉文本。任意 Codex 页面抽屉中的字体和字号覆盖立即生效、保存到浏览器并跨 repository 共享，恢复默认后删除覆盖并重新应用服务端配置。
 28. “Add file”按照 repository 相对路径构建可展开目录树，目录优先于文件；路径搜索只显示匹配文件及其父目录并自动展开，文件选择仍提交原服务端签发的 opaque ID。
 

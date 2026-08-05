@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
+import path from 'node:path';
 import type {
   CodexChatMessageSnapshot,
   CodexCliStatus,
@@ -15,6 +16,8 @@ const TURN_TIMEOUT_MS = 30 * 60 * 1_000;
 const TERMINATION_GRACE_MS = 5_000;
 const AVAILABILITY_TIMEOUT_MS = 5_000;
 const MAX_VERSION_OUTPUT_BYTES = 64 * 1024;
+const THREAD_READ_TIMEOUT_MS = 15_000;
+const MAX_THREAD_READ_STDOUT_BYTES = 16 * 1024 * 1024;
 const SNAPSHOT_PUBLISH_INTERVAL_MS = 40;
 const CODEX_VERSION_PATTERN = /^codex-cli [0-9A-Za-z][0-9A-Za-z._+-]{0,63}$/u;
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -31,8 +34,28 @@ export interface CodexExecutionRequest {
   onStdoutLine(line: string): void;
 }
 
+export interface CodexThreadReadRequest {
+  cwd: string;
+  conversationId: string;
+}
+
+export interface CodexThreadHistoryItem {
+  id?: unknown;
+  type?: unknown;
+  text?: unknown;
+  content?: unknown;
+}
+
+export interface CodexThreadHistory {
+  id: string;
+  cwd: string;
+  updatedAt: number;
+  turns: Array<{ id?: unknown; items: CodexThreadHistoryItem[] }>;
+}
+
 export interface CodexProcessAdapter {
   checkAvailability(): Promise<CodexCliAvailability>;
+  readThread?(request: CodexThreadReadRequest): Promise<CodexThreadHistory>;
   execute(request: CodexExecutionRequest): Promise<void>;
 }
 
@@ -77,6 +100,15 @@ interface AppServerThreadResult {
   thread?: { id?: unknown };
 }
 
+interface AppServerThreadReadResult {
+  thread?: {
+    id?: unknown;
+    cwd?: unknown;
+    updatedAt?: unknown;
+    turns?: unknown;
+  };
+}
+
 interface AppServerTurnResult {
   turn?: { id?: unknown };
 }
@@ -97,6 +129,140 @@ export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
 
   async checkAvailability(): Promise<CodexCliAvailability> {
     return checkAvailability(this.executablePath, this.versionRunner);
+  }
+
+  async readThread(request: CodexThreadReadRequest): Promise<CodexThreadHistory> {
+    const child = this.spawnProcess(this.executablePath, ['app-server', '--listen', 'stdio://'], {
+      cwd: request.cwd,
+      detached: true,
+      shell: false,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }) as ChildProcessWithoutNullStreams;
+    await new Promise<void>((resolve, reject) => {
+      child.once('spawn', resolve);
+      child.once('error', reject);
+    });
+    if (!child.pid) throw new Error('Codex did not provide a process ID');
+
+    let stdoutBytes = 0;
+    let exited = false;
+    let requestCompleted = false;
+    let requestId = 1;
+    let killTimeout: NodeJS.Timeout | undefined;
+    let resolveRead: ((history: CodexThreadHistory) => void) | undefined;
+    let rejectRead: ((error: Error) => void) | undefined;
+    const readPromise = new Promise<CodexThreadHistory>((resolve, reject) => {
+      resolveRead = resolve;
+      rejectRead = reject;
+    });
+    const stop = (signal: NodeJS.Signals) => {
+      if (exited || !child.pid) return;
+      try {
+        this.killProcess(-child.pid, signal);
+      } catch {
+        // The process may already have exited.
+      }
+    };
+    const terminate = () => {
+      stop('SIGTERM');
+      if (!killTimeout) {
+        killTimeout = setTimeout(() => stop('SIGKILL'), TERMINATION_GRACE_MS);
+        killTimeout.unref();
+      }
+    };
+    const send = (message: Record<string, unknown>) => {
+      if (exited || child.stdin.destroyed) return;
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+    };
+    const timeout = setTimeout(() => {
+      terminate();
+      rejectRead?.(new ApiError(504, 'CODEX_HISTORY_TIMEOUT', 'Codex conversation history did not load in time'));
+    }, THREAD_READ_TIMEOUT_MS);
+    timeout.unref();
+
+    const onMessage = (message: AppServerMessage) => {
+      if (message.error) {
+        rejectRead?.(new Error('Codex app-server history request failed'));
+        return;
+      }
+      if (message.id === 1 && message.result) {
+        send({ method: 'initialized', params: {} });
+        send({
+          method: 'thread/read',
+          id: ++requestId,
+          params: { threadId: request.conversationId, includeTurns: true },
+        });
+        return;
+      }
+      if (message.id !== 2 || !message.result || requestCompleted) return;
+      const result = message.result as AppServerThreadReadResult;
+      const thread = result.thread;
+      if (
+        !thread
+        || typeof thread.id !== 'string'
+        || typeof thread.cwd !== 'string'
+        || !Array.isArray(thread.turns)
+      ) {
+        rejectRead?.(new Error('Codex app-server returned invalid conversation history'));
+        return;
+      }
+      requestCompleted = true;
+      resolveRead?.({
+        id: thread.id,
+        cwd: thread.cwd,
+        updatedAt: typeof thread.updatedAt === 'number' ? thread.updatedAt : 0,
+        turns: thread.turns.map(turn => {
+          const value = turn as { id?: unknown; items?: unknown };
+          return {
+            id: value.id,
+            items: Array.isArray(value.items)
+              ? value.items.filter(item => item && typeof item === 'object') as CodexThreadHistoryItem[]
+              : [],
+          };
+        }),
+      });
+    };
+
+    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    lines.on('line', line => {
+      stdoutBytes += Buffer.byteLength(line, 'utf8');
+      if (stdoutBytes > MAX_THREAD_READ_STDOUT_BYTES) {
+        terminate();
+        rejectRead?.(new ApiError(502, 'CODEX_HISTORY_TOO_LARGE', 'Codex conversation history is too large to load'));
+        return;
+      }
+      let message: AppServerMessage;
+      try {
+        message = JSON.parse(line) as AppServerMessage;
+      } catch {
+        return;
+      }
+      onMessage(message);
+    });
+    child.stdin.on('error', () => undefined);
+    child.once('exit', (code, signal) => {
+      exited = true;
+      if (killTimeout) clearTimeout(killTimeout);
+      if (!requestCompleted) {
+        rejectRead?.(new Error(`Codex app-server exited (${code ?? signal ?? 'unknown'})`));
+      }
+    });
+    child.once('error', error => rejectRead?.(error));
+    send({
+      method: 'initialize',
+      id: 1,
+      params: {
+        clientInfo: { name: 'codepilot_web', title: 'CodePilot Web', version: '0.1.0' },
+      },
+    });
+
+    try {
+      return await readPromise;
+    } finally {
+      clearTimeout(timeout);
+      lines.close();
+      if (!exited) terminate();
+    }
   }
 
   async execute(request: CodexExecutionRequest): Promise<void> {
@@ -323,6 +489,7 @@ export interface CodexChatServiceLike {
   status(): Promise<CodexCliStatus>;
   send(turn: CodexChatTurn): Promise<void>;
   getConversation(repositoryId: string): CodexConversationSnapshot | null;
+  restoreConversation?(repositoryId: string, repositoryRealPath: string): Promise<CodexConversationSnapshot | null>;
   getRunningRepositoryIds?(): string[];
   subscribe?(repositoryId: string, listener: (event: CodexConversationStreamEvent) => void): () => void;
   clearConversation(repositoryId: string): Promise<void> | void;
@@ -340,6 +507,75 @@ interface CodexJsonItem {
 interface CodexAppServerEvent {
   method?: unknown;
   params?: unknown;
+}
+
+const USER_MESSAGE_MARKER = '\nUser message:\n';
+const SELECTED_CONTEXT_FILES_MARKER = '\nSelected context files (JSON):\n';
+const SAFE_REPOSITORY_RELATIVE_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._~+\-\/]+$/u;
+
+function historyTextContent(item: CodexThreadHistoryItem): string {
+  if (!Array.isArray(item.content)) return '';
+  return item.content
+    .filter((content): content is { type?: unknown; text?: unknown } => Boolean(content) && typeof content === 'object')
+    .filter(content => content.type === 'text' && typeof content.text === 'string')
+    .map(content => content.text as string)
+    .join('\n');
+}
+
+function parseHistoryUserMessage(item: CodexThreadHistoryItem): { message: string; contextFiles?: string[] } | null {
+  const prompt = historyTextContent(item);
+  const markerIndex = prompt.indexOf(USER_MESSAGE_MARKER);
+  if (markerIndex < 0) return null;
+  const message = prompt.slice(markerIndex + USER_MESSAGE_MARKER.length);
+  if (!message.trim()) return null;
+
+  const contextMarkerIndex = prompt.indexOf(SELECTED_CONTEXT_FILES_MARKER);
+  if (contextMarkerIndex < 0 || contextMarkerIndex >= markerIndex) return { message };
+  const rawContext = prompt.slice(
+    contextMarkerIndex + SELECTED_CONTEXT_FILES_MARKER.length,
+    markerIndex,
+  ).trim();
+  try {
+    const parsed = JSON.parse(rawContext) as unknown;
+    if (!Array.isArray(parsed)) return { message };
+    const contextFiles = parsed
+      .filter((file): file is { relativePath?: unknown } => Boolean(file) && typeof file === 'object')
+      .map(file => file.relativePath)
+      .filter((relativePath): relativePath is string => typeof relativePath === 'string' && SAFE_REPOSITORY_RELATIVE_PATH.test(relativePath));
+    return contextFiles.length > 0 ? { message, contextFiles } : { message };
+  } catch {
+    return { message };
+  }
+}
+
+function historyToMessages(history: CodexThreadHistory, repositoryRealPath: string): CodexChatMessageSnapshot[] {
+  const messages: CodexChatMessageSnapshot[] = [];
+  for (const [turnIndex, turn] of history.turns.entries()) {
+    const userItem = turn.items.find(item => item.type === 'userMessage');
+    if (userItem) {
+      const parsed = parseHistoryUserMessage(userItem);
+      if (parsed) {
+        messages.push({
+          id: typeof userItem.id === 'string' ? `user-${userItem.id}` : `user-history-${turnIndex}`,
+          role: 'user',
+          content: parsed.message,
+          ...(parsed.contextFiles ? { contextFiles: parsed.contextFiles } : {}),
+        });
+      }
+    }
+    const assistantContent = turn.items
+      .filter(item => item.type === 'agentMessage' && typeof item.text === 'string')
+      .map(item => sanitizedAssistantText(item.text as string, repositoryRealPath))
+      .join('');
+    if (assistantContent) {
+      messages.push({
+        id: `assistant-history-${typeof turn.id === 'string' ? turn.id : turnIndex}`,
+        role: 'assistant',
+        content: assistantContent,
+      });
+    }
+  }
+  return messages;
 }
 
 function promptFor(message: string, contextFiles: CodexChatTurn['contextFiles'] = []): string {
@@ -374,6 +610,7 @@ export class CodexChatService implements CodexChatServiceLike {
   private readonly snapshots = new Map<string, CodexConversationSnapshot>();
   private readonly subscribers = new Map<string, Set<(event: CodexConversationStreamEvent) => void>>();
   private readonly publishTimers = new Map<string, NodeJS.Timeout>();
+  private readonly restoreOperations = new Map<string, Promise<CodexConversationSnapshot | null>>();
 
   constructor(
     private readonly adapter: CodexProcessAdapter,
@@ -405,6 +642,54 @@ export class CodexChatService implements CodexChatServiceLike {
       error: null,
       updatedAt: new Date(0).toISOString(),
     } : null;
+  }
+
+  async restoreConversation(repositoryId: string, repositoryRealPath: string): Promise<CodexConversationSnapshot | null> {
+    const current = this.snapshots.get(repositoryId);
+    if (current) return structuredClone(current);
+    const existing = this.restoreOperations.get(repositoryId);
+    if (existing) return structuredClone((await existing) ?? null);
+    const operation = this.restoreConversationFromThread(repositoryId, repositoryRealPath);
+    this.restoreOperations.set(repositoryId, operation);
+    try {
+      return structuredClone(await operation);
+    } finally {
+      if (this.restoreOperations.get(repositoryId) === operation) this.restoreOperations.delete(repositoryId);
+    }
+  }
+
+  private async restoreConversationFromThread(
+    repositoryId: string,
+    repositoryRealPath: string,
+  ): Promise<CodexConversationSnapshot | null> {
+    const conversationId = this.persistedConversations.get(repositoryId);
+    if (!conversationId) return null;
+    if (!this.adapter.readThread) return this.getConversation(repositoryId);
+
+    let history: CodexThreadHistory;
+    try {
+      history = await this.adapter.readThread({ cwd: repositoryRealPath, conversationId });
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(502, 'CODEX_HISTORY_UNAVAILABLE', 'Codex conversation history is temporarily unavailable');
+    }
+    if (history.id !== conversationId || path.resolve(history.cwd) !== path.resolve(repositoryRealPath)) {
+      throw new ApiError(404, 'CODEX_CONVERSATION_NOT_FOUND', 'Codex conversation was not found');
+    }
+    const snapshot: CodexConversationSnapshot = {
+      repositoryId,
+      conversationId,
+      messages: historyToMessages(history, repositoryRealPath),
+      status: 'idle',
+      error: null,
+      updatedAt: history.updatedAt > 0
+        ? new Date(history.updatedAt * 1_000).toISOString()
+        : new Date(0).toISOString(),
+    };
+    this.conversations.set(conversationId, repositoryId);
+    this.snapshots.set(repositoryId, snapshot);
+    this.publish(repositoryId);
+    return snapshot;
   }
 
   getRunningRepositoryIds(): string[] {

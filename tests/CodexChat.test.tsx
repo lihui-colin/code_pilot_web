@@ -466,6 +466,34 @@ describe('CodexChat', () => {
     expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument();
   });
 
+  it('prefers server thread history over a stale browser snapshot', async () => {
+    window.localStorage.setItem(`codepilot.codex.${repositoryId}`, JSON.stringify({
+      repositoryId,
+      conversationId,
+      messages: [{ id: 'user-stale', role: 'user', content: '旧浏览器内容' }],
+      status: 'idle',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    }));
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-server', role: 'user', content: '跨设备历史' },
+        { id: 'assistant-server', role: 'assistant', content: '服务端历史' },
+      ],
+      status: 'idle',
+      error: null,
+      updatedAt: '2026-08-05T00:00:00.000Z',
+    });
+
+    render(<CodexChat />);
+
+    expect(await screen.findByText('跨设备历史')).toBeInTheDocument();
+    expect(screen.getByText('服务端历史')).toBeInTheDocument();
+    expect(screen.queryByText('旧浏览器内容')).not.toBeInTheDocument();
+  });
+
   it('shows app-server startup status until the Codex handshake completes', async () => {
     vi.mocked(api.getCodexConversation).mockResolvedValue({
       repositoryId,

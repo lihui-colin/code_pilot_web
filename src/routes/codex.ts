@@ -40,12 +40,14 @@ export function registerCodexRoutes(app: FastifyInstance, dependencies: CodexRou
   }));
   app.get('/api/codex/conversations/:repositoryId', async request => {
     const params = repositoryParamsSchema.parse(request.params);
-    await repositoryService().resolveRepository(params.repositoryId);
+    const repository = await repositoryService().resolveRepository(params.repositoryId);
+    await codexChatService.restoreConversation?.(params.repositoryId, repository.realPath);
     return { conversation: codexChatService.getConversation(params.repositoryId) };
   });
   app.get('/api/codex/conversations/:repositoryId/events', async (request, reply) => {
     const params = repositoryParamsSchema.parse(request.params);
-    await repositoryService().resolveRepository(params.repositoryId);
+    const repository = await repositoryService().resolveRepository(params.repositoryId);
+    await codexChatService.restoreConversation?.(params.repositoryId, repository.realPath);
     if (!codexChatService.subscribe) {
       return { conversation: codexChatService.getConversation(params.repositoryId) };
     }
@@ -94,6 +96,9 @@ export function registerCodexRoutes(app: FastifyInstance, dependencies: CodexRou
     const body = codexChatSchema.parse(request.body);
     const repositories = repositoryService();
     const repository = await repositories.resolveRepository(body.repositoryId);
+    if (body.conversationId) {
+      await codexChatService.restoreConversation?.(body.repositoryId, repository.realPath);
+    }
     if (!(await codexChatService.status()).available) {
       throw new ApiError(503, 'CODEX_CLI_UNAVAILABLE', 'Codex CLI is not available on the server');
     }

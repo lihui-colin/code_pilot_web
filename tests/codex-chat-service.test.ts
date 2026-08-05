@@ -167,6 +167,54 @@ describe('SpawnCodexAppServerAdapter', () => {
     });
   });
 
+  it('reads a stored thread with turns over the native app-server request', async () => {
+    const child = fakeChildProcess();
+    const requests: Array<{ method: string; id?: number; params?: Record<string, unknown> }> = [];
+    child.stdin.on('data', chunk => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const message = JSON.parse(line) as { method: string; id?: number; params?: Record<string, unknown> };
+        requests.push(message);
+        if (message.method === 'initialize') {
+          child.stdout.write(`${JSON.stringify({ id: message.id, result: {} })}\n`);
+        } else if (message.method === 'thread/read') {
+          child.stdout.write(`${JSON.stringify({
+            id: message.id,
+            result: {
+              thread: {
+                id: threadId,
+                cwd: '/workspace/repository',
+                updatedAt: 1_730_000_000,
+                turns: [{
+                  id: 'turn-1',
+                  items: [{ id: 'user-1', type: 'userMessage', content: [{ type: 'text', text: 'Explain this' }] }],
+                }],
+              },
+            },
+          })}\n`);
+        }
+      }
+    });
+    const spawnProcess = vi.fn(() => child);
+    const adapter = new SpawnCodexAppServerAdapter(
+      'codex',
+      spawnProcess as unknown as typeof import('node:child_process').spawn,
+      vi.fn() as unknown as typeof process.kill,
+    );
+    const historyPromise = adapter.readThread?.({ cwd: '/workspace/repository', conversationId: threadId });
+    child.emit('spawn');
+    const history = await historyPromise;
+
+    expect(spawnProcess).toHaveBeenCalledWith('codex', ['app-server', '--listen', 'stdio://'], {
+      cwd: '/workspace/repository',
+      detached: true,
+      shell: false,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    expect(requests.map(request => request.method)).toEqual(['initialize', 'initialized', 'thread/read']);
+    expect(history).toMatchObject({ id: threadId, cwd: '/workspace/repository', updatedAt: 1_730_000_000 });
+    expect(history?.turns).toHaveLength(1);
+  });
+
   it('terminates the process group and escalates cancellation after five seconds', async () => {
     vi.useFakeTimers();
     const child = fakeChildProcess(7331);
@@ -456,6 +504,71 @@ describe('CodexChatService', () => {
       status: 'idle',
       error: null,
       updatedAt: '1970-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('hydrates persisted thread history without browser state and caches the result', async () => {
+    const adapter = adapterWith([]);
+    adapter.readThread = vi.fn(async () => ({
+      id: threadId,
+      cwd: '/workspace/repository',
+      updatedAt: 1_730_000_000,
+      turns: [{
+        id: 'turn-1',
+        items: [
+          {
+            id: 'user-1',
+            type: 'userMessage',
+            content: [{
+              type: 'text',
+              text: [
+                'You are responding through the CodePilot Web chat interface.',
+                'Selected context files (JSON):',
+                JSON.stringify([{ relativePath: 'src/app.ts', content: 'do not expose this' }]),
+                '',
+                'User message:',
+                '恢复历史',
+              ].join('\n'),
+            }],
+          },
+          { id: 'assistant-1', type: 'agentMessage', text: 'See /workspace/repository/src/app.ts' },
+          { id: 'assistant-2', type: 'agentMessage', text: ' and continue' },
+          { id: 'tool-1', type: 'fileChange', changes: [{ path: '/workspace/repository/secret' }] },
+        ],
+      }],
+    }));
+    const service = new CodexChatService(adapter, new Map([[repositoryId, threadId]]));
+
+    const restored = await service.restoreConversation(repositoryId, '/workspace/repository');
+    const cached = await service.restoreConversation(repositoryId, '/workspace/repository');
+
+    expect(adapter.readThread).toHaveBeenCalledTimes(1);
+    expect(restored).toMatchObject({
+      repositoryId,
+      conversationId: threadId,
+      status: 'idle',
+      messages: [
+        { role: 'user', content: '恢复历史', contextFiles: ['src/app.ts'] },
+        { role: 'assistant', content: 'See ./src/app.ts and continue' },
+      ],
+    });
+    expect(JSON.stringify(restored)).not.toContain('do not expose this');
+    expect(JSON.stringify(restored)).not.toContain('/workspace/repository');
+    expect(cached).toEqual(restored);
+  });
+
+  it('rejects persisted thread history from another repository cwd', async () => {
+    const adapter = adapterWith([]);
+    adapter.readThread = vi.fn(async () => ({
+      id: threadId,
+      cwd: '/workspace/other-repository',
+      updatedAt: 1_730_000_000,
+      turns: [],
+    }));
+    const service = new CodexChatService(adapter, new Map([[repositoryId, threadId]]));
+
+    await expect(service.restoreConversation(repositoryId, '/workspace/repository')).rejects.toMatchObject({
+      code: 'CODEX_CONVERSATION_NOT_FOUND',
     });
   });
 
