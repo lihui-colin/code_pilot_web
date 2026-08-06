@@ -11,11 +11,11 @@
 - code-viewer：`0.10.0`。
 - OpenVSCode Server：`1.109.5`。
 
-管理服务启动时检查 Node.js、Zellij 和 code-viewer 的实际版本。版本不匹配时，进程可以启动并提供 `/api/health`，但 `/api/ready` 返回 `503`，所有写操作被拒绝。OpenVSCode 版本由独立下载脚本在安装时验证。
+管理服务启动时检查 Node.js、Zellij 和 code-viewer 的实际版本。版本不匹配时，进程可以启动并提供 `/api/health`，但 `/api/ready` 返回 `503`，所有写操作被拒绝。OpenVSCode 版本由 `codepilot-server init` 在初始化时验证。
 
 code-viewer 以固定生产依赖 `@youtyan/code-viewer@0.10.0` 写入 `package.json` 和锁文件，由 `npm install` 自动安装。管理服务必须解析并使用项目本地包中的 `dist/code-viewer.js`，版本检查和实例启动使用同一文件，不依赖全局安装或 PATH 中的同名命令。
 
-OpenVSCode Server 使用独立脚本 `scripts/download-openvscode.sh` 从官方 GitHub Release 下载固定版本。脚本必须显示下载进度，按 Linux x64、arm64 或 armhf 选择官方归档，验证官方发布页固定的 SHA-256 摘要和解压后的 `bin/openvscode-server --version`，再安装到 `data/openvscode/openvscode-server-v1.109.5-linux-<arch>/`，并原子更新 `data/openvscode/current` 符号链接。`scripts/install.sh` 必须调用该脚本并把 `current/bin/openvscode-server` 及配置端口写入 `config.json`。
+OpenVSCode Server 由 `codepilot-server init` 使用 Node.js `fetch` 从官方 GitHub Release 下载固定版本。初始化命令必须显示下载进度，按 Linux x64、arm64 或 armhf 选择官方归档，验证官方发布页固定的 SHA-256 摘要和解压后的 `bin/openvscode-server --version`，再安装到 `data/openvscode/openvscode-server-v1.109.5-linux-<arch>/`，并原子更新 `data/openvscode/current` 符号链接。初始化命令把 `current/bin/openvscode-server` 及配置端口写入 `config.json`，不得调用 Bash、curl 管道或下载后执行的安装脚本。`scripts/download-openvscode.sh` 仅保留为兼容的独立下载入口。
 
 Zellij `0.44.3` 同时作为项目管理的固定二进制依赖：
 
@@ -41,7 +41,7 @@ Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。
 
 ### 1.3 HTTPS 监听与访问边界
 
-管理服务提供 HTTPS。唯一生命周期入口是 Node.js 可执行应用 `codepilot-server`，支持 `start`、`stop`、`restart`、`status` 和 `run` 子命令，不依赖 Bash 启停脚本。启动命令为 `codepilot-server start --host <browser-host> --port <port> --workspace <directory>`。管理服务默认监听 `0.0.0.0`；`--host` 表示浏览器实际访问的 IP 或域名，用于生成 `publicBaseUrl`，并作为 Zellij HTTPS 证书必须覆盖的 SAN。省略 `--host` 时沿用配置中的 `publicBaseUrl` 主机。`--host` 不接受 `0.0.0.0`、`::` 等通配地址。`--port` 和 `--workspace` 覆盖配置中的对应运行值；旧的 `--workspace-root` 参数保持兼容。
+管理服务提供 HTTPS。唯一生命周期入口是 Node.js 可执行应用 `codepilot-server`，支持 `init`、`start`、`stop`、`restart`、`status` 和 `run` 子命令，不依赖 Bash 启停脚本。`codepilot-server init` 在 Node.js 26 和应用包已经安装后负责参数校验、Zellij 与 OpenVSCode 固定版本安装、目录 ID secret、HTTPS 证书、Zellij KDL 和 `config.json` 初始化；它不负责安装 Node.js、执行 `npm install`、构建应用或注册全局命令。初始化过程中外部程序只可通过 `execFile()` 参数数组调用固定的 `tar` 和 `openssl`，不得启动 shell。启动命令为 `codepilot-server start --host <browser-host> --port <port> --workspace <directory>`。管理服务默认监听 `0.0.0.0`；`--host` 表示浏览器实际访问的 IP 或域名，用于生成 `publicBaseUrl`，并作为 Zellij HTTPS 证书必须覆盖的 SAN。省略 `--host` 时沿用配置中的 `publicBaseUrl` 主机。`--host` 不接受 `0.0.0.0`、`::` 等通配地址。`--port` 和 `--workspace` 覆盖配置中的对应运行值；旧的 `--workspace-root` 参数保持兼容。
 
 启动脚本必须在构建和拉起进程前检查 PID 文件、管理服务 `listenHost:listenPort`，以及 `viewerPortRange` 中所有 localhost code-viewer 端口。本项目服务已在运行、PID 文件指向其他存活进程，或管理服务或 code-viewer 端口已被占用时，启动脚本必须以非零状态退出，且不得覆盖 PID 文件或启动新服务进程。Zellij Web 是独立服务，其端口即使已在运行也不得阻止管理服务启动。
 

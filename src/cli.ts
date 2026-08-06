@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, chmod, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { loadConfiguration } from './config.js';
+import { initializeCodePilot, type InitOptions } from './init.js';
+
+const execFileAsync = promisify(execFile);
 
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const dataDirectory = path.join(projectRoot, 'data');
@@ -22,10 +27,49 @@ interface RuntimeMetadata {
   workspaceRoot: string;
   browserHost: string;
   port: number;
+  openVSCodeExecutable: string;
+  openVSCodePort: number;
+  viewerPorts: number[];
+  zellijConfigFile: string;
+  zellijManagedBinary: string;
+  zellijWebPort: number;
+}
+
+interface ProgressBar {
+  update(step: number, message: string): void;
+  finish(message: string): void;
+  fail(message: string): void;
+}
+
+function createProgressBar(label: string, totalSteps: number): ProgressBar {
+  const interactive = Boolean(process.stdout.isTTY);
+  let lastLength = 0;
+  const update = (step: number, message: string) => {
+    const percentage = Math.max(0, Math.min(100, Math.round((step / totalSteps) * 100)));
+    if (!interactive) {
+      process.stdout.write(`${label}: ${percentage}% ${message}\n`);
+      return;
+    }
+    const width = 24;
+    const filled = Math.round((percentage / 100) * width);
+    const line = `${label} [${'#'.repeat(filled)}${'-'.repeat(width - filled)}] ${percentage}% ${message}`;
+    process.stdout.write(`\r${line}${' '.repeat(Math.max(0, lastLength - line.length))}`);
+    lastLength = line.length;
+  };
+  const endLine = (message: string) => {
+    if (interactive) process.stdout.write('\n');
+    process.stdout.write(`${label}: ${message}\n`);
+  };
+  return {
+    update,
+    finish: endLine,
+    fail: message => endLine(`failed - ${message}`),
+  };
 }
 
 function usage(): string {
   return `Usage:
+  codepilot-server init --host <address> --service-port <port> [options]
   codepilot-server start --host <address> --port <port> --workspace <directory> [options]
   codepilot-server stop
   codepilot-server restart
@@ -33,12 +77,89 @@ function usage(): string {
   codepilot-server run --host <address> --port <port> --workspace <directory> [options]
 
 Options:
+  --service-port <port>   CodePilot Web HTTPS port for init
+  --zellij-port <port>   Local Zellij Web port for init (default: 5021)
+  --viewer-port <port>   Local code-viewer port for init (default: 5022)
+  --openvscode-port <port> Local OpenVSCode port for init (default: 5023)
+  --listen-host <address> Listen address for init (default: 0.0.0.0)
+  --non-interactive      Fail instead of prompting for missing init values
   --host <address>         Browser host used for the HTTPS certificate
   --port <port>            HTTPS management port
   --workspace <directory>  Workspace directory to manage
   --config <file>          Configuration file (default: config.json)
   -h, --help               Show this help
 `;
+}
+
+function parsePort(name: string, value: string): number {
+  if (!/^\d+$/u.test(value)) throw new Error(`${name} must be an integer between 1 and 65535`);
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+    throw new Error(`${name} must be an integer between 1 and 65535`);
+  }
+  return parsed;
+}
+
+async function init(arguments_: string[]): Promise<void> {
+  const parsed = parseArgs({
+    args: arguments_,
+    options: {
+      config: { type: 'string', default: 'config.json' },
+      host: { type: 'string' },
+      'service-port': { type: 'string' },
+      'zellij-port': { type: 'string', default: '5021' },
+      'viewer-port': { type: 'string', default: '5022' },
+      'openvscode-port': { type: 'string', default: '5023' },
+      'listen-host': { type: 'string', default: '0.0.0.0' },
+      'non-interactive': { type: 'boolean', default: false },
+      help: { type: 'boolean', short: 'h' },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
+  if (parsed.values.help) {
+    process.stdout.write(usage());
+    return;
+  }
+
+  let host = parsed.values.host;
+  let servicePort = parsed.values['service-port'];
+  let zellijPort = parsed.values['zellij-port'] ?? '5021';
+  let viewerPort = parsed.values['viewer-port'] ?? '5022';
+  let openVSCodePort = parsed.values['openvscode-port'] ?? '5023';
+  if (!parsed.values['non-interactive']) {
+    const prompt = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      host ||= (await prompt.question('Browser-reachable host machine IP or hostname (not the container IP): ')).trim();
+      servicePort ||= (await prompt.question('CodePilot Web HTTPS port: ')).trim();
+      const promptedZellij = (await prompt.question(`Zellij Web HTTPS port [${zellijPort}]: `)).trim();
+      const promptedViewer = (await prompt.question(`Local code-viewer port [${viewerPort}]: `)).trim();
+      const promptedOpenVSCode = (await prompt.question(`Local OpenVSCode upstream port [${openVSCodePort}]: `)).trim();
+      if (promptedZellij) zellijPort = promptedZellij;
+      if (promptedViewer) viewerPort = promptedViewer;
+      if (promptedOpenVSCode) openVSCodePort = promptedOpenVSCode;
+    } finally {
+      prompt.close();
+    }
+  }
+  if (!host) throw new Error('--host is required and must be the browser-reachable host machine address');
+  if (!servicePort) throw new Error('--service-port is required');
+
+  const options: InitOptions = {
+    host,
+    listenHost: parsed.values['listen-host'] ?? '0.0.0.0',
+    servicePort: parsePort('service port', servicePort),
+    zellijPort: parsePort('Zellij port', zellijPort),
+    viewerPort: parsePort('viewer port', viewerPort),
+    openVSCodePort: parsePort('OpenVSCode port', openVSCodePort),
+    configFile: path.resolve(parsed.values.config ?? 'config.json'),
+  };
+  process.stdout.write(`Initializing CodePilot Web at ${path.dirname(options.configFile)}\n`);
+  const result = await initializeCodePilot(options);
+  process.stdout.write('Configuration initialization complete.\n');
+  process.stdout.write(`Config: ${result.configFile}\n`);
+  process.stdout.write(`OpenVSCode executable: ${result.openVSCodeExecutable}\n`);
+  process.stdout.write(`Zellij: ${result.zellij.executablePath}\n`);
 }
 
 function processExists(pid: number): boolean {
@@ -69,8 +190,49 @@ async function commandArguments(pid: number): Promise<string[]> {
   }
 }
 
-async function isManagementProcess(pid: number): Promise<boolean> {
-  return (await commandArguments(pid)).includes(serverFile);
+function hasOption(arguments_: readonly string[], option: string, value: string): boolean {
+  const index = arguments_.indexOf(option);
+  return index >= 0 && arguments_[index + 1] === value;
+}
+
+async function processStartTime(pid: number): Promise<string | null> {
+  try {
+    const content = await readFile(`/proc/${pid}/stat`, 'utf8');
+    return content.slice(content.lastIndexOf(')') + 2).split(' ')[19] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function listenerPids(port: number): Promise<number[]> {
+  try {
+    const { stdout } = await execFileAsync('ss', ['-H', '-ltnp', `sport = :${port}`], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
+      shell: false,
+    });
+    return [...stdout.matchAll(/pid=(\d+)/gu)].map(match => Number(match[1]));
+  } catch {
+    return [];
+  }
+}
+
+function matchesManagementArguments(arguments_: readonly string[], metadata: RuntimeMetadata): boolean {
+  return arguments_.includes(serverFile)
+    && hasOption(arguments_, '--config', metadata.configFile)
+    && hasOption(arguments_, '--workspace', metadata.workspaceRoot);
+}
+
+async function isManagementProcess(pid: number, metadata: RuntimeMetadata): Promise<boolean> {
+  const arguments_ = await commandArguments(pid);
+  if (!matchesManagementArguments(arguments_, metadata)) return false;
+  const hasHostOrPort = arguments_.includes('--host') || arguments_.includes('--port');
+  if (hasHostOrPort) {
+    return hasOption(arguments_, '--host', metadata.browserHost)
+      && hasOption(arguments_, '--port', String(metadata.port));
+  }
+  return (await listenerPids(metadata.port)).includes(pid);
 }
 
 async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
@@ -118,6 +280,7 @@ async function runServiceRuntime(operation: 'cleanup' | 'ensure-support', metada
     metadata.configFile,
     metadata.workspaceRoot,
     String(metadata.port),
+    JSON.stringify(metadata),
   ], { cwd: projectRoot, shell: false, stdio: 'inherit' });
   const exitCode = await new Promise<number>((resolve, reject) => {
     child.once('error', reject);
@@ -156,66 +319,98 @@ async function resolveMetadata(arguments_: string[]): Promise<{ metadata: Runtim
   const hasConfig = options.includes('--config');
   const serverArguments = hasConfig ? options : ['--config', path.resolve('config.json'), ...options];
   const loaded = await loadConfiguration(serverArguments, process.cwd());
+  const metadata = {
+    configFile: loaded.configFilePath,
+    workspaceRoot: loaded.config.workspaceRootRealPath,
+    browserHost: new URL(loaded.config.publicBaseUrl).hostname,
+    port: loaded.config.listenPort,
+    openVSCodeExecutable: loaded.config.openVSCodeExecutableFile,
+    openVSCodePort: loaded.config.openVSCodePort,
+    viewerPorts: Array.from(
+      { length: loaded.config.viewerPortRange.end - loaded.config.viewerPortRange.start + 1 },
+      (_, index) => loaded.config.viewerPortRange.start + index,
+    ),
+    zellijConfigFile: loaded.config.zellijConfigFile,
+    zellijManagedBinary: loaded.config.zellijManagedBinaryFile,
+    zellijWebPort: loaded.config.zellijWebPort,
+  };
   return {
-    metadata: {
-      configFile: loaded.configFilePath,
-      workspaceRoot: loaded.config.workspaceRootRealPath,
-      browserHost: new URL(loaded.config.publicBaseUrl).hostname,
-      port: loaded.config.listenPort,
-    },
-    serverArguments,
+    metadata,
+    serverArguments: [
+      '--config', metadata.configFile,
+      '--host', metadata.browserHost,
+      '--port', String(metadata.port),
+      '--workspace', metadata.workspaceRoot,
+    ],
   };
 }
 
 async function start(arguments_: string[]): Promise<void> {
-  await access(serverFile, constants.R_OK);
-  const { metadata, serverArguments } = await resolveMetadata(arguments_);
-  const existingPid = await readPid();
-  if (existingPid && processExists(existingPid)) {
-    throw new Error(await isManagementProcess(existingPid)
-      ? `CodePilot Web is already running with PID ${existingPid}`
-      : `PID file points to another running process: ${existingPid}`);
-  }
-  if (existingPid) await rm(pidFile, { force: true });
-
-  await waitForPort(metadata.port, false, 1_000);
-  await runServiceRuntime('ensure-support', metadata);
-  await writeSecureFile(runtimeFile, `${JSON.stringify(metadata, null, 2)}\n`);
-
-  const logHandle = await open(logFile, 'w', 0o600);
-  await logHandle.chmod(0o600);
-  let child: ChildProcess | undefined;
+  const progress = createProgressBar('Starting CodePilot Web', 5);
   try {
-    const spawnedChild = spawn(process.execPath, [serverFile, ...serverArguments], {
-      cwd: projectRoot,
-      detached: true,
-      shell: false,
-      stdio: ['ignore', logHandle.fd, logHandle.fd],
-    });
-    await new Promise<void>((resolve, reject) => {
-      spawnedChild.once('spawn', resolve);
-      spawnedChild.once('error', reject);
-    });
-    if (!spawnedChild.pid) throw new Error('CodePilot Web did not provide a process ID');
-    child = spawnedChild;
-    await writeSecureFile(pidFile, `${spawnedChild.pid}\n`);
-    spawnedChild.unref();
-  } finally {
-    await logHandle.close();
-  }
+    progress.update(1, 'validating configuration');
+    try {
+      await access(serverFile, constants.R_OK);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error('CodePilot Web is not built; run npm run build before starting the service');
+      }
+      throw error;
+    }
+    const { metadata, serverArguments } = await resolveMetadata(arguments_);
+    const existingPid = await readPid();
+    if (existingPid && processExists(existingPid)) {
+      throw new Error(await isManagementProcess(existingPid, metadata)
+        ? `CodePilot Web is already running with PID ${existingPid}`
+        : `PID file points to another running process: ${existingPid}`);
+    }
+    if (existingPid) await rm(pidFile, { force: true });
 
-  try {
-    await waitForPort(metadata.port, true, 15_000);
+    progress.update(2, 'checking management port');
+    await waitForPort(metadata.port, false, 1_000);
+    progress.update(3, 'starting support services');
+    await runServiceRuntime('ensure-support', metadata);
+    let child: ChildProcess | undefined;
+    try {
+      await writeSecureFile(runtimeFile, `${JSON.stringify(metadata, null, 2)}\n`);
+      const logHandle = await open(logFile, 'w', 0o600);
+      await logHandle.chmod(0o600);
+      try {
+        const spawnedChild = spawn(process.execPath, [serverFile, ...serverArguments], {
+          cwd: projectRoot,
+          detached: true,
+          shell: false,
+          stdio: ['ignore', logHandle.fd, logHandle.fd],
+        });
+        await new Promise<void>((resolve, reject) => {
+          spawnedChild.once('spawn', resolve);
+          spawnedChild.once('error', reject);
+        });
+        if (!spawnedChild.pid) throw new Error('CodePilot Web did not provide a process ID');
+        child = spawnedChild;
+        await writeSecureFile(pidFile, `${spawnedChild.pid}\n`);
+        spawnedChild.unref();
+      } finally {
+        await logHandle.close();
+      }
+      progress.update(4, 'waiting for management service');
+      await waitForPort(metadata.port, true, 15_000);
+    } catch (error) {
+      if (child?.pid && processExists(child.pid)) process.kill(child.pid, 'SIGTERM');
+      await runServiceRuntime('cleanup', metadata).catch(() => undefined);
+      await Promise.all([rm(pidFile, { force: true }), rm(runtimeFile, { force: true })]);
+      throw error;
+    }
+
+    progress.update(5, 'ready');
+    progress.finish(`started with PID ${child.pid}`);
+    process.stdout.write(`Access URL: https://${metadata.browserHost}:${metadata.port}\n`);
+    process.stdout.write(`Workspace: ${metadata.workspaceRoot}\n`);
+    process.stdout.write(`Log: ${logFile}\n`);
   } catch (error) {
-    if (child?.pid && processExists(child.pid)) process.kill(child.pid, 'SIGTERM');
-    await Promise.all([rm(pidFile, { force: true }), rm(runtimeFile, { force: true })]);
+    progress.fail(error instanceof Error ? error.message : 'unknown error');
     throw error;
   }
-
-  process.stdout.write(`CodePilot Web started with PID ${child.pid}\n`);
-  process.stdout.write(`Access URL: https://${metadata.browserHost}:${metadata.port}\n`);
-  process.stdout.write(`Workspace: ${metadata.workspaceRoot}\n`);
-  process.stdout.write(`Log: ${logFile}\n`);
 }
 
 async function readMetadata(): Promise<RuntimeMetadata> {
@@ -223,7 +418,15 @@ async function readMetadata(): Promise<RuntimeMetadata> {
   if (typeof value.configFile !== 'string' || typeof value.workspaceRoot !== 'string') {
     throw new Error('Invalid CodePilot Web runtime metadata');
   }
-  if (typeof value.browserHost === 'string' && Number.isInteger(value.port)) return value as RuntimeMetadata;
+  if (typeof value.browserHost === 'string'
+    && Number.isInteger(value.port)
+    && typeof value.openVSCodeExecutable === 'string'
+    && Number.isInteger(value.openVSCodePort)
+    && Array.isArray(value.viewerPorts)
+    && value.viewerPorts.every(Number.isInteger)
+    && typeof value.zellijConfigFile === 'string'
+    && typeof value.zellijManagedBinary === 'string'
+    && Number.isInteger(value.zellijWebPort)) return value as RuntimeMetadata;
   const loaded = await loadConfiguration([
     '--config', value.configFile,
     '--workspace', value.workspaceRoot,
@@ -233,40 +436,92 @@ async function readMetadata(): Promise<RuntimeMetadata> {
     workspaceRoot: loaded.config.workspaceRootRealPath,
     browserHost: new URL(loaded.config.publicBaseUrl).hostname,
     port: loaded.config.listenPort,
+    openVSCodeExecutable: loaded.config.openVSCodeExecutableFile,
+    openVSCodePort: loaded.config.openVSCodePort,
+    viewerPorts: Array.from(
+      { length: loaded.config.viewerPortRange.end - loaded.config.viewerPortRange.start + 1 },
+      (_, index) => loaded.config.viewerPortRange.start + index,
+    ),
+    zellijConfigFile: loaded.config.zellijConfigFile,
+    zellijManagedBinary: loaded.config.zellijManagedBinaryFile,
+    zellijWebPort: loaded.config.zellijWebPort,
   };
 }
 
+export async function recoverMetadataFromArguments(arguments_: readonly string[]): Promise<RuntimeMetadata | null> {
+  if (!arguments_.includes(serverFile)) return null;
+  const recoveredArguments: string[] = [];
+  for (const option of ['--config', '--host', '--port', '--workspace']) {
+    const index = arguments_.indexOf(option);
+    const value = index >= 0 ? arguments_[index + 1] : undefined;
+    if (!value) return null;
+    recoveredArguments.push(option, value);
+  }
+  return (await resolveMetadata(recoveredArguments)).metadata;
+}
+
+async function recoverMetadataFromProcess(pid: number): Promise<RuntimeMetadata | null> {
+  return recoverMetadataFromArguments(await commandArguments(pid));
+}
+
 async function stop(): Promise<void> {
-  const pid = await readPid();
-  let metadata: RuntimeMetadata | null = null;
+  const progress = createProgressBar('Stopping CodePilot Web', 5);
   try {
-    metadata = await readMetadata();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-
-  if (pid && processExists(pid)) {
-    if (!(await isManagementProcess(pid))) throw new Error(`PID ${pid} does not belong to this CodePilot Web service`);
-    process.stdout.write(`Sending SIGTERM to CodePilot Web (PID ${pid})\n`);
-    process.kill(pid, 'SIGTERM');
-    if (!(await waitForExit(pid, 10_000))) {
-      process.stderr.write(`Sending SIGKILL to CodePilot Web (PID ${pid})\n`);
-      process.kill(pid, 'SIGKILL');
-      if (!(await waitForExit(pid, 5_000))) throw new Error(`CodePilot Web process ${pid} did not stop`);
+    progress.update(1, 'reading runtime state');
+    const pid = await readPid();
+    let metadata: RuntimeMetadata | null = null;
+    try {
+      metadata = await readMetadata();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (pid && processExists(pid)) metadata = await recoverMetadataFromProcess(pid);
     }
-  } else {
-    process.stdout.write('CodePilot Web is not running\n');
-  }
 
-  await rm(pidFile, { force: true });
-  if (metadata) await runServiceRuntime('cleanup', metadata);
-  await rm(runtimeFile, { force: true });
-  process.stdout.write('CodePilot Web stopped\n');
+    if (pid && processExists(pid)) {
+      if (!metadata || !(await isManagementProcess(pid, metadata))) {
+        throw new Error(`PID ${pid} does not belong to this CodePilot Web service`);
+      }
+      const startTime = await processStartTime(pid);
+      if (!startTime) throw new Error(`CodePilot Web process ${pid} identity could not be verified`);
+      progress.update(2, `sending SIGTERM to PID ${pid}`);
+      process.kill(pid, 'SIGTERM');
+      if (!(await waitForExit(pid, 10_000))) {
+        const arguments_ = await commandArguments(pid);
+        if (await processStartTime(pid) !== startTime || !matchesManagementArguments(arguments_, metadata)) {
+          throw new Error(`CodePilot Web process ${pid} identity changed while stopping`);
+        }
+        progress.update(3, `sending SIGKILL to PID ${pid}`);
+        process.kill(pid, 'SIGKILL');
+        if (!(await waitForExit(pid, 5_000))) throw new Error(`CodePilot Web process ${pid} did not stop`);
+      } else {
+        progress.update(3, 'management service stopped');
+      }
+    } else {
+      progress.update(2, 'management service is not running');
+      progress.update(3, 'no management process to stop');
+    }
+
+    progress.update(4, 'cleaning support services');
+    await rm(pidFile, { force: true });
+    if (metadata) await runServiceRuntime('cleanup', metadata);
+    await rm(runtimeFile, { force: true });
+    progress.update(5, 'complete');
+    progress.finish('stopped');
+  } catch (error) {
+    progress.fail(error instanceof Error ? error.message : 'unknown error');
+    throw error;
+  }
 }
 
 async function status(): Promise<void> {
   const pid = await readPid();
-  if (pid && processExists(pid) && await isManagementProcess(pid)) {
+  let metadata: RuntimeMetadata | null = null;
+  try {
+    metadata = await readMetadata();
+  } catch {
+    // Missing or invalid runtime metadata means ownership cannot be verified.
+  }
+  if (pid && metadata && processExists(pid) && await isManagementProcess(pid, metadata)) {
     process.stdout.write(`CodePilot Web is running with PID ${pid}\n`);
     return;
   }
@@ -316,7 +571,8 @@ async function main(): Promise<void> {
     process.stdout.write(usage());
     return;
   }
-  if (command === 'start') await start(arguments_);
+  if (command === 'init') await init(arguments_);
+  else if (command === 'start') await start(arguments_);
   else if (command === 'stop') await stop();
   else if (command === 'restart') await restart();
   else if (command === 'status') await status();

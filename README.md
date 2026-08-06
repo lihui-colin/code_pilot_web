@@ -4,27 +4,35 @@ CodePilot Web 用于在浏览器中管理 workspace 下的 Git 仓库、Zellij S
 
 ## 安装
 
-先安装 NVM，并通过 NVM 安装 Node.js 26。npm 会随 Node.js 一起安装：
+启动服务前依次完成依赖安装、配置初始化和服务构建。
+
+### 步骤 1：安装依赖
+
+安装 NVM、Node.js 26 和 npm 项目依赖，并注册 `codepilot-server` 命令：
 
 ```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-nvm install 26
-nvm use 26
-node --version
-npm --version
+source ./scripts/install_deps.sh
 ```
 
-进入项目目录，运行：
+使用 `source` 执行后，脚本会把 Node.js 26 设置为 NVM 默认版本，并在当前终端加载 Node.js 26 和 `codepilot-server`。也可以直接执行安装脚本：
 
 ```bash
-./scripts/install.sh
+./scripts/install_deps.sh
 ```
 
-脚本会把安装时配置的 host 写入 `config.json` 的 `publicBaseUrl`，把服务端口写入 `listenPort`。如果尚未安装 NVM、Node.js 26 和 npm，脚本也会自动安装。随后脚本会安装项目依赖、Zellij 和 OpenVSCode Server，同时生成配置与 HTTPS 证书，并通过 `npm link` 自动注册 `codepilot-server` 命令。
+直接执行不会修改当前终端环境，新终端会自动使用设置好的 NVM 默认版本。
 
-安装时可以输入以下配置参数：
+### 步骤 2：初始化配置
+
+初始化配置、固定版本的 Zellij 和 OpenVSCode Server、目录 ID secret 与 HTTPS 证书：
+
+```bash
+codepilot-server init
+```
+
+初始化命令会把安装时配置的 host 写入 `config.json` 的 `publicBaseUrl`，把服务端口写入 `listenPort`。需要升级或重新安装依赖时，可以单独再次运行 `./scripts/install_deps.sh`，无需覆盖运行配置。
+
+初始化时可以输入以下配置参数：
 
 | 参数 | 默认值 | 写入配置 | 说明 |
 | --- | --- | --- | --- |
@@ -34,14 +42,15 @@ npm --version
 | `--zellij-port` | `5021` | `zellij.webPort` | 本机 Zellij Web 上游端口 |
 | `--viewer-port` | `5022` | `viewerPortRange.start/end` | 本机 code-viewer 上游端口 |
 | `--openvscode-port` | `5023` | `openVSCode.port` | 本机 OpenVSCode 上游端口 |
+| `--config` | `config.json` | 初始化目标 | 指定要创建或覆盖的配置文件 |
 | `--non-interactive` | 关闭 | 不写入 | 不进行交互提问，缺少必填值时直接失败 |
 
-不使用 `--non-interactive` 时，脚本会询问必填的宿主机 host、服务端口和其他可选端口。`--host` 必须填写 VPN 或局域网浏览器实际访问的宿主机地址，即使安装脚本运行在容器内，也不能填写容器内部 IP。可选端口直接按 Enter 使用表中的默认值。所有端口必须互不相同。
+不使用 `--non-interactive` 时，命令会询问必填的宿主机 host、服务端口和其他可选端口。`--host` 必须填写 VPN 或局域网浏览器实际访问的宿主机地址，即使初始化命令运行在容器内，也不能填写容器内部 IP。可选端口直接按 Enter 使用表中的默认值。所有端口必须互不相同。
 
 无人值守安装示例：
 
 ```bash
-./scripts/install.sh \
+codepilot-server init \
   --host 192.168.1.20 \
   --listen-host 0.0.0.0 \
   --service-port 8020 \
@@ -54,7 +63,13 @@ npm --version
 查看全部安装参数：
 
 ```bash
-./scripts/install.sh --help
+codepilot-server init --help
+```
+
+### 步骤 3：构建服务
+
+```bash
+npm run build
 ```
 
 ## 启动服务

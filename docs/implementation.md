@@ -238,4 +238,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ```
 
-管理应用默认监听 `0.0.0.0:8020` 并作为唯一对外 HTTPS 入口；Zellij Web 使用 localhost `8021` 并通过 `/zellij` 代理，code-viewer 使用 localhost `8022` 并通过 `/viewer` 代理，独立 OpenVSCode Server 使用相同 workspace root 和 localhost `8023` 并通过 `/openvscode` 代理 HTTP 与 WebSocket 流量。Codex Chat 直接由管理服务 API 提供。OpenVSCode 固定版本由独立下载脚本安装，上游端口由 `scripts/install.sh` 写入配置。管理应用不设置用户或密码，防火墙只允许 VPN/公司内网访问管理端口。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij、OpenVSCode 和证书目录，但不能扩大为 root 权限。
+管理应用默认监听 `0.0.0.0:8020` 并作为唯一对外 HTTPS 入口；Zellij Web 使用 localhost `8021` 并通过 `/zellij` 代理，code-viewer 使用 localhost `8022` 并通过 `/viewer` 代理，独立 OpenVSCode Server 使用相同 workspace root 和 localhost `8023` 并通过 `/openvscode` 代理 HTTP 与 WebSocket 流量。Codex Chat 直接由管理服务 API 提供。OpenVSCode 固定版本由 `codepilot-server init` 安装并验证，上游端口由该命令写入配置。管理应用不设置用户或密码，防火墙只允许 VPN/公司内网访问管理端口。文件系统沙箱必须允许读取配置的工作目录以及项目托管 Zellij、OpenVSCode 和证书目录，但不能扩大为 root 权限。

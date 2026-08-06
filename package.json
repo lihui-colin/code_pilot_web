@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "bin": {
-    "codepilot-server": "dist/cli.js"
+    "codepilot-server": "scripts/codepilot-server"
   },
   "files": [
     "dist",
+    "src",
+    "scripts/codepilot-server",
     "scripts/service-runtime.mjs",
     "config.example.json",
     "README.md"

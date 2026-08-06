@@ -711,6 +711,58 @@ describe('MVP-1 routes', () => {
     await app.close();
   });
 
+  it('rejects write operations while dependencies are not ready', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-not-ready-write-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, '.git'));
+    const app = await createApp(createTestConfig(root), {
+      readiness: { ...ready, status: 'not_ready', checks: { ...ready.checks, state: false } },
+      directoryIdSecret: Buffer.from('route test secret'),
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/codex/messages',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { repositoryId: `dir_${'a'.repeat(43)}`, message: 'hello' },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error.code).toBe('SERVICE_NOT_READY');
+    await app.close();
+  });
+
+  it('returns sanitized client errors for malformed or oversized JSON', async () => {
+    const app = await testApp();
+    const malformed = await app.inject({
+      method: 'POST',
+      url: '/api/services/restart',
+      headers: {
+        origin: 'https://192.0.2.10:8024',
+        'content-type': 'application/json',
+      },
+      payload: '{',
+    });
+    const oversized = await app.inject({
+      method: 'POST',
+      url: '/api/services/restart',
+      headers: {
+        origin: 'https://192.0.2.10:8024',
+        'content-type': 'application/json',
+      },
+      payload: JSON.stringify({ padding: 'x'.repeat(64 * 1024) }),
+    });
+
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.json().error.code).toBe('INVALID_REQUEST');
+    expect(oversized.statusCode).toBe(413);
+    expect(oversized.json().error.code).toBe('INVALID_REQUEST');
+    await app.close();
+  });
+
   it('creates a Zellij Session for a repository ID without accepting a path', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-session-route-'));
     temporaryDirectories.push(root);
@@ -863,6 +915,56 @@ describe('MVP-1 routes', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toContain('management-spa');
+    await app.close();
+  });
+
+  it('keeps unknown API paths in the management namespace when a viewer cookie is active', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-viewer-api-route-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, 'static'), { recursive: true });
+    await writeFile(path.join(root, 'static/index.html'), '<div>management</div>');
+    const viewerId = `viewer_${'v'.repeat(22)}`;
+    const viewerManager = new ViewerManager({
+      start: async () => { throw new Error('not used'); },
+      healthy: async () => true,
+      stop: async () => undefined,
+    }, 8022, 'https://192.0.2.10:8024');
+    Object.assign(viewerManager, {
+      active: {
+        instance: {
+          id: viewerId,
+          repositoryId: `dir_${'a'.repeat(43)}`,
+          pid: 321,
+          upstreamUrl: 'http://127.0.0.1:8022',
+          webUrl: `https://192.0.2.10:8024/viewer/${viewerId}/`,
+          createdAt: new Date().toISOString(),
+          lastAccessedAt: new Date().toISOString(),
+          status: 'running',
+        },
+        process: {
+          pid: 321,
+          output: () => '',
+          exited: () => false,
+          waitForExit: async () => undefined,
+        },
+      },
+    });
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      viewerManager,
+      staticRoot: path.join(root, 'static'),
+      https: false,
+      logger: false,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/not-a-real-route',
+      headers: { cookie: `codepilot_web_viewer=${viewerId}` },
+    });
+
+    expect(response.statusCode).toBe(404);
     await app.close();
   });
 

@@ -507,8 +507,13 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       }
       const managementPage = requestUrl.pathname === '/' || requestUrl.pathname === '/codex-chat';
       const cookieViewerId = viewerIdFromCookie(request.headers.cookie);
-      if (!managementPage && cookieViewerId && cookieViewerId === viewerManager.activeViewerId()) {
+      const managementApi = requestUrl.pathname === '/api' || requestUrl.pathname.startsWith('/api/');
+      if (!managementPage && !managementApi && cookieViewerId && cookieViewerId === viewerManager.activeViewerId()) {
         return proxyViewerRequest(request, reply, viewerManager, cookieViewerId, `${requestUrl.pathname}${requestUrl.search}`);
+      }
+      if (managementApi) {
+        await reply.code(404).send();
+        return;
       }
       if (request.method === 'GET') {
         await reply.sendFile('index.html');

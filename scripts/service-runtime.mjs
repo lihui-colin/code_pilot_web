@@ -18,14 +18,14 @@ function resolveConfigPath(configDirectory, value) {
   return path.resolve(configDirectory, value);
 }
 
-async function loadRuntime(configFile, workspaceRoot, managementPortOverride) {
+async function loadRuntime(configFile, workspaceRoot, managementPortOverride, runtimeSnapshot) {
   const resolvedConfigFile = await realpath(configFile);
   const configDirectory = path.dirname(resolvedConfigFile);
   const config = JSON.parse(await readFile(resolvedConfigFile, 'utf8'));
   const workspaceRootRealPath = await realpath(workspaceRoot);
   const workspaceStat = await stat(workspaceRootRealPath);
   if (!workspaceStat.isDirectory()) throw new Error('workspace root is not a directory');
-  return {
+  const configuredRuntime = {
     configFile: resolvedConfigFile,
     managementPort: managementPortOverride === undefined
       ? Number(config.listenPort)
@@ -40,6 +40,18 @@ async function loadRuntime(configFile, workspaceRoot, managementPortOverride) {
     zellijConfigFile: resolveConfigPath(configDirectory, config.zellij.configFile),
     zellijManagedBinary: resolveConfigPath(configDirectory, config.zellij.managedBinaryFile),
     zellijWebPort: Number(config.zellij.webPort),
+  };
+  if (!runtimeSnapshot) return configuredRuntime;
+  const snapshot = JSON.parse(runtimeSnapshot);
+  return {
+    ...configuredRuntime,
+    managementPort: Number(snapshot.port),
+    openVSCodeExecutable: String(snapshot.openVSCodeExecutable),
+    openVSCodePort: Number(snapshot.openVSCodePort),
+    viewerPorts: snapshot.viewerPorts.map(Number),
+    zellijConfigFile: String(snapshot.zellijConfigFile),
+    zellijManagedBinary: String(snapshot.zellijManagedBinary),
+    zellijWebPort: Number(snapshot.zellijWebPort),
   };
 }
 
@@ -337,7 +349,7 @@ async function ensureManagedListener(runtime, port, kind, pidFile, start) {
   const pids = [...new Set(await listenerPids(port))];
   if (pids.length === 0) {
     await start(runtime);
-    return;
+    return true;
   }
   let managedPid;
   for (const pid of pids) {
@@ -348,26 +360,31 @@ async function ensureManagedListener(runtime, port, kind, pidFile, start) {
     managedPid ??= pid;
   }
   if (managedPid) await writePidFile(pidFile, managedPid);
+  return false;
 }
 
 async function ensureSupport(runtime) {
-  await ensureManagedListener(runtime, runtime.zellijWebPort, 'zellij-web', zellijWebPidFile, startZellijWeb);
+  const startedZellijWeb = await ensureManagedListener(
+    runtime, runtime.zellijWebPort, 'zellij-web', zellijWebPidFile, startZellijWeb,
+  );
   try {
     await ensureManagedListener(runtime, runtime.openVSCodePort, 'openvscode', openVSCodePidFile, startOpenVsCode);
   } catch (error) {
-    if ((await listenerPids(runtime.zellijWebPort)).length === 0) {
-      await rm(zellijWebPidFile, { force: true });
+    if (startedZellijWeb) {
+      await stopZellijWeb(runtime);
+      await cleanupPort(runtime, runtime.zellijWebPort, ['zellij-web']);
     }
+    await rm(zellijWebPidFile, { force: true });
     throw error;
   }
 }
 
 async function main() {
-  const [operation, configFile, workspaceRoot, managementPortOverride] = process.argv.slice(2);
+  const [operation, configFile, workspaceRoot, managementPortOverride, runtimeSnapshot] = process.argv.slice(2);
   if (!['cleanup', 'start-support', 'ensure-support'].includes(operation) || !configFile || !workspaceRoot) {
     throw new Error('usage: service-runtime.mjs <cleanup|start-support|ensure-support> <config-file> <workspace-root>');
   }
-  const runtime = await loadRuntime(configFile, workspaceRoot, managementPortOverride);
+  const runtime = await loadRuntime(configFile, workspaceRoot, managementPortOverride, runtimeSnapshot);
   if (operation === 'cleanup') await cleanup(runtime);
   else if (operation === 'start-support') await startSupport(runtime);
   else await ensureSupport(runtime);

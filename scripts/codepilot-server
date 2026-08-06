@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_file="$(readlink -f "${BASH_SOURCE[0]}")"
+project_root="$(cd "$(dirname "$script_file")/.." && pwd)"
+
+exec "$project_root/node_modules/.bin/tsx" "$project_root/src/cli.ts" "$@"
