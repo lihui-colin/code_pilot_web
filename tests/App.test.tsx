@@ -546,7 +546,7 @@ describe('App', () => {
     await waitFor(() => expect(api.deleteSession).toHaveBeenCalledWith(sessionName));
   });
 
-  it('opens a blank tab before starting code-viewer and navigates it on success', async () => {
+  it('opens the same-origin code-viewer launch page in a new tab', async () => {
     vi.mocked(api.getRepositories).mockResolvedValue({
       ...repositories,
       entries: [{
@@ -554,15 +554,11 @@ describe('App', () => {
         kind: 'repository', source: 'workspace', markers: ['git', 'node'], openVSCodeUrl, viewer: null, session: null,
       }],
     });
-    const replace = vi.fn();
-    const open = vi.spyOn(window, 'open').mockReturnValue({
-      location: { replace },
-      close: vi.fn(),
-    } as unknown as Window);
+    const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
     render(<App />);
     fireEvent.click(await screen.findByLabelText('codepilot-web 更多操作'));
     fireEvent.click(await screen.findByRole('button', { name: 'code-viewer' }));
-    expect(open).toHaveBeenCalledWith('about:blank', '_blank');
-    await waitFor(() => expect(replace).toHaveBeenCalledWith(`http://192.0.2.10:8024/viewer/viewer_${'b'.repeat(22)}/`));
+    expect(open).toHaveBeenCalledWith(`/viewer-launch/dir_${'a'.repeat(43)}`, '_blank');
+    expect(api.createViewer).not.toHaveBeenCalled();
   });
 });

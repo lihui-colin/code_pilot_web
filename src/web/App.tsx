@@ -10,7 +10,6 @@ import type {
 import {
   addManualRepository,
   createSession,
-  createViewer,
   deleteManualRepository,
   deleteSession,
   deleteZellijToken,
@@ -192,24 +191,13 @@ export function App() {
     () => setSessionPanelOpen(false),
   );
 
-  const browseCode = async (repositoryId: string) => {
-    const viewerWindow = window.open('about:blank', '_blank');
+  const browseCode = (repositoryId: string) => {
+    const viewerWindow = window.open(`/viewer-launch/${encodeURIComponent(repositoryId)}`, '_blank');
     if (!viewerWindow) {
       setError('浏览器阻止了新标签页，请允许本站打开弹窗。');
       return;
     }
-    setBusyRepositoryId(repositoryId);
-    try {
-      const viewer = await createViewer(repositoryId);
-      viewerWindow.location.replace(viewer.webUrl);
-      await refreshRepositories();
-      setError(null);
-    } catch (caught) {
-      viewerWindow.close();
-      setError(errorMessage(caught, 'code-viewer 启动失败'));
-    } finally {
-      setBusyRepositoryId(null);
-    }
+    setError(null);
   };
 
   const copyToken = async () => {
@@ -707,7 +695,7 @@ export function App() {
                       type="button"
                       onClick={() => {
                         setOpenRepositoryMenuId(null);
-                        void browseCode(entry.id);
+                        browseCode(entry.id);
                       }}
                       disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
                     >code-viewer</button>}

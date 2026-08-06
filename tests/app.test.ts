@@ -34,6 +34,21 @@ afterEach(async () => {
 });
 
 describe('MVP-1 routes', () => {
+  it('serves a same-origin viewer launch page for a valid repository ID', async () => {
+    const app = await testApp();
+    const repositoryId = `dir_${'a'.repeat(43)}`;
+
+    const response = await app.inject({ method: 'GET', url: `/viewer-launch/${repositoryId}` });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/html');
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body).toContain("fetch('/api/viewers'");
+    expect(response.body).toContain(JSON.stringify(repositoryId));
+    expect(response.body).toContain('window.location.replace(viewer.webUrl)');
+    await app.close();
+  });
+
   it('returns only the configured Codex chat appearance fields', async () => {
     const app = await testApp();
 

@@ -85,11 +85,11 @@ codepilot-server start --port 8020 --workspace /home/lihui/projects
 
 用户点击“浏览”时：
 
-1. 当前点击事件先打开空白标签页，避免异步启动导致弹窗被拦截。
-2. 前端调用 Viewer API。
+1. 当前点击事件先打开同源 viewer 启动页，避免异步启动导致弹窗被拦截，也不依赖移动浏览器返回新标签页的窗口句柄。
+2. viewer 启动页调用 Viewer API。
 3. 后端复用健康实例或启动新实例。
-4. 成功后把空白标签页导航到后端返回的同源代理地址。
-5. 失败时关闭空白标签页，并在管理页面显示可理解的错误。
+4. 成功后启动页把自身导航到后端返回的同源代理地址。
+5. 失败时启动页显示可理解的错误，不得停留在空白页面。
 
 启动过程中显示稳定的 `starting` 状态并禁止重复提交。用户可以停止不再需要的 viewer。viewer 进程异常退出、启动超时或长时间空闲时，服务清理实例和端口记录。
 
@@ -149,7 +149,7 @@ Codex 对话快照只包含 conversation ID、用户与助手文本、运行状�
 
 - 尚无对应 Session 时显示“创建 Zellij Session”，在该 repository 的真实目录创建 Codex Session。
 - 已有对应 Session 时显示“打开 Zellij Web”和“删除 Session”；打开仓库绑定的 Session 时自动复制当前 Zellij Web Token，并显示复制结果；服务重启后仍通过固定名称识别对应关系。Zellij Web 固定版本静态资源使用浏览器缓存和压缩传输，手机端刷新时不得重复下载全部未压缩终端脚本。
-- “code-viewer”：打开空白标签页，启动或复用该 repository 的 code-viewer，成功后导航到管理服务同源 viewer 地址。
+- “code-viewer”：打开同源启动页，由启动页启动或复用该 repository 的 code-viewer，成功后导航到管理服务同源 viewer 地址。
 - “编辑代码”：在“code-viewer”旁边以新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode 地址，并通过 `folder` 参数自动打开该 repository。OpenVSCode 由部署侧使用配置的 workspace root 启动，只监听默认端口 `127.0.0.1:8023`，由管理服务代理 `/openvscode` HTTP 和 WebSocket 流量；后端重新校验 repository 真实路径和对应来源边界，前端不提交或拼接目录、绝对路径、命令或环境变量。
 - “与 Codex 对话”：在新标签页打开该 repository 的独立流式对话页面；服务端校验 repository ID 并固定 Codex app-server 的进程参数、工作目录、审批与沙箱策略，前端只提交自然语言消息和服务端签发的 conversation ID。
 - 手动 repository 显示“移除仓库”；该操作只删除状态记录，不删除文件、Session 或进程。

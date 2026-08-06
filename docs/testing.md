@@ -115,7 +115,7 @@
 8. Session URL 使用主服务同源 `/zellij/open/<session>`，不包含 Zellij 上游端口；打开时由管理服务使用服务端 Token 登录 localhost 上游，转发认证 Cookie 并重定向到 `/zellij/<session>`，Token 不出现在浏览器 URL、HTML 或响应正文中。
 9. Zellij Web 只监听 localhost；入口 HTML 的 base 被改写为 `/zellij/`，登录 HTTP 和终端 WebSocket 均通过主服务代理。
 10. Zellij `0.44.3` 已知静态资源返回一天的私有 immutable 缓存、版本化弱 ETag 和 gzip；匹配 `If-None-Match` 时直接返回 `304` 且不请求上游。HTML、登录/API 和 WebSocket 不使用该静态缓存策略。
-11. 桌面和移动浏览器的 Zellij 入口都显示圆形浮动快捷键盘；收起时不占用整行或缩短终端高度，闲置 3 秒后自动缩进最近的屏幕边缘、隐藏球体主体并仅保留可点击圆弧，交互时恢复完整按钮；浮球贴边后点击页面其他区域不得将其唤醒。展开时仅有 `Ctrl+P N` 和 `Ctrl+P X` 两个圆形按钮沿浮动按钮上方呈环状展开。两个按钮必须按顺序写入两段固定序列，并在发送后自动收起快捷键盘、同步恢复折叠状态，例如 `Ctrl+P N` 写入 `0x10` 后写入 ASCII `n`；桌面和触摸操作都不得主动聚焦终端或其他可编辑输入，拖动按钮不得触发页面平移，并按动画帧合并位置更新。
+11. 桌面和移动浏览器的 Zellij 入口都显示圆形浮动快捷键盘；首次打开时默认贴边收起，隐藏球体主体并仅保留半透明可点击圆弧，不占用整行或缩短终端高度，交互时恢复完整按钮，之后收起并闲置 3 秒再次自动贴边；浮球贴边后点击页面其他区域不得将其唤醒。展开时仅有 `Ctrl+P N` 和 `Ctrl+P X` 两个圆形按钮沿浮动按钮上方呈环状展开。两个按钮必须按顺序写入两段固定序列，并在发送后自动收起快捷键盘、同步恢复折叠状态，例如 `Ctrl+P N` 写入 `0x10` 后写入 ASCII `n`；桌面和触摸操作都不得主动聚焦终端或其他可编辑输入，拖动按钮不得触发页面平移，并按动画帧合并位置更新。
 12. 防火墙只需公开主服务端口，Zellij Web、code-viewer 和 OpenVSCode 端口从外部不可访问。
 13. Session 表格默认隐藏；Workspace 管理区的“会话列表”按钮打开弹窗，弹窗可通过关闭按钮、遮罩和 Esc 关闭，并在打开或成功删除 Session 后自动关闭。
 
@@ -143,7 +143,7 @@
 
 ## MVP-3：Viewer 管理
 
-当前首版仓库页面覆盖：点击“code-viewer”会先同步打开空白标签页，再通过 API 启动或复用 localhost:8022 的 code-viewer，并导航到同源 viewer 地址；切换仓库会停止旧实例。repository 没有对应 Session 时显示创建按钮，已有时显示安全打开链接和删除按钮。“code-viewer”旁边显示“编辑代码”链接，安全地在新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode URL；URL 的 `folder` 参数必须等于重新执行真实路径和对应来源边界校验后的 repository 目录，前端不得自行拼接路径。`/openvscode` 必须保留基路径代理普通 HTTP 和 WebSocket 流量，上游只监听 localhost。
+当前首版仓库页面覆盖：点击“code-viewer”会先同步打开同源启动页，启动页再通过 API 启动或复用 localhost:8022 的 code-viewer，并把自身导航到同源 viewer 地址；该流程不依赖移动浏览器向原页面返回新标签页窗口句柄，切换仓库会停止旧实例。repository 没有对应 Session 时显示创建按钮，已有时显示安全打开链接和删除按钮。“code-viewer”旁边显示“编辑代码”链接，安全地在新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode URL；URL 的 `folder` 参数必须等于重新执行真实路径和对应来源边界校验后的 repository 目录，前端不得自行拼接路径。`/openvscode` 必须保留基路径代理普通 HTTP 和 WebSocket 流量，上游只监听 localhost。
 
 1. 请求额外字段和非法 ID 被拒绝。
 2. 非 repository 或越界目录无法启动 viewer。
@@ -167,7 +167,7 @@
 20. Host、Origin 和 Referer 正确重写，成功请求更新最后访问时间。
 21. viewer 代理不要求用户凭据，并由部署网络边界限制访问。
 22. 弹窗被阻止时不发送启动请求。
-23. 启动失败时空白标签页被关闭。
+23. viewer 启动失败时启动页显示可理解的错误，不停留在空白页面。
 24. 轮询不覆盖 starting 和 stopping 状态。
 
 ## 当前扩展：Codex Web 对话
