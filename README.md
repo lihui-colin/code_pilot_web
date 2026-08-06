@@ -38,7 +38,7 @@ codepilot-server init
 | --- | --- | --- | --- |
 | `--host` | 无，必填 | `publicBaseUrl` | 浏览器可访问的宿主机 IP 或域名，也用于 HTTPS 证书 SAN；不要填写容器内部 IP |
 | `--listen-host` | `0.0.0.0` | `listenHost` | CodePilot Web 的监听地址 |
-| `--service-port` | 无，必填 | `listenPort`、`publicBaseUrl` | CodePilot Web HTTPS 端口 |
+| `--port` | 无，必填 | `listenPort`、`publicBaseUrl` | CodePilot Web HTTPS 端口 |
 | `--zellij-port` | `5021` | `zellij.webPort` | 本机 Zellij Web 上游端口 |
 | `--viewer-port` | `5022` | `viewerPortRange.start/end` | 本机 code-viewer 上游端口 |
 | `--openvscode-port` | `5023` | `openVSCode.port` | 本机 OpenVSCode 上游端口 |
@@ -53,7 +53,7 @@ codepilot-server init
 codepilot-server init \
   --host 192.168.1.20 \
   --listen-host 0.0.0.0 \
-  --service-port 8020 \
+  --port 8020 \
   --zellij-port 5021 \
   --viewer-port 5022 \
   --openvscode-port 5023 \

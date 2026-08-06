@@ -69,26 +69,66 @@ function createProgressBar(label: string, totalSteps: number): ProgressBar {
 
 function usage(): string {
   return `Usage:
-  codepilot-server init --host <address> --service-port <port> [options]
+  codepilot-server init --host <address> --port <port> [options]
   codepilot-server start --host <address> --port <port> --workspace <directory> [options]
   codepilot-server stop
   codepilot-server restart
   codepilot-server status
   codepilot-server run --host <address> --port <port> --workspace <directory> [options]
 
+Run codepilot-server <command> --help for command-specific options.
+`;
+}
+
+function initUsage(): string {
+  return `Usage:
+  codepilot-server init --host <address> --port <port> [options]
+
 Options:
-  --service-port <port>   CodePilot Web HTTPS port for init
-  --zellij-port <port>   Local Zellij Web port for init (default: 5021)
-  --viewer-port <port>   Local code-viewer port for init (default: 5022)
-  --openvscode-port <port> Local OpenVSCode port for init (default: 5023)
-  --listen-host <address> Listen address for init (default: 0.0.0.0)
-  --non-interactive      Fail instead of prompting for missing init values
-  --host <address>         Browser host used for the HTTPS certificate
-  --port <port>            HTTPS management port
-  --workspace <directory>  Workspace directory to manage
+  --host <address>           Browser host used for the HTTPS certificate
+  --port <port>             CodePilot Web HTTPS port
+  --zellij-port <port>     Local Zellij Web port (default: 5021)
+  --viewer-port <port>     Local code-viewer port (default: 5022)
+  --openvscode-port <port> Local OpenVSCode port (default: 5023)
+  --listen-host <address>  Listen address (default: 0.0.0.0)
+  --config <file>          Configuration file (default: config.json)
+  --non-interactive        Fail instead of prompting for missing values
+  -h, --help               Show this help
+`;
+}
+
+function serviceUsage(command: 'start' | 'run'): string {
+  return `Usage:
+  codepilot-server ${command} --workspace <directory> [options]
+
+Options:
+  --host <address>         Browser host override
+  --port <port>            HTTPS management port override
+  --workspace <directory>  Workspace directory to manage (required)
   --config <file>          Configuration file (default: config.json)
   -h, --help               Show this help
 `;
+}
+
+function noOptionsUsage(command: 'stop' | 'restart' | 'status'): string {
+  return `Usage:
+  codepilot-server ${command}
+
+Options:
+  -h, --help  Show this help
+`;
+}
+
+function parseNoOptions(command: 'stop' | 'restart' | 'status', arguments_: string[]): boolean {
+  const parsed = parseArgs({
+    args: arguments_,
+    options: { help: { type: 'boolean', short: 'h' } },
+    strict: true,
+    allowPositionals: false,
+  });
+  if (!parsed.values.help) return false;
+  process.stdout.write(noOptionsUsage(command));
+  return true;
 }
 
 function parsePort(name: string, value: string): number {
@@ -106,7 +146,7 @@ async function init(arguments_: string[]): Promise<void> {
     options: {
       config: { type: 'string', default: 'config.json' },
       host: { type: 'string' },
-      'service-port': { type: 'string' },
+      port: { type: 'string' },
       'zellij-port': { type: 'string', default: '5021' },
       'viewer-port': { type: 'string', default: '5022' },
       'openvscode-port': { type: 'string', default: '5023' },
@@ -118,12 +158,12 @@ async function init(arguments_: string[]): Promise<void> {
     allowPositionals: false,
   });
   if (parsed.values.help) {
-    process.stdout.write(usage());
+    process.stdout.write(initUsage());
     return;
   }
 
   let host = parsed.values.host;
-  let servicePort = parsed.values['service-port'];
+  let servicePort = parsed.values.port;
   let zellijPort = parsed.values['zellij-port'] ?? '5021';
   let viewerPort = parsed.values['viewer-port'] ?? '5022';
   let openVSCodePort = parsed.values['openvscode-port'] ?? '5023';
@@ -143,7 +183,7 @@ async function init(arguments_: string[]): Promise<void> {
     }
   }
   if (!host) throw new Error('--host is required and must be the browser-reachable host machine address');
-  if (!servicePort) throw new Error('--service-port is required');
+  if (!servicePort) throw new Error('--port is required');
 
   const options: InitOptions = {
     host,
@@ -289,7 +329,7 @@ async function runServiceRuntime(operation: 'cleanup' | 'ensure-support', metada
   if (exitCode !== 0) throw new Error(`support service ${operation} failed`);
 }
 
-function parseStartOptions(arguments_: string[]): string[] {
+function parseStartOptions(command: 'start' | 'run', arguments_: string[]): string[] {
   const parsed = parseArgs({
     args: arguments_,
     options: {
@@ -303,8 +343,8 @@ function parseStartOptions(arguments_: string[]): string[] {
     allowPositionals: false,
   });
   if (parsed.values.help) {
-    process.stdout.write(usage());
-    process.exit(0);
+    process.stdout.write(serviceUsage(command));
+    return [];
   }
   const result: string[] = [];
   if (parsed.values.config) result.push('--config', parsed.values.config);
@@ -314,8 +354,12 @@ function parseStartOptions(arguments_: string[]): string[] {
   return result;
 }
 
-async function resolveMetadata(arguments_: string[]): Promise<{ metadata: RuntimeMetadata; serverArguments: string[] }> {
-  const options = parseStartOptions(arguments_);
+async function resolveMetadata(
+  arguments_: string[],
+  command: 'start' | 'run' = 'start',
+): Promise<{ metadata: RuntimeMetadata; serverArguments: string[] } | null> {
+  const options = parseStartOptions(command, arguments_);
+  if (arguments_.some(argument => argument === '--help' || argument === '-h')) return null;
   const hasConfig = options.includes('--config');
   const serverArguments = hasConfig ? options : ['--config', path.resolve('config.json'), ...options];
   const loaded = await loadConfiguration(serverArguments, process.cwd());
@@ -346,6 +390,10 @@ async function resolveMetadata(arguments_: string[]): Promise<{ metadata: Runtim
 }
 
 async function start(arguments_: string[]): Promise<void> {
+  if (arguments_.some(argument => argument === '--help' || argument === '-h')) {
+    parseStartOptions('start', arguments_);
+    return;
+  }
   const progress = createProgressBar('Starting CodePilot Web', 5);
   try {
     progress.update(1, 'validating configuration');
@@ -357,7 +405,9 @@ async function start(arguments_: string[]): Promise<void> {
       }
       throw error;
     }
-    const { metadata, serverArguments } = await resolveMetadata(arguments_);
+    const resolved = await resolveMetadata(arguments_, 'start');
+    if (!resolved) return;
+    const { metadata, serverArguments } = resolved;
     const existingPid = await readPid();
     if (existingPid && processExists(existingPid)) {
       throw new Error(await isManagementProcess(existingPid, metadata)
@@ -457,7 +507,7 @@ export async function recoverMetadataFromArguments(arguments_: readonly string[]
     if (!value) return null;
     recoveredArguments.push(option, value);
   }
-  return (await resolveMetadata(recoveredArguments)).metadata;
+  return (await resolveMetadata(recoveredArguments))?.metadata ?? null;
 }
 
 async function recoverMetadataFromProcess(pid: number): Promise<RuntimeMetadata | null> {
@@ -530,7 +580,9 @@ async function status(): Promise<void> {
 }
 
 async function run(arguments_: string[]): Promise<void> {
-  const { metadata, serverArguments } = await resolveMetadata(arguments_);
+  const resolved = await resolveMetadata(arguments_, 'run');
+  if (!resolved) return;
+  const { metadata, serverArguments } = resolved;
   await runServiceRuntime('ensure-support', metadata);
   const child = spawn(process.execPath, [serverFile, ...serverArguments], {
     cwd: projectRoot,
@@ -573,10 +625,13 @@ async function main(): Promise<void> {
   }
   if (command === 'init') await init(arguments_);
   else if (command === 'start') await start(arguments_);
-  else if (command === 'stop') await stop();
-  else if (command === 'restart') await restart();
-  else if (command === 'status') await status();
-  else if (command === 'run') await run(arguments_);
+  else if (command === 'stop') {
+    if (!parseNoOptions('stop', arguments_)) await stop();
+  } else if (command === 'restart') {
+    if (!parseNoOptions('restart', arguments_)) await restart();
+  } else if (command === 'status') {
+    if (!parseNoOptions('status', arguments_)) await status();
+  } else if (command === 'run') await run(arguments_);
   else throw new Error(`unknown command: ${command}`);
 }
 

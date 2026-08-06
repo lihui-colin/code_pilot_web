@@ -19,11 +19,38 @@ describe('codepilot-web CLI', () => {
     expect(stdout).toContain('codepilot-server run');
   });
 
+  it('prints only initialization options for init help', async () => {
+    const { stdout } = await execFileAsync(process.execPath, ['dist/cli.js', 'init', '--help'], { encoding: 'utf8' });
+    expect(stdout).toContain('--port <port>');
+    expect(stdout).toContain('--openvscode-port <port>');
+    expect(stdout).not.toContain('--service-port <port>');
+    expect(stdout).not.toContain('--workspace <directory>');
+  });
+
+  it.each(['start', 'run'] as const)('prints only service options for %s help', async command => {
+    const { stdout } = await execFileAsync(process.execPath, ['dist/cli.js', command, '--help'], { encoding: 'utf8' });
+    expect(stdout).toContain('--host <address>');
+    expect(stdout).toContain('--port <port>');
+    expect(stdout).toContain('--workspace <directory>');
+    expect(stdout).toContain('--config <file>');
+    expect(stdout).not.toContain('--zellij-port <port>');
+    expect(stdout).not.toContain('--non-interactive');
+  });
+
+  it.each(['stop', 'restart', 'status'] as const)('prints no business options for %s help', async command => {
+    const { stdout } = await execFileAsync(process.execPath, ['dist/cli.js', command, '--help'], { encoding: 'utf8' });
+    expect(stdout).toContain(`codepilot-server ${command}`);
+    expect(stdout).toContain('-h, --help');
+    expect(stdout).not.toContain('--host <address>');
+    expect(stdout).not.toContain('--port <port>');
+    expect(stdout).not.toContain('--config <file>');
+  });
+
   it('requires a host for non-interactive initialization', async () => {
     await expect(execFileAsync(process.execPath, [
       'dist/cli.js',
       'init',
-      '--service-port', '8020',
+      '--port', '8020',
       '--non-interactive',
     ], { encoding: 'utf8' })).rejects.toMatchObject({
       stderr: expect.stringContaining('--host is required'),
