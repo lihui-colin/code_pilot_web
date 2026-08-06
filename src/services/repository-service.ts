@@ -179,6 +179,9 @@ export class RepositoryService {
     if (!(await stat(realPath)).isDirectory()) {
       throw new ApiError(404, 'DIRECTORY_NOT_FOUND', 'Directory was not found');
     }
+    if (!(await this.detectMarkers(realPath)).includes('git')) {
+      throw new ApiError(422, 'NOT_A_REPOSITORY', 'Directory is not a Git repository');
+    }
     return { realPath, relativePath: registered.relativePath };
   }
 
@@ -250,15 +253,20 @@ export class RepositoryService {
   }
 
   async removeManualRepository(repositoryId: string): Promise<void> {
+    await this.validateManualRepository(repositoryId);
+    const registered = this.repositoryIndex.get(repositoryId)!;
+    const paths = [...this.manualRepositoryPaths].filter(candidate => candidate !== registered.configuredPath);
+    await this.persistManualRepositoryPaths(paths);
+    this.manualRepositoryPaths.delete(registered.configuredPath);
+    this.repositoryIndex.delete(repositoryId);
+  }
+
+  async validateManualRepository(repositoryId: string): Promise<void> {
     await this.list();
     const registered = this.repositoryIndex.get(repositoryId);
     if (!registered || registered.source !== 'manual' || !this.manualRepositoryPaths.has(registered.configuredPath)) {
       throw new ApiError(404, 'MANUAL_REPOSITORY_NOT_FOUND', 'Manual repository was not found');
     }
-    const paths = [...this.manualRepositoryPaths].filter(candidate => candidate !== registered.configuredPath);
-    await this.persistManualRepositoryPaths(paths);
-    this.manualRepositoryPaths.delete(registered.configuredPath);
-    this.repositoryIndex.delete(repositoryId);
   }
 
   private async readFolder(directoryId?: string, initialPath?: string): Promise<RepositoryFolderListing> {

@@ -25,7 +25,14 @@ async function main(): Promise<void> {
   } catch {
     process.stderr.write('CodePilot Web warning: unable to reconcile managed Sessions during startup\n');
   }
-  const managedSessions = await stateStore.initialize(actualSessionNames);
+  let stateAvailable = true;
+  let managedSessions = new Map();
+  try {
+    managedSessions = await stateStore.initialize(actualSessionNames);
+  } catch {
+    stateAvailable = false;
+    process.stderr.write('CodePilot Web warning: state file is invalid; starting in read-only mode\n');
+  }
   const zellijTokenService = new ZellijTokenService(
     zellijBootstrap.zellij.executablePath,
     loaded.config.zellijWebTokenDatabaseFile,
@@ -41,6 +48,7 @@ async function main(): Promise<void> {
     loaded.directoryIdSecret !== null,
     zellijBootstrap.zellij.executablePath,
     codeViewerExecutablePath,
+    stateAvailable,
   );
   const codexChatService = new CodexChatService(
     new SpawnCodexAppServerAdapter(),

@@ -71,7 +71,7 @@ curl --fail --show-error --location --progress-bar \
 
 checksum_output="$(sha256sum "$temporary_directory/$archive_name")"
 actual_sha256="${checksum_output%% *}"
-[[ "$actual_sha256" == "$expected_sha256" ]] open\
+[[ "$actual_sha256" == "$expected_sha256" ]] \
 || die "downloaded archive checksum did not match the official release digest"
 
 tar -xzf "$temporary_directory/$archive_name" \

@@ -13,7 +13,7 @@ import { createTestConfig } from './helpers.js';
 const temporaryDirectories: string[] = [];
 const ready: ReadinessResult = {
   status: 'ready',
-  checks: { workspaceRoot: true, directoryIdSecret: true, node: true, zellij: true, codeViewer: true },
+  checks: { workspaceRoot: true, state: true, directoryIdSecret: true, node: true, zellij: true, codeViewer: true },
 };
 
 afterEach(async () => {

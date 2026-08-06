@@ -177,6 +177,8 @@ describe('RepositoryService', () => {
       markers: [],
     }));
     expect(persisted).toEqual([[plain]]);
+    await expect(repositoryService.resolveRepository(directoryId))
+      .rejects.toMatchObject({ statusCode: 422, code: 'NOT_A_REPOSITORY' });
   });
 
   it('lists repository context files with opaque IDs and revalidates containment before reading', async () => {

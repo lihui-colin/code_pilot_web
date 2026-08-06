@@ -658,7 +658,7 @@ export function App() {
                 {entry.markers.length > 0 && <div className="markers">{entry.markers.map(marker => <small key={marker}>{marker}</small>)}</div>}
               </div>
               <div className="repository-actions">
-                {entry.session ? (
+                {entry.kind === 'repository' && (entry.session ? (
                   <a
                     className="button-link zellij-link"
                     href={entry.session.webUrl}
@@ -675,8 +675,8 @@ export function App() {
                     onClick={() => void createRepositorySession(entry.id)}
                     disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
                   >创建 Zellij Session</button>
-                )}
-                <a
+                ))}
+                {entry.kind === 'repository' && <a
                   className={`button-link codex-chat-link${codexRunning ? ' running' : ''}`}
                   href={`/codex-chat?repositoryId=${encodeURIComponent(entry.id)}`}
                   target="_blank"
@@ -686,7 +686,7 @@ export function App() {
                     <span className="codex-link-main">与 Codex 对话</span>
                     <span className="sr-only">，生成中</span>
                   </>
-                ) : '与 Codex 对话'}</a>
+                ) : '与 Codex 对话'}</a>}
                 <div
                   className="repository-more"
                   data-repository-menu-id={entry.id}
@@ -701,20 +701,20 @@ export function App() {
                     onClick={() => setOpenRepositoryMenuId(current => current === entry.id ? null : entry.id)}
                   >⋯</button>
                   {openRepositoryMenuId === entry.id && <div className="repository-menu">
-                    <a
+                    {entry.openVSCodeUrl && <a
                       href={entry.openVSCodeUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={() => setOpenRepositoryMenuId(null)}
-                    >编辑代码</a>
-                    <button
+                    >编辑代码</a>}
+                    {entry.kind === 'repository' && <button
                       type="button"
                       onClick={() => {
                         setOpenRepositoryMenuId(null);
                         void browseCode(entry.id);
                       }}
                       disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
-                    >code-viewer</button>
+                    >code-viewer</button>}
                     {(entry.session || entry.source === 'manual') && <div className="repository-menu-separator" />}
                     {entry.session && (
                       <button

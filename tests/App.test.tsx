@@ -26,7 +26,7 @@ vi.mock('../src/web/api.js', () => ({
 
 const readiness = {
   status: 'ready' as const,
-  checks: { workspaceRoot: true, directoryIdSecret: true, node: true, zellij: true, codeViewer: true },
+  checks: { workspaceRoot: true, state: true, directoryIdSecret: true, node: true, zellij: true, codeViewer: true },
 };
 const repositories = {
   current: { id: null, name: 'workspace', relativePath: '' },

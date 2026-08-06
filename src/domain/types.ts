@@ -65,7 +65,7 @@ export interface RepositoryListing {
 }
 
 export interface RepositoryEntryResponse extends DirectoryEntry {
-  openVSCodeUrl: string;
+  openVSCodeUrl: string | null;
 }
 
 export type RepositoryListingResponse = Omit<RepositoryListing, 'entries'> & {
@@ -86,6 +86,7 @@ export interface RepositoryFolderListing {
 
 export interface ReadinessChecks {
   workspaceRoot: boolean;
+  state: boolean;
   directoryIdSecret: boolean;
   node: boolean;
   zellij: boolean;

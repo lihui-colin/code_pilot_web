@@ -13,7 +13,7 @@ import { createTestConfig } from './helpers.js';
 const temporaryDirectories: string[] = [];
 const ready: ReadinessResult = {
   status: 'ready',
-  checks: { workspaceRoot: true, directoryIdSecret: true, node: true, zellij: true, codeViewer: true },
+  checks: { workspaceRoot: true, state: true, directoryIdSecret: true, node: true, zellij: true, codeViewer: true },
 };
 
 async function testApp(adapter: ZellijAdapter = { listSessions: async () => '' }) {
@@ -570,6 +570,91 @@ describe('MVP-1 routes', () => {
     expect(zellijDelete).toHaveBeenCalledTimes(1);
     expect(viewerStop).toHaveBeenCalledTimes(1);
     expect(cleanupRepository).toHaveBeenCalledWith(id);
+    await app.close();
+  });
+
+  it('rejects execution actions for a manually selected non-Git directory', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-plain-folder-route-'));
+    temporaryDirectories.push(root);
+    const workspace = path.join(root, 'workspace');
+    const plain = path.join(root, 'plain-directory');
+    await mkdir(workspace);
+    await mkdir(plain);
+    const viewerStart = vi.fn(async () => {
+      throw new Error('viewer must not start');
+    });
+    const app = await createApp(createTestConfig(workspace), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      manualRepositoryPaths: [plain],
+      viewerManager: new ViewerManager({
+        start: viewerStart,
+        healthy: async () => true,
+        stop: async () => undefined,
+      }, 8022, 'https://192.0.2.10:8024'),
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+    const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
+    const entry = listing.json().entries.find((candidate: { source: string }) => candidate.source === 'manual');
+    expect(entry).toMatchObject({ kind: 'directory', openVSCodeUrl: null });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/viewers',
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { repositoryId: entry.id },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe('NOT_A_REPOSITORY');
+    expect(viewerStart).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('does not clean resources when repository removal targets a workspace entry', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-workspace-remove-route-'));
+    temporaryDirectories.push(root);
+    await mkdir(path.join(root, '.git'));
+    const zellijDelete = vi.fn(async () => undefined);
+    const viewerStop = vi.fn(async () => undefined);
+    const cleanupRepository = vi.fn(async () => undefined);
+    const app = await createApp(createTestConfig(root), {
+      readiness: ready,
+      directoryIdSecret: Buffer.from('route test secret'),
+      zellijAdapter: { listSessions: async () => '', deleteSession: zellijDelete },
+      viewerManager: new ViewerManager({
+        start: async () => { throw new Error('not used'); },
+        healthy: async () => true,
+        stop: viewerStop,
+      }, 8022, 'https://192.0.2.10:8024'),
+      codexChatService: {
+        status: async () => ({ available: true, version: 'codex-cli 0.146.0', mode: 'yolo' }),
+        send: async () => undefined,
+        getConversation: () => null,
+        clearConversation: async () => undefined,
+        cleanupRepository,
+        stopConversation: () => undefined,
+        close: async () => undefined,
+      },
+      staticRoot: false,
+      https: false,
+      logger: false,
+    });
+    const listing = await app.inject({ method: 'GET', url: '/api/repositories' });
+    const repositoryId = listing.json().entries[0].id as string;
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/repositories/${repositoryId}`,
+      headers: { origin: 'https://192.0.2.10:8024' },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(zellijDelete).not.toHaveBeenCalled();
+    expect(viewerStop).not.toHaveBeenCalled();
+    expect(cleanupRepository).not.toHaveBeenCalled();
     await app.close();
   });
 

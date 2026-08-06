@@ -20,7 +20,7 @@ import type { ServiceRestarter } from './services/service-restarter.js';
 import { SpawnViewerProcessAdapter, ViewerManager } from './services/viewer-manager.js';
 import { proxyViewerRequest, viewerIdFromCookie } from './services/viewer-proxy.js';
 import { ZELLIJ_VERSION } from './services/zellij-installer.js';
-import { ExecFileZellijAdapter, repositorySessionName, ZellijService, type ManagedSessionMetadata } from './services/zellij-service.js';
+import { ExecFileZellijAdapter, repositorySessionNames, ZellijService, type ManagedSessionMetadata } from './services/zellij-service.js';
 import type { ZellijTokenService } from './services/zellij-token-service.js';
 
 const repositoryQuerySchema = z.object({}).strict();
@@ -169,9 +169,10 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     cert: readFileSync(config.zellijWebCertificateFile),
     key: readFileSync(config.zellijWebPrivateKeyFile),
   };
+  const fastifyOptions = { logger, bodyLimit: 64 * 1024 };
   const app = (https
-    ? Fastify({ logger, https })
-    : Fastify({ logger })) as unknown as FastifyInstance;
+    ? Fastify({ ...fastifyOptions, https })
+    : Fastify(fastifyOptions)) as unknown as FastifyInstance;
   await app.register(fastifyCompress, {
     encodings: ['gzip'],
     global: true,
@@ -296,6 +297,12 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     if (origin !== config.publicBaseUrl) throw new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'Request origin is not allowed');
   };
 
+  app.addHook('preHandler', async request => {
+    if ((request.method === 'POST' || request.method === 'DELETE') && dependencies.readiness.status !== 'ready') {
+      throw new ApiError(503, 'SERVICE_NOT_READY', 'Write operations are not ready');
+    }
+  });
+
   app.get('/api/health', async () => ({ status: 'ok' }));
   app.get('/api/ready', async (_request, reply) => {
     if (dependencies.readiness.status !== 'ready') reply.code(503);
@@ -322,20 +329,17 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       app.log.warn('Zellij sessions were unavailable while listing repositories');
     }
     const sessionsByName = new Map(sessions.map(session => [session.name, session]));
-    const sessionBaseNameCounts = new Map<string, number>();
-    for (const entry of listing.entries) {
-      const baseName = repositorySessionName(entry.name, entry.id);
-      sessionBaseNameCounts.set(baseName, (sessionBaseNameCounts.get(baseName) ?? 0) + 1);
-    }
+    const sessionNamesByRepositoryId = repositorySessionNames(listing.entries);
     const entries = await Promise.all(listing.entries.map(async entry => {
-      const repository = await repositoryService.resolveRepository(entry.id);
       const viewer = viewerManager.currentFor(entry.id);
-      const baseName = repositorySessionName(entry.name, entry.id);
-      const sessionName = repositorySessionName(entry.name, entry.id, (sessionBaseNameCounts.get(baseName) ?? 0) > 1);
+      const sessionName = sessionNamesByRepositoryId.get(entry.id)!;
       const session = sessionsByName.get(sessionName);
+      const repository = entry.kind === 'repository'
+        ? await repositoryService.resolveRepository(entry.id)
+        : null;
       return {
         ...entry,
-        openVSCodeUrl: openVSCodeWebUrl(config, repository.realPath),
+        openVSCodeUrl: repository ? openVSCodeWebUrl(config, repository.realPath) : null,
         viewer: viewer ? { id: viewer.id, status: viewer.status, webUrl: viewer.webUrl } : null,
         session: session ? { name: session.name, status: session.status, webUrl: session.webUrl } : null,
       };
@@ -368,6 +372,7 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     requireSameOrigin(request.headers.origin);
     noBodySchema.parse(request.body);
     const params = repositoryParamsSchema.parse(request.params);
+    await repositoryService.validateManualRepository(params.repositoryId);
     await zellijService.deleteSessionsForRepository(params.repositoryId);
     await viewerManager.stopFor(params.repositoryId);
     if (codexChatService.cleanupRepository) {
@@ -392,13 +397,10 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     const listing = await repositoryService.list();
     const entry = listing.entries.find(candidate => candidate.id === body.repositoryId);
     if (!entry) throw new ApiError(404, 'DIRECTORY_NOT_FOUND', 'Directory was not found');
-    const baseName = repositorySessionName(entry.name, entry.id);
-    const duplicateName = listing.entries.filter(candidate => (
-      repositorySessionName(candidate.name, candidate.id) === baseName
-    )).length > 1;
+    const sessionName = repositorySessionNames(listing.entries).get(entry.id)!;
     const repository = await repositoryService.resolveRepository(body.repositoryId);
     const result = await zellijService.ensureRepositorySession(
-      repositorySessionName(entry.name, entry.id, duplicateName),
+      sessionName,
       body.repositoryId,
       repository.relativePath,
       repository.realPath,
@@ -470,6 +472,14 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     if (error instanceof ApiError) {
       await reply.code(error.statusCode).send({
         error: { code: error.code, message: error.message, requestId: request.id },
+      });
+      return;
+    }
+    const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error
+      && typeof error.statusCode === 'number' ? error.statusCode : null;
+    if (statusCode && statusCode >= 400 && statusCode < 500) {
+      await reply.code(statusCode).send({
+        error: { code: 'INVALID_REQUEST', message: 'Request validation failed', requestId: request.id },
       });
       return;
     }

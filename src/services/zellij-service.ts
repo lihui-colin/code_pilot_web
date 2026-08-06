@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import type { FastifyBaseLogger } from 'fastify';
 import type { SessionInfo } from '../domain/types.js';
 import { ApiError } from '../errors.js';
+import { withoutZellijEnvironment } from './zellij-environment.js';
 
 const execFileAsync = promisify(execFile);
 export const SESSION_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
@@ -35,17 +36,13 @@ export class ExecFileZellijAdapter implements ZellijAdapter {
   constructor(private readonly executablePath = 'zellij') {}
 
   async listSessions(): Promise<string> {
-    const env = { ...process.env };
-    for (const name of Object.keys(env)) {
-      if (name === 'ZELLIJ' || name.startsWith('ZELLIJ_')) delete env[name];
-    }
     try {
       const { stdout } = await execFileAsync(this.executablePath, ['list-sessions', '--short'], {
         encoding: 'utf8',
         timeout: 5_000,
         maxBuffer: 1024 * 1024,
         shell: false,
-        env,
+        env: withoutZellijEnvironment(process.env),
       });
       return stdout;
     } catch (error) {
@@ -55,31 +52,23 @@ export class ExecFileZellijAdapter implements ZellijAdapter {
   }
 
   async createSession(arguments_: string[], cwd: string): Promise<void> {
-    const env = { ...process.env };
-    for (const name of Object.keys(env)) {
-      if (name === 'ZELLIJ' || name.startsWith('ZELLIJ_')) delete env[name];
-    }
     await execFileAsync(this.executablePath, arguments_, {
       cwd,
       encoding: 'utf8',
       timeout: 15_000,
       maxBuffer: 1024 * 1024,
       shell: false,
-      env,
+      env: withoutZellijEnvironment(process.env),
     });
   }
 
   async deleteSession(arguments_: string[]): Promise<void> {
-    const env = { ...process.env };
-    for (const name of Object.keys(env)) {
-      if (name === 'ZELLIJ' || name.startsWith('ZELLIJ_')) delete env[name];
-    }
     await execFileAsync(this.executablePath, arguments_, {
       encoding: 'utf8',
       timeout: 15_000,
       maxBuffer: 1024 * 1024,
       shell: false,
-      env,
+      env: withoutZellijEnvironment(process.env),
     });
   }
 }
@@ -92,6 +81,23 @@ export function repositorySessionName(repositoryName: string, repositoryId: stri
   if (!duplicateName) return baseName;
   const suffix = repositoryId.slice(-8);
   return `${baseName.slice(0, 55)}-${suffix}`;
+}
+
+export function repositorySessionNames(
+  repositories: readonly { id: string; name: string }[],
+): ReadonlyMap<string, string> {
+  const baseNameCounts = new Map<string, number>();
+  for (const repository of repositories) {
+    const baseName = repositorySessionName(repository.name, repository.id);
+    baseNameCounts.set(baseName, (baseNameCounts.get(baseName) ?? 0) + 1);
+  }
+  return new Map(repositories.map(repository => {
+    const baseName = repositorySessionName(repository.name, repository.id);
+    return [
+      repository.id,
+      repositorySessionName(repository.name, repository.id, (baseNameCounts.get(baseName) ?? 0) > 1),
+    ];
+  }));
 }
 
 export function parseSessionNames(output: string, warn: (line: string) => void = () => undefined): string[] {

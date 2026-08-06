@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isNoActiveSessionsError,
   repositorySessionName,
+  repositorySessionNames,
   ZellijService,
   parseSessionNames,
   type ZellijAdapter,
@@ -41,6 +42,21 @@ describe('ZellijService', () => {
   it('derives a stable Session name from the opaque repository ID', () => {
     expect(repositorySessionName('flash-attention', `dir_${'a'.repeat(43)}`)).toBe('flash-attention');
     expect(repositorySessionName('project', `dir_${'a'.repeat(35)}12345678`, true)).toBe('project-12345678');
+  });
+
+  it('adds stable suffixes only when repository base names collide', () => {
+    const uniqueId = `dir_${'a'.repeat(43)}`;
+    const firstDuplicateId = `dir_${'b'.repeat(35)}11111111`;
+    const secondDuplicateId = `dir_${'c'.repeat(35)}22222222`;
+    expect(repositorySessionNames([
+      { id: uniqueId, name: 'unique' },
+      { id: firstDuplicateId, name: 'same name' },
+      { id: secondDuplicateId, name: 'same-name' },
+    ])).toEqual(new Map([
+      [uniqueId, 'unique'],
+      [firstDuplicateId, 'same-name-11111111'],
+      [secondDuplicateId, 'same-name-22222222'],
+    ]));
   });
 
   it('merges managed metadata and creates server-owned web URLs', async () => {

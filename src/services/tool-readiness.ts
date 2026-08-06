@@ -24,9 +24,11 @@ export async function checkToolReadiness(
   directoryIdSecretAvailable: boolean,
   zellijExecutablePath = 'zellij',
   codeViewerExecutablePath = 'code-viewer',
+  stateAvailable = true,
 ): Promise<ReadinessResult> {
   const checks: ReadinessChecks = {
     workspaceRoot: true,
+    state: stateAvailable,
     directoryIdSecret: directoryIdSecretAvailable,
     node: process.versions.node.startsWith('26.'),
     zellij: await versionMatches(zellijExecutablePath, 'zellij 0.44.3', withoutZellijEnvironment(process.env)),
