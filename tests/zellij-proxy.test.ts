@@ -165,6 +165,7 @@ describe('Zellij Web same-origin proxy', () => {
       expect(htmlBody).toContain('<base href="/zellij/" />');
       expect(htmlBody).toContain('id="codepilot-zellij-shortcuts"');
       expect(htmlBody).toContain('data-expanded="false"');
+      expect(htmlBody).toContain('data-idle="false"');
       expect(htmlBody).toContain('data-sequence="16,110" data-hint="Ctrl+P N"');
       expect(htmlBody).toContain('data-sequence="16,120" data-hint="Ctrl+P X"');
       expect(htmlBody).toContain('data-sequence="3" data-hint="Ctrl+C"');
@@ -183,6 +184,8 @@ describe('Zellij Web same-origin proxy', () => {
       const shortcutScript = await shortcutScriptResponse.text();
       expect(shortcutScriptResponse.headers.get('content-type')).toContain('application/javascript');
       expect(shortcutScript).toContain('window.__zjImeBypass.sendFn');
+      expect(shortcutScript).toContain("toolbar.dataset.idle = 'true'");
+      expect(shortcutScript).toContain('}, 3000)');
       const dom = new JSDOM(htmlBody, { runScripts: 'outside-only' });
       const sentSequences: string[] = [];
       Object.assign(dom.window, { __zjImeBypass: { sendFn: (sequence: string) => sentSequences.push(sequence) } });
@@ -204,10 +207,15 @@ describe('Zellij Web same-origin proxy', () => {
       dom.window.document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
       expect(toolbar?.getAttribute('data-expanded')).toBe('false');
       expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      toolbar!.dataset.idle = 'true';
+      dom.window.document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+      expect(toolbar?.getAttribute('data-idle')).toBe('true');
       clickToggle();
       const shortcut = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="16,110"]');
-      shortcut?.click();
+      terminalInput?.focus();
       expect(dom.window.document.activeElement).toBe(terminalInput);
+      shortcut?.click();
+      expect(dom.window.document.activeElement).not.toBe(terminalInput);
       expect(sentSequences).toEqual(['\x10', 'n']);
       expect(dom.window.document.querySelector('#codepilot-zellij-shortcuts')?.getAttribute('data-expanded')).toBe('false');
       expect(toggle?.getAttribute('aria-expanded')).toBe('false');

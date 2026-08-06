@@ -115,7 +115,7 @@
 8. Session URL 使用主服务同源 `/zellij/open/<session>`，不包含 Zellij 上游端口；打开时由管理服务使用服务端 Token 登录 localhost 上游，转发认证 Cookie 并重定向到 `/zellij/<session>`，Token 不出现在浏览器 URL、HTML 或响应正文中。
 9. Zellij Web 只监听 localhost；入口 HTML 的 base 被改写为 `/zellij/`，登录 HTTP 和终端 WebSocket 均通过主服务代理。
 10. Zellij `0.44.3` 已知静态资源返回一天的私有 immutable 缓存、版本化弱 ETag 和 gzip；匹配 `If-None-Match` 时直接返回 `304` 且不请求上游。HTML、登录/API 和 WebSocket 不使用该静态缓存策略。
-11. 桌面和移动浏览器的 Zellij 入口都显示右下角圆形浮动快捷键盘；收起时不占用整行或缩短终端高度，展开时仅有 `Ctrl+P N` 和 `Ctrl+P X` 两个圆形按钮沿浮动按钮上方呈环状展开。两个按钮必须按顺序写入两段固定序列，并在发送后自动收起快捷键盘、同步恢复折叠状态，例如 `Ctrl+P N` 写入 `0x10` 后写入 ASCII `n`。
+11. 桌面和移动浏览器的 Zellij 入口都显示圆形浮动快捷键盘；收起时不占用整行或缩短终端高度，闲置 3 秒后自动缩进最近的屏幕边缘、隐藏球体主体并仅保留可点击圆弧，交互时恢复完整按钮；浮球贴边后点击页面其他区域不得将其唤醒。展开时仅有 `Ctrl+P N` 和 `Ctrl+P X` 两个圆形按钮沿浮动按钮上方呈环状展开。两个按钮必须按顺序写入两段固定序列，并在发送后自动收起快捷键盘、同步恢复折叠状态，例如 `Ctrl+P N` 写入 `0x10` 后写入 ASCII `n`；桌面和触摸操作都不得主动聚焦终端或其他可编辑输入，拖动按钮不得触发页面平移，并按动画帧合并位置更新。
 12. 防火墙只需公开主服务端口，Zellij Web、code-viewer 和 OpenVSCode 端口从外部不可访问。
 13. Session 表格默认隐藏；Workspace 管理区的“会话列表”按钮打开弹窗，弹窗可通过关闭按钮、遮罩和 Esc 关闭，并在打开或成功删除 Session 后自动关闭。
 
