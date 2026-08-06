@@ -193,7 +193,7 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     const sequence = button.dataset.sequence;
     if (sequence) {
       for (const value of sequence.split(',')) sendSequence(String.fromCharCode(Number(value)));
-      setExpanded(false);
+      if (button.dataset.keepExpanded !== 'true') setExpanded(false);
     }
   });
   document.addEventListener('pointerdown', event => {
@@ -208,7 +208,7 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     const rect = toolbar.getBoundingClientRect();
     placeToolbar(rect.left, rect.top, false);
   });
-  scheduleIdle();
+  toolbar.dataset.idle = 'true';
 })();`;
 const ZELLIJ_SHORTCUTS = `
 <style id="codepilot-zellij-shortcuts-style">
@@ -222,17 +222,30 @@ const ZELLIJ_SHORTCUTS = `
   #codepilot-zellij-shortcuts .codepilot-ring-action::after { content: attr(data-hint); position: absolute; top: calc(100% + .18rem); color: #b7cbc5; font: 600 .58rem ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action { opacity: 1; }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(2) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-upper-x)), calc(-1 * var(--shortcut-upper-y))) scale(1); }
-  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(3) { transform: translate(calc(var(--shortcut-x) * 4rem), 0) scale(1); }
-  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(4) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-lower-x)), var(--shortcut-lower-y)) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(3) { transform: translate(calc(var(--shortcut-x) * 3.86rem), -1.04rem) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(4) { transform: translate(calc(var(--shortcut-x) * 3.86rem), 1.04rem) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(5) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-lower-x)), var(--shortcut-lower-y)) scale(1); }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-shortcut-toggle { opacity: 1; transform: rotate(45deg); }
 </style>
-<div id="codepilot-zellij-shortcuts" role="toolbar" aria-label="终端快捷键盘" data-expanded="false" data-idle="false">
+<div id="codepilot-zellij-shortcuts" role="toolbar" aria-label="终端快捷键盘" data-expanded="false" data-idle="true">
   <button type="button" tabindex="-1" class="codepilot-shortcut-toggle" aria-label="展开快捷键盘" aria-expanded="false">+</button>
   <button type="button" tabindex="-1" class="codepilot-ring-action" data-sequence="16,110" data-hint="Ctrl+P N" aria-label="发送 Ctrl+P N">N</button>
   <button type="button" tabindex="-1" class="codepilot-ring-action" data-sequence="16,120" data-hint="Ctrl+P X" aria-label="发送 Ctrl+P X">X</button>
   <button type="button" tabindex="-1" class="codepilot-ring-action" data-sequence="3" data-hint="Ctrl+C" aria-label="发送 Ctrl+C">C</button>
+  <button type="button" tabindex="-1" class="codepilot-ring-action" data-sequence="9" data-keep-expanded="true" data-hint="Tab" aria-label="发送 Tab">Tab</button>
 </div>
 <script src="${ZELLIJ_SHORTCUTS_SCRIPT_PATH}"></script>`;
+
+function viewerLaunchHtml(repositoryId: string): string {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>正在打开 code-viewer</title></head>
+<body style="margin:0;display:grid;min-height:100vh;place-items:center;color:#d7fff3;background:#07110f;font:16px system-ui,sans-serif">
+<p id="status">正在启动 code-viewer…</p>
+<script>(()=>{const repositoryId=${JSON.stringify(repositoryId)};fetch('/api/viewers',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({repositoryId})}).then(async response=>{if(!response.ok)throw new Error();return response.json()}).then(viewer=>{if(typeof viewer.webUrl!=='string'||!viewer.webUrl)throw new Error();window.location.replace(viewer.webUrl)}).catch(()=>{document.getElementById('status').textContent='code-viewer 启动失败，请关闭此页面后重试。'})})();</script>
+</body>
+</html>`;
+}
 
 function zellijWebAssetEtag(pathname: string): string | null {
   const match = /^\/zellij\/assets\/([A-Za-z0-9._-]+)$/u.exec(pathname);
@@ -404,6 +417,13 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     .type('application/javascript; charset=utf-8')
     .header('cache-control', 'no-cache')
     .send(ZELLIJ_SHORTCUTS_SCRIPT));
+  app.get('/viewer-launch/:repositoryId', async (request, reply) => {
+    const params = repositoryParamsSchema.parse(request.params);
+    return reply
+      .type('text/html; charset=utf-8')
+      .header('cache-control', 'no-store')
+      .send(viewerLaunchHtml(params.repositoryId));
+  });
   const zellijProxyUpstream = dependencies.zellijWebUpstreamUrl ?? `https://127.0.0.1:${config.zellijWebPort}`;
   const zellijBrowserCookiePrefix = zellijCookiePrefix(config.publicBaseUrl);
   await app.register(fastifyHttpProxy, {

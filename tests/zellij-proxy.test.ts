@@ -165,19 +165,22 @@ describe('Zellij Web same-origin proxy', () => {
       expect(htmlBody).toContain('<base href="/zellij/" />');
       expect(htmlBody).toContain('id="codepilot-zellij-shortcuts"');
       expect(htmlBody).toContain('data-expanded="false"');
-      expect(htmlBody).toContain('data-idle="false"');
+      expect(htmlBody).toContain('data-idle="true"');
       expect(htmlBody).toContain('data-sequence="16,110" data-hint="Ctrl+P N"');
       expect(htmlBody).toContain('data-sequence="16,120" data-hint="Ctrl+P X"');
       expect(htmlBody).toContain('data-sequence="3" data-hint="Ctrl+C"');
+      expect(htmlBody).toContain('data-sequence="9" data-keep-expanded="true" data-hint="Tab"');
       expect(htmlBody).not.toContain('Ctrl+O D');
-      expect(htmlBody.match(/data-sequence=/gu)).toHaveLength(3);
+      expect(htmlBody.match(/data-sequence=/gu)).toHaveLength(4);
       expect(htmlBody).not.toContain('#terminal { height: calc');
       expect(htmlBody).toContain('border-radius: 50%');
       expect(htmlBody).toContain('0 .75rem 1.6rem rgba(0, 0, 0, .42)');
       expect(htmlBody).toContain('inset 0 -.16rem .22rem rgba(15, 92, 70, .3)');
       expect(htmlBody).toContain('calc(-1 * var(--shortcut-upper-y))');
-      expect(htmlBody).toContain('translate(calc(var(--shortcut-x) * 4rem), 0)');
+      expect(htmlBody).toContain('translate(calc(var(--shortcut-x) * 3.86rem), -1.04rem)');
+      expect(htmlBody).toContain('translate(calc(var(--shortcut-x) * 3.86rem), 1.04rem)');
       expect(htmlBody).toContain('var(--shortcut-lower-y)) scale(1)');
+      expect(htmlBody).not.toContain('7.4rem');
       expect(htmlBody).not.toContain('@media');
       expect(htmlBody).toContain('<script src="/codepilot-zellij-shortcuts.js"></script>');
       const shortcutScriptResponse = await fetch(`http://127.0.0.1:${appPort}/codepilot-zellij-shortcuts.js`);
@@ -224,6 +227,12 @@ describe('Zellij Web same-origin proxy', () => {
       const interrupt = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="3"]');
       interrupt?.click();
       expect(sentSequences).toEqual(['\x10', 'n', '\x03']);
+      clickToggle();
+      const tab = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="9"]');
+      tab?.click();
+      tab?.click();
+      expect(sentSequences).toEqual(['\x10', 'n', '\x03', '\t', '\t']);
+      expect(toolbar?.getAttribute('data-expanded')).toBe('true');
       Object.defineProperty(toolbar, 'offsetWidth', { configurable: true, value: 45 });
       Object.defineProperty(toolbar, 'offsetHeight', { configurable: true, value: 45 });
       toolbar!.getBoundingClientRect = () => {
