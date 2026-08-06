@@ -63,10 +63,38 @@ const ZELLIJ_SHORTCUTS_SCRIPT_PATH = '/codepilot-zellij-shortcuts.js';
 const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   const toolbar = document.getElementById('codepilot-zellij-shortcuts');
   if (!toolbar) return;
+  const storageKey = 'codepilot-zellij-shortcuts-position';
+  const edgeGap = 8;
+  let dragState = null;
+  let suppressToggleClick = false;
   const terminalInput = () => document.querySelector('.xterm-helper-textarea, textarea');
   const sendSequence = sequence => {
     const sendFunction = window.__zjImeBypass && window.__zjImeBypass.sendFn;
     if (typeof sendFunction === 'function') sendFunction(sequence);
+  };
+  const placeToolbar = (left, top, persist) => {
+    const width = toolbar.offsetWidth || 45;
+    const height = toolbar.offsetHeight || 45;
+    const radius = 64;
+    const boundedLeft = Math.max(edgeGap, Math.min(left, window.innerWidth - width - edgeGap));
+    const boundedTop = Math.max(edgeGap, Math.min(top, window.innerHeight - height - edgeGap));
+    const idealArcY = radius / Math.sqrt(2);
+    const upperArcY = Math.min(idealArcY, Math.max(0, boundedTop - edgeGap));
+    const lowerArcY = Math.min(idealArcY, Math.max(0, window.innerHeight - boundedTop - height - edgeGap));
+    const upperArcX = Math.sqrt(radius * radius - upperArcY * upperArcY);
+    const lowerArcX = Math.sqrt(radius * radius - lowerArcY * lowerArcY);
+    toolbar.style.left = boundedLeft + 'px';
+    toolbar.style.top = boundedTop + 'px';
+    toolbar.style.right = 'auto';
+    toolbar.style.bottom = 'auto';
+    toolbar.style.setProperty('--shortcut-x', boundedLeft + width / 2 < window.innerWidth / 2 ? '1' : '-1');
+    toolbar.style.setProperty('--shortcut-upper-x', Math.round(upperArcX * 100) / 100 + 'px');
+    toolbar.style.setProperty('--shortcut-upper-y', Math.round(upperArcY * 100) / 100 + 'px');
+    toolbar.style.setProperty('--shortcut-lower-x', Math.round(lowerArcX * 100) / 100 + 'px');
+    toolbar.style.setProperty('--shortcut-lower-y', Math.round(lowerArcY * 100) / 100 + 'px');
+    if (persist) {
+      try { window.localStorage.setItem(storageKey, JSON.stringify({ left: boundedLeft, top: boundedTop })); } catch {}
+    }
   };
   const setExpanded = expanded => {
     toolbar.dataset.expanded = String(expanded);
@@ -76,11 +104,47 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
       toggle.setAttribute('aria-expanded', String(expanded));
     }
   };
-  toolbar.addEventListener('pointerdown', event => event.preventDefault());
+  const stopDragging = event => {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    if (dragState.moved) {
+      suppressToggleClick = true;
+      const rect = toolbar.getBoundingClientRect();
+      placeToolbar(rect.left, rect.top, true);
+    }
+    dragState = null;
+    window.removeEventListener('pointermove', moveToolbar);
+    window.removeEventListener('pointerup', stopDragging);
+    window.removeEventListener('pointercancel', stopDragging);
+  };
+  const moveToolbar = event => {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    const deltaX = event.clientX - dragState.pointerX;
+    const deltaY = event.clientY - dragState.pointerY;
+    if (!dragState.moved && Math.hypot(deltaX, deltaY) < 5) return;
+    dragState.moved = true;
+    placeToolbar(dragState.left + deltaX, dragState.top + deltaY, false);
+  };
+  toolbar.addEventListener('pointerdown', event => {
+    const button = event.target instanceof Element ? event.target.closest('button') : null;
+    if (!(button instanceof HTMLButtonElement)) return;
+    event.preventDefault();
+    if (!button.classList.contains('codepilot-shortcut-toggle')) return;
+    const rect = toolbar.getBoundingClientRect();
+    dragState = { pointerId: event.pointerId, pointerX: event.clientX, pointerY: event.clientY, left: rect.left, top: rect.top, moved: false };
+    setExpanded(false);
+    button.setPointerCapture?.(event.pointerId);
+    window.addEventListener('pointermove', moveToolbar);
+    window.addEventListener('pointerup', stopDragging);
+    window.addEventListener('pointercancel', stopDragging);
+  });
   toolbar.addEventListener('click', event => {
     const button = event.target instanceof Element ? event.target.closest('button') : null;
     if (!(button instanceof HTMLButtonElement)) return;
     if (button.classList.contains('codepilot-shortcut-toggle')) {
+      if (suppressToggleClick) {
+        suppressToggleClick = false;
+        return;
+      }
       setExpanded(toolbar.dataset.expanded !== 'true');
       return;
     }
@@ -92,24 +156,34 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
       setExpanded(false);
     }
   });
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(storageKey) || 'null');
+    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) placeToolbar(saved.left, saved.top, false);
+  } catch {}
+  window.addEventListener('resize', () => {
+    const rect = toolbar.getBoundingClientRect();
+    placeToolbar(rect.left, rect.top, false);
+  });
 })();`;
 const ZELLIJ_SHORTCUTS = `
 <style id="codepilot-zellij-shortcuts-style">
-  #codepilot-zellij-shortcuts { position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: 2.8rem; height: 2.8rem; pointer-events: none; }
+  #codepilot-zellij-shortcuts { --shortcut-x: -1; --shortcut-upper-x: 2.83rem; --shortcut-upper-y: 2.83rem; --shortcut-lower-x: 2.83rem; --shortcut-lower-y: 2.83rem; position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: 2.8rem; height: 2.8rem; pointer-events: none; }
   #codepilot-zellij-shortcuts button { position: absolute; display: grid; place-items: center; width: 2.8rem; height: 2.8rem; padding: 0; border: 1px solid #617a72; border-radius: 50%; color: #eff8f5; background: rgba(27, 44, 39, .97); box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .35); font: 700 .78rem ui-monospace, SFMono-Regular, Consolas, monospace; touch-action: manipulation; pointer-events: auto; transition: transform .18s ease, opacity .14s ease, background .14s ease; }
   #codepilot-zellij-shortcuts button:active { background: #45635a; }
   #codepilot-zellij-shortcuts .codepilot-shortcut-toggle { right: 0; bottom: 0; z-index: 2; color: #07110f; border-color: #73e1bd; background: #73e1bd; font-size: 1.15rem; }
   #codepilot-zellij-shortcuts .codepilot-ring-action { right: 0; bottom: 0; opacity: 0; transform: translate(0, 0) scale(.72); }
   #codepilot-zellij-shortcuts .codepilot-ring-action::after { content: attr(data-hint); position: absolute; top: calc(100% + .18rem); color: #b7cbc5; font: 600 .58rem ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action { opacity: 1; }
-  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(2) { transform: translate(-3.6rem, -1.4rem) scale(1); }
-  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(3) { transform: translate(-1.4rem, -3.6rem) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(2) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-upper-x)), calc(-1 * var(--shortcut-upper-y))) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(3) { transform: translate(calc(var(--shortcut-x) * 4rem), 0) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(4) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-lower-x)), var(--shortcut-lower-y)) scale(1); }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-shortcut-toggle { transform: rotate(45deg); }
 </style>
 <div id="codepilot-zellij-shortcuts" role="toolbar" aria-label="终端快捷键盘" data-expanded="false">
   <button type="button" class="codepilot-shortcut-toggle" aria-label="展开快捷键盘" aria-expanded="false">+</button>
   <button type="button" class="codepilot-ring-action" data-sequence="16,110" data-hint="Ctrl+P N" aria-label="发送 Ctrl+P N">N</button>
   <button type="button" class="codepilot-ring-action" data-sequence="16,120" data-hint="Ctrl+P X" aria-label="发送 Ctrl+P X">X</button>
+  <button type="button" class="codepilot-ring-action" data-sequence="3" data-hint="Ctrl+C" aria-label="发送 Ctrl+C">C</button>
 </div>
 <script src="${ZELLIJ_SHORTCUTS_SCRIPT_PATH}"></script>`;
 
