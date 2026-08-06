@@ -188,9 +188,21 @@ describe('Zellij Web same-origin proxy', () => {
       const terminalInput = dom.window.document.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
       const toolbar = dom.window.document.querySelector<HTMLElement>('#codepilot-zellij-shortcuts');
       const toggle = dom.window.document.querySelector<HTMLButtonElement>('.codepilot-shortcut-toggle');
-      toggle?.click();
+      const clickToggle = () => {
+        toggle?.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+        toggle?.click();
+      };
+      clickToggle();
       expect(dom.window.document.querySelector('#codepilot-zellij-shortcuts')?.getAttribute('data-expanded')).toBe('true');
       expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+      clickToggle();
+      expect(toolbar?.getAttribute('data-expanded')).toBe('false');
+      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      clickToggle();
+      dom.window.document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+      expect(toolbar?.getAttribute('data-expanded')).toBe('false');
+      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      clickToggle();
       const shortcut = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="16,110"]');
       shortcut?.click();
       expect(dom.window.document.activeElement).toBe(terminalInput);
@@ -198,7 +210,7 @@ describe('Zellij Web same-origin proxy', () => {
       expect(dom.window.document.querySelector('#codepilot-zellij-shortcuts')?.getAttribute('data-expanded')).toBe('false');
       expect(toggle?.getAttribute('aria-expanded')).toBe('false');
       expect(toggle?.getAttribute('aria-label')).toBe('展开快捷键盘');
-      toggle?.click();
+      clickToggle();
       const interrupt = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="3"]');
       interrupt?.click();
       expect(sentSequences).toEqual(['\x10', 'n', '\x03']);

@@ -430,7 +430,7 @@ Zellij Web 必须只监听 `127.0.0.1:<zellij-port>`。浏览器入口固定为 
 
 管理服务必须移除 `/zellij` 前缀并代理 Zellij Web 的普通 HTTP、登录请求和 WebSocket Upgrade。Zellij `0.44.3` 入口 HTML 固定包含 `<base href="/" />`，管理服务只对合法入口路径 `/zellij/` 和 `/zellij/<session-name>` 的 HTML 响应把它改为 `<base href="/zellij/" />`；静态资源、API 和 WebSocket 响应保持流式转发，不修改正文。入口 HTML 最大允许 1 MiB，超过限制时代理失败。
 
-合法入口 HTML 还必须在桌面和移动浏览器中注入浮动终端快捷键盘。收起时只显示右下角圆形浮动按钮，不改变终端容器尺寸；展开时，固定的 `Ctrl+P N` 和 `Ctrl+P X` 两个圆形操作按钮沿浮动按钮上方呈环状展开。前端不得提交自定义按键、命令或参数。用户点击快捷键时，页面恢复 Zellij xterm 输入焦点，通过 Zellij Web 已建立的终端发送函数按顺序写入对应的固定控制序列，并在发送后自动收起快捷键盘；例如 `Ctrl+P X` 依次写入 `0x10` 和 ASCII `x`。浮动控件必须位于浏览器安全区内，并且收起时不得占用整行或缩短终端高度。
+合法入口 HTML 还必须在桌面和移动浏览器中注入浮动终端快捷键盘。收起时只显示右下角圆形浮动按钮，不改变终端容器尺寸；展开时，固定的 `Ctrl+P N` 和 `Ctrl+P X` 两个圆形操作按钮沿浮动按钮上方呈环状展开。再次点击浮动按钮或点击浮动控件以外的页面区域时必须自动收起。前端不得提交自定义按键、命令或参数。用户点击快捷键时，页面恢复 Zellij xterm 输入焦点，通过 Zellij Web 已建立的终端发送函数按顺序写入对应的固定控制序列，并在发送后自动收起快捷键盘；例如 `Ctrl+P X` 依次写入 `0x10` 和 ASCII `x`。浮动控件必须位于浏览器安全区内，并且收起时不得占用整行或缩短终端高度。
 
 固定 Zellij `0.44.3` 自带的已知 `/zellij/assets/*` 静态资源必须返回 `Cache-Control: private, max-age=86400, immutable` 和包含版本、文件名的弱 `ETag`。浏览器发送匹配的 `If-None-Match` 时，管理服务必须直接返回 `304`，不得访问 Zellij 上游。客户端声明接受 gzip 时，大于等于 1 KiB 的可压缩响应使用 gzip 传输并设置正确的 `Content-Encoding` 与 `Vary`；请求正文解压必须保持关闭。入口 HTML、登录/API 响应和 WebSocket 不得使用静态资源长期缓存策略。
 

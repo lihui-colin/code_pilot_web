@@ -121,6 +121,7 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     const deltaX = event.clientX - dragState.pointerX;
     const deltaY = event.clientY - dragState.pointerY;
     if (!dragState.moved && Math.hypot(deltaX, deltaY) < 5) return;
+    if (!dragState.moved) setExpanded(false);
     dragState.moved = true;
     placeToolbar(dragState.left + deltaX, dragState.top + deltaY, false);
   };
@@ -131,7 +132,6 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     if (!button.classList.contains('codepilot-shortcut-toggle')) return;
     const rect = toolbar.getBoundingClientRect();
     dragState = { pointerId: event.pointerId, pointerX: event.clientX, pointerY: event.clientY, left: rect.left, top: rect.top, moved: false };
-    setExpanded(false);
     button.setPointerCapture?.(event.pointerId);
     window.addEventListener('pointermove', moveToolbar);
     window.addEventListener('pointerup', stopDragging);
@@ -155,6 +155,10 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
       for (const value of sequence.split(',')) sendSequence(String.fromCharCode(Number(value)));
       setExpanded(false);
     }
+  });
+  document.addEventListener('pointerdown', event => {
+    const target = event.target;
+    if (target instanceof Node && !toolbar.contains(target)) setExpanded(false);
   });
   try {
     const saved = JSON.parse(window.localStorage.getItem(storageKey) || 'null');
