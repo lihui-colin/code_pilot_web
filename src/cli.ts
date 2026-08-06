@@ -17,6 +17,7 @@ const execFileAsync = promisify(execFile);
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const dataDirectory = path.join(projectRoot, 'data');
 const serverFile = path.join(projectRoot, 'dist/codepilot-server.js');
+const legacyServerFile = path.join(projectRoot, 'dist/server.js');
 const serviceRuntimeFile = path.join(projectRoot, 'scripts/service-runtime.mjs');
 const pidFile = path.join(dataDirectory, 'codepilot-web.pid');
 const runtimeFile = path.join(dataDirectory, 'service-runtime.json');
@@ -259,9 +260,13 @@ async function listenerPids(port: number): Promise<number[]> {
 }
 
 function matchesManagementArguments(arguments_: readonly string[], metadata: RuntimeMetadata): boolean {
-  return arguments_.includes(serverFile)
-    && hasOption(arguments_, '--config', metadata.configFile)
-    && hasOption(arguments_, '--workspace', metadata.workspaceRoot);
+  return hasOption(arguments_, '--config', metadata.configFile)
+    && (
+      (arguments_.includes(serverFile)
+        && hasOption(arguments_, '--workspace', metadata.workspaceRoot))
+      || (arguments_.includes(legacyServerFile)
+        && hasOption(arguments_, '--workspace-root', metadata.workspaceRoot))
+    );
 }
 
 async function isManagementProcess(pid: number, metadata: RuntimeMetadata): Promise<boolean> {

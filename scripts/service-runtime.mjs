@@ -121,12 +121,22 @@ function hasOption(arguments_, option, value) {
   return index >= 0 && arguments_[index + 1] === value;
 }
 
+export function matchesManagementArguments(arguments_, runtime) {
+  const currentEntry = path.join(projectRoot, 'dist/codepilot-server.js');
+  const legacyEntry = path.join(projectRoot, 'dist/server.js');
+  return hasOption(arguments_, '--config', runtime.configFile)
+    && (
+      (arguments_.includes(currentEntry)
+        && hasOption(arguments_, '--workspace', runtime.workspaceRoot))
+      || (arguments_.includes(legacyEntry)
+        && hasOption(arguments_, '--workspace-root', runtime.workspaceRoot))
+    );
+}
+
 async function processKind(pid, runtime) {
   const arguments_ = await commandArguments(pid);
   if (arguments_.length === 0) return null;
-  const managementEntry = path.join(projectRoot, 'dist/codepilot-server.js');
-  if (arguments_.includes(managementEntry)
-    && hasOption(arguments_, '--config', runtime.configFile)) return 'management';
+  if (matchesManagementArguments(arguments_, runtime)) return 'management';
 
   const viewerEntry = path.join(projectRoot, 'node_modules/@youtyan/code-viewer/dist/code-viewer.js');
   if (arguments_.includes(viewerEntry)
@@ -390,7 +400,9 @@ async function main() {
   else await ensureSupport(runtime);
 }
 
-main().catch(error => {
-  process.stderr.write(`Service lifecycle failed: ${error instanceof Error ? error.message : 'unknown error'}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    process.stderr.write(`Service lifecycle failed: ${error instanceof Error ? error.message : 'unknown error'}\n`);
+    process.exitCode = 1;
+  });
+}
