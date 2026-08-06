@@ -8,19 +8,19 @@ CodePilot Web 用于在浏览器中管理 workspace 下的 Git 仓库、Zellij S
 
 ### 步骤 1：安装依赖
 
-安装 NVM、Node.js 26 和 npm 项目依赖，并注册 `codepilot-server` 命令：
+使用当前终端默认的 Node.js 和 npm 安装项目依赖，并通过 `npm link` 注册 `codepilot-server` 命令：
 
 ```bash
 source ./scripts/install_deps.sh
 ```
 
-使用 `source` 执行后，脚本会把 Node.js 26 设置为 NVM 默认版本，并在当前终端加载 Node.js 26 和 `codepilot-server`。也可以直接执行安装脚本：
+脚本不会安装 NVM、切换 Node.js 版本或修改 NVM 默认版本。执行前请确保当前终端中的 `node` 和 `npm` 可用。使用 `source` 执行后，`codepilot-server` 会在当前终端立即生效。也可以直接执行安装脚本：
 
 ```bash
 ./scripts/install_deps.sh
 ```
 
-直接执行不会修改当前终端环境，新终端会自动使用设置好的 NVM 默认版本。
+直接执行不会修改当前终端环境；`codepilot-server` 会注册到当前 Node.js 对应的 npm 全局目录。
 
 ### 步骤 2：初始化配置
 

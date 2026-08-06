@@ -12,10 +12,6 @@ fi
 if [[ "$sourced" == true ]]; then
     script_file="$(cd "$(dirname "$source_file")" && pwd)/$(basename "$source_file")"
     CODEPILOT_ACTIVATE_PARENT=1 bash "$script_file" "$@" || return
-    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-    # shellcheck source=/dev/null
-    . "$NVM_DIR/nvm.sh"
-    nvm use 26
     hash -r
     echo "codepilot-server is ready in the current terminal: $(command -v codepilot-server)"
     return
@@ -23,40 +19,31 @@ else
     set -euo pipefail
     
     project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    nvm_version="v0.40.3"
-    node_version="26"
     
     die() {
         echo "Error: $*" >&2
         exit 1
     }
     
-    command -v curl >/dev/null 2>&1 || die "required command is not installed: curl"
+    for command_name in node npm; do
+        command -v "$command_name" >/dev/null 2>&1 \
+        || die "required command is not installed: $command_name"
+    done
     
-    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-    if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
-        echo "Installing nvm $nvm_version..."
-        curl --fail --show-error --silent --location \
-        "https://raw.githubusercontent.com/nvm-sh/nvm/${nvm_version}/install.sh" | bash
-    fi
-    
-    # shellcheck source=/dev/null
-    . "$NVM_DIR/nvm.sh"
-    echo "Installing Node.js $node_version..."
-    nvm install "$node_version"
-    nvm use "$node_version"
-    nvm alias default "$node_version"
-    
+    echo "Using current Node.js $(node --version) and npm $(npm --version)..."
     echo "Installing project dependencies..."
     cd "$project_root"
     npm install
     
     chmod +x "$project_root/scripts/codepilot-server"
     echo "Registering codepilot-server command..."
-    npm link
-    codepilot_server_command="$(command -v codepilot-server || true)"
-    [[ -n "$codepilot_server_command" ]] \
-    || die "codepilot-server was registered but is not available in PATH"
+    rm -f "$HOME/.local/bin/codepilot-server"
+    mkdir -p "$HOME/.npm-global"
+    npm_config_prefix="$HOME/.npm-global" npm link
+    hash -r
+    codepilot_server_command="$HOME/.npm-global/bin/codepilot-server"
+    [[ -x "$codepilot_server_command" ]] \
+    || die "codepilot-server was not registered at $codepilot_server_command"
     
     echo
     echo "Dependency installation complete."
