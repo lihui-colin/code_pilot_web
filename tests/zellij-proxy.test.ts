@@ -172,6 +172,8 @@ describe('Zellij Web same-origin proxy', () => {
       expect(htmlBody.match(/data-sequence=/gu)).toHaveLength(3);
       expect(htmlBody).not.toContain('#terminal { height: calc');
       expect(htmlBody).toContain('border-radius: 50%');
+      expect(htmlBody).toContain('0 .75rem 1.6rem rgba(0, 0, 0, .42)');
+      expect(htmlBody).toContain('inset 0 -.16rem .22rem rgba(15, 92, 70, .3)');
       expect(htmlBody).toContain('calc(-1 * var(--shortcut-upper-y))');
       expect(htmlBody).toContain('translate(calc(var(--shortcut-x) * 4rem), 0)');
       expect(htmlBody).toContain('var(--shortcut-lower-y)) scale(1)');
