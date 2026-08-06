@@ -186,6 +186,8 @@ Session 出现在结果中即为 `running`。MVP 不探测 Session 内 Codex 是
 
 Session URL 由服务端生成。打开入口先由同源管理服务使用服务端保存的 Token 登录 localhost Zellij Web，把上游认证 Cookie 写入浏览器响应，再重定向到实际 Session 页面；Token 不得出现在 URL、HTML 或重定向响应中：
 
+浏览器 Cookie 不按端口隔离。为避免同一主机上不同管理端口或不同容器实例的 Zellij `session_token` 互相覆盖，管理代理必须按 `publicBaseUrl` 端口改写浏览器侧 Cookie 名，并把 Path 收敛为 `/zellij`；转发 HTTP 和 WebSocket 请求到各自 localhost Zellij 上游前，再还原为 Zellij 原始 Cookie 名。不得把其他管理端口的认证 Cookie 转发给当前实例。
+
 ```typescript
 new URL(`${encodeURIComponent(name)}`, `${baseUrl}/open/`).toString()
 ```
@@ -427,6 +429,8 @@ API 和 viewer 代理均不要求应用层登录。上游端口不得监听公�
 Zellij Web 必须只监听 `127.0.0.1:<zellij-port>`。浏览器入口固定为 `<publicBaseUrl>/zellij/<session-name>`，不得返回或跳转到 Zellij Web 上游端口。
 
 管理服务必须移除 `/zellij` 前缀并代理 Zellij Web 的普通 HTTP、登录请求和 WebSocket Upgrade。Zellij `0.44.3` 入口 HTML 固定包含 `<base href="/" />`，管理服务只对合法入口路径 `/zellij/` 和 `/zellij/<session-name>` 的 HTML 响应把它改为 `<base href="/zellij/" />`；静态资源、API 和 WebSocket 响应保持流式转发，不修改正文。入口 HTML 最大允许 1 MiB，超过限制时代理失败。
+
+合法入口 HTML 还必须在桌面和移动浏览器中注入浮动终端快捷键盘。收起时只显示右下角圆形浮动按钮，不改变终端容器尺寸；展开时，固定的 `Ctrl+P N` 和 `Ctrl+P X` 两个圆形操作按钮沿浮动按钮上方呈环状展开。前端不得提交自定义按键、命令或参数。用户点击快捷键时，页面恢复 Zellij xterm 输入焦点，通过 Zellij Web 已建立的终端发送函数按顺序写入对应的固定控制序列，并在发送后自动收起快捷键盘；例如 `Ctrl+P X` 依次写入 `0x10` 和 ASCII `x`。浮动控件必须位于浏览器安全区内，并且收起时不得占用整行或缩短终端高度。
 
 固定 Zellij `0.44.3` 自带的已知 `/zellij/assets/*` 静态资源必须返回 `Cache-Control: private, max-age=86400, immutable` 和包含版本、文件名的弱 `ETag`。浏览器发送匹配的 `If-None-Match` 时，管理服务必须直接返回 `304`，不得访问 Zellij 上游。客户端声明接受 gzip 时，大于等于 1 KiB 的可压缩响应使用 gzip 传输并设置正确的 `Content-Encoding` 与 `Vary`；请求正文解压必须保持关闭。入口 HTML、登录/API 响应和 WebSocket 不得使用静态资源长期缓存策略。
 

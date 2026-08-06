@@ -519,7 +519,7 @@ describe('App', () => {
     await waitFor(() => expect(api.createSession).toHaveBeenCalledWith(`dir_${'a'.repeat(43)}`));
   });
 
-  it('copies the token when opening and can delete an existing repository Session', async () => {
+  it('opens the server-side login URL without copying the token and can delete an existing repository Session', async () => {
     const sessionName = 'codepilot-web';
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
@@ -540,8 +540,7 @@ describe('App', () => {
     expect(link).toHaveAttribute('href', `https://192.0.2.10:8024/zellij/open/${sessionName}`);
     expect(link).toHaveAttribute('target', '_blank');
     fireEvent.click(link);
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('123e4567-e89b-42d3-a456-426614174000'));
-    expect(screen.getByRole('status')).toHaveTextContent('Token 已复制');
+    expect(writeText).not.toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText('codepilot-web 更多操作'));
     fireEvent.click(screen.getByRole('button', { name: '删除 Session' }));
     await waitFor(() => expect(api.deleteSession).toHaveBeenCalledWith(sessionName));

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { request as httpRequest } from 'node:http';
+import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +59,59 @@ const ZELLIJ_WEB_ASSET_NAMES = new Set([
   'xterm.css',
   'xterm.js',
 ]);
+const ZELLIJ_SHORTCUTS_SCRIPT_PATH = '/codepilot-zellij-shortcuts.js';
+const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
+  const toolbar = document.getElementById('codepilot-zellij-shortcuts');
+  if (!toolbar) return;
+  const terminalInput = () => document.querySelector('.xterm-helper-textarea, textarea');
+  const sendSequence = sequence => {
+    const sendFunction = window.__zjImeBypass && window.__zjImeBypass.sendFn;
+    if (typeof sendFunction === 'function') sendFunction(sequence);
+  };
+  const setExpanded = expanded => {
+    toolbar.dataset.expanded = String(expanded);
+    const toggle = toolbar.querySelector('.codepilot-shortcut-toggle');
+    if (toggle instanceof HTMLButtonElement) {
+      toggle.setAttribute('aria-label', expanded ? '收起快捷键盘' : '展开快捷键盘');
+      toggle.setAttribute('aria-expanded', String(expanded));
+    }
+  };
+  toolbar.addEventListener('pointerdown', event => event.preventDefault());
+  toolbar.addEventListener('click', event => {
+    const button = event.target instanceof Element ? event.target.closest('button') : null;
+    if (!(button instanceof HTMLButtonElement)) return;
+    if (button.classList.contains('codepilot-shortcut-toggle')) {
+      setExpanded(toolbar.dataset.expanded !== 'true');
+      return;
+    }
+    const input = terminalInput();
+    if (input instanceof HTMLElement) input.focus({ preventScroll: true });
+    const sequence = button.dataset.sequence;
+    if (sequence) {
+      for (const value of sequence.split(',')) sendSequence(String.fromCharCode(Number(value)));
+      setExpanded(false);
+    }
+  });
+})();`;
+const ZELLIJ_SHORTCUTS = `
+<style id="codepilot-zellij-shortcuts-style">
+  #codepilot-zellij-shortcuts { position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: 2.8rem; height: 2.8rem; pointer-events: none; }
+  #codepilot-zellij-shortcuts button { position: absolute; display: grid; place-items: center; width: 2.8rem; height: 2.8rem; padding: 0; border: 1px solid #617a72; border-radius: 50%; color: #eff8f5; background: rgba(27, 44, 39, .97); box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .35); font: 700 .78rem ui-monospace, SFMono-Regular, Consolas, monospace; touch-action: manipulation; pointer-events: auto; transition: transform .18s ease, opacity .14s ease, background .14s ease; }
+  #codepilot-zellij-shortcuts button:active { background: #45635a; }
+  #codepilot-zellij-shortcuts .codepilot-shortcut-toggle { right: 0; bottom: 0; z-index: 2; color: #07110f; border-color: #73e1bd; background: #73e1bd; font-size: 1.15rem; }
+  #codepilot-zellij-shortcuts .codepilot-ring-action { right: 0; bottom: 0; opacity: 0; transform: translate(0, 0) scale(.72); }
+  #codepilot-zellij-shortcuts .codepilot-ring-action::after { content: attr(data-hint); position: absolute; top: calc(100% + .18rem); color: #b7cbc5; font: 600 .58rem ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action { opacity: 1; }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(2) { transform: translate(-3.6rem, -1.4rem) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(3) { transform: translate(-1.4rem, -3.6rem) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-shortcut-toggle { transform: rotate(45deg); }
+</style>
+<div id="codepilot-zellij-shortcuts" role="toolbar" aria-label="终端快捷键盘" data-expanded="false">
+  <button type="button" class="codepilot-shortcut-toggle" aria-label="展开快捷键盘" aria-expanded="false">+</button>
+  <button type="button" class="codepilot-ring-action" data-sequence="16,110" data-hint="Ctrl+P N" aria-label="发送 Ctrl+P N">N</button>
+  <button type="button" class="codepilot-ring-action" data-sequence="16,120" data-hint="Ctrl+P X" aria-label="发送 Ctrl+P X">X</button>
+</div>
+<script src="${ZELLIJ_SHORTCUTS_SCRIPT_PATH}"></script>`;
 
 function zellijWebAssetEtag(pathname: string): string | null {
   const match = /^\/zellij\/assets\/([A-Za-z0-9._-]+)$/u.exec(pathname);
@@ -74,6 +127,46 @@ function openVSCodeWebUrl(config: AppConfig, repositoryRealPath: string): string
   url.searchParams.set('folder', repositoryRealPath);
   url.hash = '';
   return url.toString();
+}
+
+function zellijCookiePrefix(publicBaseUrl: string): string {
+  const url = new URL(publicBaseUrl);
+  const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+  return `codepilot_zellij_${port}_`;
+}
+
+function rewriteZellijSetCookies(cookies: readonly string[], cookiePrefix: string): string[] {
+  return cookies.map(cookie => {
+    const parts = cookie.split(';');
+    const cookiePair = parts[0];
+    if (!cookiePair) return cookie;
+    const separator = cookiePair.indexOf('=');
+    if (separator <= 0) return cookie;
+    parts[0] = `${cookiePrefix}${cookiePair.slice(0, separator)}${cookiePair.slice(separator)}`;
+    const pathIndex = parts.findIndex(part => /^\s*path=/iu.test(part));
+    if (pathIndex >= 0) parts[pathIndex] = ' Path=/zellij';
+    else parts.push(' Path=/zellij');
+    return parts.join(';');
+  });
+}
+
+function upstreamZellijCookie(cookie: string | undefined, cookiePrefix: string): string | undefined {
+  const translated = cookie?.split(';').map(part => part.trim()).flatMap(part => {
+    const separator = part.indexOf('=');
+    if (separator <= 0) return [];
+    const name = part.slice(0, separator);
+    if (!name.startsWith(cookiePrefix)) return [];
+    return [`${name.slice(cookiePrefix.length)}${part.slice(separator)}`];
+  });
+  return translated?.length ? translated.join('; ') : undefined;
+}
+
+function rewriteZellijRequestHeaders(headers: IncomingHttpHeaders, cookiePrefix: string): IncomingHttpHeaders {
+  const rewritten = { ...headers };
+  const cookie = upstreamZellijCookie(typeof headers.cookie === 'string' ? headers.cookie : undefined, cookiePrefix);
+  if (cookie) rewritten.cookie = cookie;
+  else delete rewritten.cookie;
+  return rewritten;
 }
 
 async function requestZellijWebLogin(destination: string, token: string) {
@@ -104,12 +197,13 @@ async function requestZellijWebLogin(destination: string, token: string) {
   });
 }
 
-async function proxyZellijHtml(destination: string, cookie: string | undefined) {
+async function proxyZellijHtml(destination: string, cookie: string | undefined, cookiePrefix: string) {
   const url = new URL(destination);
   const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
+  const upstreamCookie = upstreamZellijCookie(cookie, cookiePrefix);
   return new Promise<{ statusCode: number; headers: Record<string, string | string[]>; body: string }>((resolve, reject) => {
     const upstream = request(url, {
-      headers: cookie ? { cookie } : undefined,
+      headers: upstreamCookie ? { cookie: upstreamCookie } : undefined,
       rejectUnauthorized: false,
     }, response => {
       const chunks: Buffer[] = [];
@@ -133,7 +227,9 @@ async function proxyZellijHtml(destination: string, cookie: string | undefined) 
         resolve({
           statusCode: response.statusCode ?? 502,
           headers,
-          body: Buffer.concat(chunks).toString('utf8').replace('<base href="/" />', '<base href="/zellij/" />'),
+          body: Buffer.concat(chunks).toString('utf8')
+            .replace('<base href="/" />', '<base href="/zellij/" />')
+            .replace('</body>', `${ZELLIJ_SHORTCUTS}</body>`),
         });
       });
     });
@@ -183,7 +279,12 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     base: `http://127.0.0.1:${config.viewerPortRange.start}`,
     disableRequestLogging: true,
   });
+  app.get(ZELLIJ_SHORTCUTS_SCRIPT_PATH, async (_request, reply) => reply
+    .type('application/javascript; charset=utf-8')
+    .header('cache-control', 'no-cache')
+    .send(ZELLIJ_SHORTCUTS_SCRIPT));
   const zellijProxyUpstream = dependencies.zellijWebUpstreamUrl ?? `https://127.0.0.1:${config.zellijWebPort}`;
+  const zellijBrowserCookiePrefix = zellijCookiePrefix(config.publicBaseUrl);
   await app.register(fastifyHttpProxy, {
     upstream: zellijProxyUpstream,
     prefix: '/zellij',
@@ -191,7 +292,13 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     websocket: true,
     disableRequestLogging: true,
     undici: { connect: { rejectUnauthorized: false } },
-    wsClientOptions: { rejectUnauthorized: false },
+    wsClientOptions: {
+      rejectUnauthorized: false,
+      rewriteRequestHeaders: (headers: IncomingHttpHeaders, request?: { headers?: IncomingHttpHeaders }) => rewriteZellijRequestHeaders(
+        { ...headers, cookie: request?.headers?.cookie },
+        zellijBrowserCookiePrefix,
+      ),
+    },
     preValidation: async (request, reply) => {
       if (request.method !== 'GET') return;
       const pathname = new URL(request.raw.url ?? '/', config.publicBaseUrl).pathname;
@@ -206,17 +313,20 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       }
     },
     replyOptions: {
+      rewriteRequestHeaders: (_request, headers) => rewriteZellijRequestHeaders(headers, zellijBrowserCookiePrefix),
       rewriteHeaders: (headers, request) => {
         const pathname = new URL(request?.raw.url ?? '/', config.publicBaseUrl).pathname;
         const etag = request?.method === 'GET' ? zellijWebAssetEtag(pathname) : null;
-        if (etag) {
-          return {
-            ...headers,
-            'cache-control': ZELLIJ_WEB_ASSET_CACHE_CONTROL,
-            etag,
-          };
+        const rewritten = { ...headers };
+        const setCookie = headers['set-cookie'];
+        if (setCookie) {
+          rewritten['set-cookie'] = rewriteZellijSetCookies(
+            Array.isArray(setCookie) ? setCookie : [setCookie],
+            zellijBrowserCookiePrefix,
+          );
         }
-        return headers;
+        if (etag) Object.assign(rewritten, { 'cache-control': ZELLIJ_WEB_ASSET_CACHE_CONTROL, etag });
+        return rewritten;
       },
     },
     handler: async (request, reply, destination, options) => {
@@ -234,11 +344,15 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
         }
         return reply.code(302).headers({
           location: `/zellij/${encodeURIComponent(loginPath[1])}`,
-          'set-cookie': login.cookies,
+          'set-cookie': rewriteZellijSetCookies(login.cookies, zellijBrowserCookiePrefix),
         }).send();
       }
       if (request.method === 'GET' && (/^\/zellij\/?$/u.test(pathname) || /^\/zellij\/[A-Za-z0-9_-]{1,64}\/?$/u.test(pathname))) {
-        const response = await proxyZellijHtml(new URL(destination, `${zellijProxyUpstream}/`).toString(), request.headers.cookie);
+        const response = await proxyZellijHtml(
+          new URL(destination, `${zellijProxyUpstream}/`).toString(),
+          request.headers.cookie,
+          zellijBrowserCookiePrefix,
+        );
         return reply.code(response.statusCode).headers(response.headers).send(response.body);
       }
       return reply.from(destination, options);

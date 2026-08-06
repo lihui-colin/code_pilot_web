@@ -541,10 +541,7 @@ export function App() {
                             href={session.webUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            onClick={() => {
-                              if (session.repositoryId) void copyToken();
-                              setSessionPanelOpen(false);
-                            }}
+                            onClick={() => setSessionPanelOpen(false)}
                           >
                             打开
                           </a>
@@ -664,7 +661,6 @@ export function App() {
                     href={entry.session.webUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={() => void copyToken()}
                   >
                     打开 Zellij Web
                   </a>
