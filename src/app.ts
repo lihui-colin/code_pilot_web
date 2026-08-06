@@ -69,6 +69,9 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   let dragFrame = 0;
   let pendingDragPoint = null;
   let idleTimer = 0;
+  let toolbarSide = 'right';
+  let toolbarTopRatio = 1;
+  let toolbarScale = 1;
   let suppressToggleClick = false;
   const scheduleFrame = window.requestAnimationFrame?.bind(window) || (callback => window.setTimeout(callback, 16));
   const cancelFrame = window.cancelAnimationFrame?.bind(window) || window.clearTimeout.bind(window);
@@ -86,17 +89,31 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     if (toolbar.dataset.expanded === 'true') return;
     idleTimer = window.setTimeout(() => {
       idleTimer = 0;
-      if (toolbar.dataset.expanded !== 'true' && !dragState) toolbar.dataset.idle = 'true';
+      if (toolbar.dataset.expanded !== 'true' && !dragState) {
+        snapToolbarToEdge(true);
+        toolbar.dataset.idle = 'true';
+      }
     }, 3000);
   };
   const sendSequence = sequence => {
     const sendFunction = window.__zjImeBypass && window.__zjImeBypass.sendFn;
     if (typeof sendFunction === 'function') sendFunction(sequence);
   };
+  const updateToolbarScale = () => {
+    const visualScale = window.visualViewport && Number.isFinite(window.visualViewport.scale)
+      ? window.visualViewport.scale
+      : 1;
+    const screenWidth = window.screen && Number.isFinite(window.screen.width) ? window.screen.width : window.innerWidth;
+    const desktopModeRatio = navigator.maxTouchPoints > 0 && screenWidth > 0 && window.innerWidth > screenWidth * 1.4
+      ? window.innerWidth / screenWidth
+      : 1;
+    toolbarScale = Math.max(1, Math.min(2.5, visualScale < .95 ? 1 / visualScale : desktopModeRatio));
+    toolbar.style.setProperty('--shortcut-scale', String(toolbarScale));
+  };
   const placeToolbar = (left, top, persist) => {
     const width = toolbar.offsetWidth || 45;
     const height = toolbar.offsetHeight || 45;
-    const radius = 96;
+    const radius = 96 * toolbarScale;
     const boundedLeft = Math.max(edgeGap, Math.min(left, window.innerWidth - width - edgeGap));
     const boundedTop = Math.max(edgeGap, Math.min(top, window.innerHeight - height - edgeGap));
     const upperSpace = Math.max(0, boundedTop - edgeGap);
@@ -110,14 +127,25 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     toolbar.style.right = 'auto';
     toolbar.style.bottom = 'auto';
     const direction = boundedLeft + width / 2 < window.innerWidth / 2 ? 1 : -1;
+    const availableHeight = Math.max(1, window.innerHeight - height - edgeGap * 2);
+    toolbarSide = direction === 1 ? 'left' : 'right';
+    toolbarTopRatio = Math.max(0, Math.min(1, (boundedTop - edgeGap) / availableHeight));
     toolbar.style.setProperty('--shortcut-x', String(direction));
     arcAngles.forEach((angle, index) => {
       toolbar.style.setProperty('--shortcut-' + (index + 1) + '-x', Math.round(Math.cos(angle) * radius * 100) / 100 + 'px');
       toolbar.style.setProperty('--shortcut-' + (index + 1) + '-y', Math.round(Math.sin(angle) * radius * 100) / 100 + 'px');
     });
     if (persist) {
-      try { window.localStorage.setItem(storageKey, JSON.stringify({ left: boundedLeft, top: boundedTop })); } catch {}
+      try { window.localStorage.setItem(storageKey, JSON.stringify({ side: toolbarSide, topRatio: toolbarTopRatio })); } catch {}
     }
+  };
+  const snapToolbarToEdge = persist => {
+    const rect = toolbar.getBoundingClientRect();
+    const width = rect.width || toolbar.offsetWidth || 45;
+    const snappedLeft = rect.left + width / 2 < window.innerWidth / 2
+      ? edgeGap
+      : window.innerWidth - width - edgeGap;
+    placeToolbar(snappedLeft, rect.top, persist);
   };
   const setExpanded = expanded => {
     wakeToolbar();
@@ -139,8 +167,7 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     }
     if (dragState.moved) {
       suppressToggleClick = true;
-      const rect = toolbar.getBoundingClientRect();
-      placeToolbar(rect.left, rect.top, true);
+      snapToolbarToEdge(true);
     }
     dragState = null;
     window.removeEventListener('pointermove', moveToolbar);
@@ -203,22 +230,38 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     if (target instanceof Node && !toolbar.contains(target) && toolbar.dataset.expanded === 'true') setExpanded(false);
   });
   try {
+    updateToolbarScale();
     const saved = JSON.parse(window.localStorage.getItem(storageKey) || 'null');
-    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) placeToolbar(saved.left, saved.top, false);
+    const width = toolbar.offsetWidth || 45;
+    const height = toolbar.offsetHeight || 45;
+    if (saved && (saved.side === 'left' || saved.side === 'right') && Number.isFinite(saved.topRatio)) {
+      const left = saved.side === 'left' ? edgeGap : window.innerWidth - width - edgeGap;
+      const top = edgeGap + Math.max(0, Math.min(1, saved.topRatio)) * Math.max(1, window.innerHeight - height - edgeGap * 2);
+      placeToolbar(left, top, false);
+    } else if (saved && Number.isFinite(saved.top)) {
+      placeToolbar(window.innerWidth - width - edgeGap, saved.top, true);
+    } else {
+      placeToolbar(window.innerWidth - width - edgeGap, window.innerHeight - height - edgeGap, false);
+    }
   } catch {}
   window.addEventListener('resize', () => {
-    const rect = toolbar.getBoundingClientRect();
-    placeToolbar(rect.left, rect.top, false);
+    updateToolbarScale();
+    const width = toolbar.offsetWidth || 45;
+    const height = toolbar.offsetHeight || 45;
+    const availableHeight = Math.max(1, window.innerHeight - height - edgeGap * 2);
+    const left = toolbarSide === 'left' ? edgeGap : window.innerWidth - width - edgeGap;
+    placeToolbar(left, edgeGap + toolbarTopRatio * availableHeight, true);
   });
+  window.visualViewport?.addEventListener('resize', () => window.dispatchEvent(new Event('resize')));
   toolbar.dataset.idle = 'true';
 })();`;
 const ZELLIJ_SHORTCUTS = `
 <style id="codepilot-zellij-shortcuts-style">
-  #codepilot-zellij-shortcuts { --shortcut-x: -1; --shortcut-1-x: 4.24rem; --shortcut-1-y: -4.24rem; --shortcut-2-x: 5.8rem; --shortcut-2-y: -1.55rem; --shortcut-3-x: 5.8rem; --shortcut-3-y: 1.55rem; --shortcut-4-x: 4.24rem; --shortcut-4-y: 4.24rem; position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: 2.8rem; height: 2.8rem; pointer-events: none; }
-  #codepilot-zellij-shortcuts button { position: absolute; display: grid; place-items: center; width: 2.8rem; height: 2.8rem; padding: 0; border: 1px solid #617a72; border-radius: 50%; color: #eff8f5; background: rgba(27, 44, 39, .97); box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .35); font: 700 .78rem ui-monospace, SFMono-Regular, Consolas, monospace; touch-action: manipulation; pointer-events: auto; transition: transform .18s ease, opacity .14s ease, background .14s ease; }
+  #codepilot-zellij-shortcuts { --shortcut-scale: 1; --shortcut-size: calc(2.8rem * var(--shortcut-scale)); --shortcut-x: -1; --shortcut-1-x: 4.24rem; --shortcut-1-y: -4.24rem; --shortcut-2-x: 5.8rem; --shortcut-2-y: -1.55rem; --shortcut-3-x: 5.8rem; --shortcut-3-y: 1.55rem; --shortcut-4-x: 4.24rem; --shortcut-4-y: 4.24rem; position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: var(--shortcut-size); height: var(--shortcut-size); pointer-events: none; }
+  #codepilot-zellij-shortcuts button { position: absolute; display: grid; place-items: center; width: var(--shortcut-size); height: var(--shortcut-size); padding: 0; border: 1px solid #617a72; border-radius: 50%; color: #eff8f5; background: rgba(27, 44, 39, .97); box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .35); font: 700 calc(.78rem * var(--shortcut-scale)) ui-monospace, SFMono-Regular, Consolas, monospace; touch-action: manipulation; pointer-events: auto; transition: transform .18s ease, opacity .14s ease, background .14s ease; }
   #codepilot-zellij-shortcuts button:active { background: #45635a; }
-  #codepilot-zellij-shortcuts .codepilot-shortcut-toggle { right: 0; bottom: 0; z-index: 2; color: #07110f; border-color: #8aebca; background: #73e1bd; box-shadow: 0 .18rem .35rem rgba(0, 0, 0, .48), 0 .75rem 1.6rem rgba(0, 0, 0, .42), 0 0 1.15rem rgba(115, 225, 189, .3), inset 0 .12rem .18rem rgba(255, 255, 255, .38), inset 0 -.16rem .22rem rgba(15, 92, 70, .3); font-size: 1.15rem; touch-action: none; will-change: left, top, transform; transition: transform .18s ease, opacity .18s ease, background .14s ease; }
-  #codepilot-zellij-shortcuts[data-idle="true"] .codepilot-shortcut-toggle { opacity: .32; transform: translateX(calc(var(--shortcut-x) * -2.35rem)); box-shadow: 0 0 .35rem rgba(0, 0, 0, .22); }
+  #codepilot-zellij-shortcuts .codepilot-shortcut-toggle { right: 0; bottom: 0; z-index: 2; color: #07110f; border-color: #8aebca; background: #73e1bd; box-shadow: 0 .18rem .35rem rgba(0, 0, 0, .48), 0 .75rem 1.6rem rgba(0, 0, 0, .42), 0 0 1.15rem rgba(115, 225, 189, .3), inset 0 .12rem .18rem rgba(255, 255, 255, .38), inset 0 -.16rem .22rem rgba(15, 92, 70, .3); font-size: calc(1.15rem * var(--shortcut-scale)); touch-action: none; will-change: left, top, transform; transition: transform .18s ease, opacity .18s ease, background .14s ease; }
+  #codepilot-zellij-shortcuts[data-idle="true"] .codepilot-shortcut-toggle { opacity: .32; transform: translateX(calc(var(--shortcut-x) * var(--shortcut-size) * -.84)); box-shadow: 0 0 .35rem rgba(0, 0, 0, .22); }
   #codepilot-zellij-shortcuts .codepilot-shortcut-toggle:active { box-shadow: 0 .1rem .2rem rgba(0, 0, 0, .42), 0 .35rem .8rem rgba(0, 0, 0, .36), 0 0 .8rem rgba(115, 225, 189, .22), inset 0 .16rem .3rem rgba(15, 92, 70, .38); }
   #codepilot-zellij-shortcuts .codepilot-ring-action { right: 0; bottom: 0; opacity: 0; transform: translate(0, 0) scale(.72); }
   #codepilot-zellij-shortcuts .codepilot-ring-action::after { content: attr(data-hint); position: absolute; top: calc(100% + .18rem); color: #b7cbc5; font: 600 .58rem ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
