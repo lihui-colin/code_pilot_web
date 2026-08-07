@@ -305,8 +305,8 @@ describe('App', () => {
     const moreActions = screen.getByLabelText('codepilot-web 更多操作').closest('.repository-more');
     expect(zellijAction.closest('.repository-more')).toBeNull();
     fireEvent.click(screen.getByLabelText('codepilot-web 更多操作'));
-    expect(screen.getByRole('button', { name: 'code-viewer' }).closest('.repository-more')).toBe(moreActions);
-    expect(screen.getByRole('link', { name: '编辑代码' }).closest('.repository-more')).toBe(moreActions);
+    expect(screen.getByRole('button', { name: 'Code Reviewer' }).closest('.repository-more')).toBe(moreActions);
+    expect(screen.getByRole('link', { name: 'VS Code' }).closest('.repository-more')).toBe(moreActions);
     const codexLink = screen.getByRole('link', { name: '与 Codex 对话' });
     expect(codexLink.closest('.repository-more')).toBeNull();
     expect(codexLink).toHaveAttribute('href', `/codex-chat?repositoryId=dir_${'a'.repeat(43)}`);
@@ -486,7 +486,7 @@ describe('App', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByLabelText('external-project 更多操作'));
-    fireEvent.click(await screen.findByRole('button', { name: '移除仓库' }));
+    fireEvent.click(await screen.findByRole('button', { name: '从列表删除' }));
     await waitFor(() => expect(api.deleteManualRepository).toHaveBeenCalledWith(repositoryId));
   });
 
@@ -500,7 +500,7 @@ describe('App', () => {
     });
     render(<App />);
     fireEvent.click(await screen.findByLabelText('codepilot-web 更多操作'));
-    const link = await screen.findByRole('link', { name: '编辑代码' });
+    const link = await screen.findByRole('link', { name: 'VS Code' });
     expect(link).toHaveAttribute('href', openVSCodeUrl);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
@@ -542,7 +542,7 @@ describe('App', () => {
     fireEvent.click(link);
     expect(writeText).not.toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText('codepilot-web 更多操作'));
-    fireEvent.click(screen.getByRole('button', { name: '删除 Session' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Zellij' }));
     await waitFor(() => expect(api.deleteSession).toHaveBeenCalledWith(sessionName));
   });
 
@@ -557,7 +557,7 @@ describe('App', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
     render(<App />);
     fireEvent.click(await screen.findByLabelText('codepilot-web 更多操作'));
-    fireEvent.click(await screen.findByRole('button', { name: 'code-viewer' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Code Reviewer' }));
     expect(open).toHaveBeenCalledWith(`/viewer-launch/dir_${'a'.repeat(43)}`, '_blank');
     expect(api.createViewer).not.toHaveBeenCalled();
   });

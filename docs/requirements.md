@@ -113,7 +113,7 @@ Codex 对话快照只包含 conversation ID、用户与助手文本、运行状�
 - Workspace 和 Git repository 列表，以及其中的“会话列表”弹窗入口。
 - viewer 状态和操作。
 
-每个 Git repository 只常驻显示两个主要操作：已有 Session 时显示“打开 Zellij Web”，否则显示“创建 Zellij Session”；另一个为“与 Codex 对话”。编辑代码、code-viewer、删除 Session 和移除手动仓库收纳在“更多操作”菜单中，危险操作与普通操作视觉分隔。
+每个 Git repository 只常驻显示两个主要操作：已有 Session 时显示“打开 Zellij Web”，否则显示“创建 Zellij Session”；另一个为“与 Codex 对话”。“VS Code”、“Code Reviewer”、“Delete Zellij”和移除手动仓库收纳在“更多操作”菜单中，危险操作与普通操作视觉分隔。
 
 只读数据默认每 10 秒刷新。页面不可见时暂停轮询，重新可见时立即刷新。创建、删除和停止操作完成后立即重新查询对应资源。
 
@@ -148,11 +148,11 @@ Codex 对话快照只包含 conversation ID、用户与助手文本、运行状�
 每个 Git repository 条目提供以下操作：
 
 - 尚无对应 Session 时显示“创建 Zellij Session”，在该 repository 的真实目录创建 Codex Session。
-- 已有对应 Session 时显示“打开 Zellij Web”和“删除 Session”；打开仓库绑定的 Session 时自动复制当前 Zellij Web Token，并显示复制结果；服务重启后仍通过固定名称识别对应关系。Zellij Web 固定版本静态资源使用浏览器缓存和压缩传输，手机端刷新时不得重复下载全部未压缩终端脚本。
-- “code-viewer”：打开同源启动页，由启动页启动或复用该 repository 的 code-viewer，成功后导航到管理服务同源 viewer 地址。
-- “编辑代码”：在“code-viewer”旁边以新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode 地址，并通过 `folder` 参数自动打开该 repository。OpenVSCode 由部署侧使用配置的 workspace root 启动，只监听默认端口 `127.0.0.1:8023`，由管理服务代理 `/openvscode` HTTP 和 WebSocket 流量；后端重新校验 repository 真实路径和对应来源边界，前端不提交或拼接目录、绝对路径、命令或环境变量。
+- 已有对应 Session 时显示“打开 Zellij Web”和“Delete Zellij”；打开仓库绑定的 Session 时自动复制当前 Zellij Web Token，并显示复制结果；服务重启后仍通过固定名称识别对应关系。Zellij Web 固定版本静态资源使用浏览器缓存和压缩传输，手机端刷新时不得重复下载全部未压缩终端脚本。
+- “Code Reviewer”：打开同源启动页，由启动页启动或复用该 repository 的 code-viewer，成功后导航到管理服务同源 viewer 地址。
+- “VS Code”：在“code-viewer”旁边以新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode 地址，并通过 `folder` 参数自动打开该 repository。OpenVSCode 由部署侧使用配置的 workspace root 启动，只监听默认端口 `127.0.0.1:8023`，由管理服务代理 `/openvscode` HTTP 和 WebSocket 流量；后端重新校验 repository 真实路径和对应来源边界，前端不提交或拼接目录、绝对路径、命令或环境变量。
 - “与 Codex 对话”：在新标签页打开该 repository 的独立流式对话页面；服务端校验 repository ID 并固定 Codex app-server 的进程参数、工作目录、审批与沙箱策略，前端只提交自然语言消息和服务端签发的 conversation ID。
-- 手动 repository 显示“移除仓库”；该操作只删除状态记录，不删除文件、Session 或进程。
+- 手动 repository 显示“从列表删除”；该操作只删除状态记录，不删除文件、Session 或进程。
 - code-viewer 只监听 localhost，上游端口不对 VPN 网络开放。
 - 写请求执行同源校验。
 - 记录 Session 创建、删除和 viewer 启停审计日志。

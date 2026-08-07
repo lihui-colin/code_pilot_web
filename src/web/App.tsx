@@ -690,7 +690,7 @@ export function App() {
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={() => setOpenRepositoryMenuId(null)}
-                    >编辑代码</a>}
+                    >VS Code</a>}
                     {entry.kind === 'repository' && <button
                       type="button"
                       onClick={() => {
@@ -698,7 +698,7 @@ export function App() {
                         browseCode(entry.id);
                       }}
                       disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
-                    >code-viewer</button>}
+                    >Code Reviewer</button>}
                     {(entry.session || entry.source === 'manual') && <div className="repository-menu-separator" />}
                     {entry.session && (
                       <button
@@ -709,7 +709,7 @@ export function App() {
                           void removeRepositorySession(entry.id, entry.session!.name);
                         }}
                         disabled={busyRepositoryId === entry.id || dashboard?.readiness.status !== 'ready'}
-                      >删除 Session</button>
+                      >Delete Zellij</button>
                     )}
                     {entry.source === 'manual' && (
                       <button
@@ -720,7 +720,7 @@ export function App() {
                           void removeManualRepository(entry.id);
                         }}
                         disabled={busyRepositoryId === entry.id}
-                      >移除仓库</button>
+                      >从列表删除</button>
                     )}
                   </div>}
                 </div>

@@ -143,7 +143,7 @@
 
 ## MVP-3：Viewer 管理
 
-当前首版仓库页面覆盖：点击“code-viewer”会先同步打开同源启动页，启动页再通过 API 启动或复用 localhost:8022 的 code-viewer，并把自身导航到同源 viewer 地址；该流程不依赖移动浏览器向原页面返回新标签页窗口句柄，切换仓库会停止旧实例。repository 没有对应 Session 时显示创建按钮，已有时显示安全打开链接和删除按钮。“code-viewer”旁边显示“编辑代码”链接，安全地在新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode URL；URL 的 `folder` 参数必须等于重新执行真实路径和对应来源边界校验后的 repository 目录，前端不得自行拼接路径。`/openvscode` 必须保留基路径代理普通 HTTP 和 WebSocket 流量，上游只监听 localhost。
+当前首版仓库页面覆盖：点击“Code Reviewer”会先同步打开同源启动页，启动页再通过 API 启动或复用 localhost:8022 的 code-viewer，并把自身导航到同源 viewer 地址；该流程不依赖移动浏览器向原页面返回新标签页窗口句柄，切换仓库会停止旧实例。repository 没有对应 Session 时显示创建按钮，已有时显示安全打开链接和删除按钮。“Code Reviewer”旁边显示“VS Code”链接，安全地在新标签页打开后端为该 repository 生成的同源 HTTPS OpenVSCode URL；URL 的 `folder` 参数必须等于重新执行真实路径和对应来源边界校验后的 repository 目录，前端不得自行拼接路径。`/openvscode` 必须保留基路径代理普通 HTTP 和 WebSocket 流量，上游只监听 localhost。
 
 1. 请求额外字段和非法 ID 被拒绝。
 2. 非 repository 或越界目录无法启动 viewer。
