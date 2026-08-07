@@ -79,7 +79,6 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   let toolbarSide = 'right';
   let toolbarTopRatio = 1;
   let toolbarScale = 1;
-  let terminalBaseFontSize = null;
   let suppressToggleClick = false;
   const isTouchDevice = () => navigator.maxTouchPoints > 0;
   const scheduleFrame = window.requestAnimationFrame?.bind(window) || (callback => window.setTimeout(callback, 16));
@@ -87,6 +86,23 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   const blurEditable = () => {
     const active = document.activeElement;
     if (active instanceof HTMLElement && active.matches('input, textarea, [contenteditable="true"]')) active.blur();
+  };
+  const updateSoftKeyboardState = () => {
+    const active = document.activeElement;
+    const editableFocused = active instanceof HTMLElement && active.matches('input, textarea, [contenteditable="true"]');
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    const keyboardVisible = editableFocused && viewportHeight < window.innerHeight * .8;
+    document.documentElement.classList.toggle('codepilot-soft-keyboard-open', keyboardVisible);
+  };
+  const scheduleViewportRecovery = () => {
+    for (const delay of [80, 350, 800]) {
+      window.setTimeout(() => {
+        updateSoftKeyboardState();
+        if (!document.documentElement.classList.contains('codepilot-soft-keyboard-open')) {
+          window.dispatchEvent(new Event('resize'));
+        }
+      }, delay);
+    }
   };
   const wakeToolbar = () => {
     if (idleTimer) window.clearTimeout(idleTimer);
@@ -107,13 +123,6 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   const sendSequence = sequence => {
     const sendFunction = window.__zjImeBypass && window.__zjImeBypass.sendFn;
     if (typeof sendFunction === 'function') sendFunction(sequence);
-  };
-  const updateTerminalScale = () => {
-    const terminal = window.term;
-    if (!terminal || !terminal.options) return;
-    if (!Number.isFinite(terminalBaseFontSize)) terminalBaseFontSize = terminal.options.fontSize;
-    if (!Number.isFinite(terminalBaseFontSize)) return;
-    terminal.options.fontSize = Math.round(terminalBaseFontSize * toolbarScale * 100) / 100;
   };
   const updateToolbarScale = () => {
     const visualScale = window.visualViewport && Number.isFinite(window.visualViewport.scale)
@@ -156,7 +165,6 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     toolbar.style.setProperty('--shortcut-toggle-font-size', 1.15 * toolbarScale + 'rem');
     toolbar.style.setProperty('--shortcut-hint-font-size', .58 * toolbarScale + 'rem');
     toolbar.style.setProperty('--shortcut-hint-gap', .18 * toolbarScale + 'rem');
-    updateTerminalScale();
   };
   const placeToolbar = (left, top, persist) => {
     const width = toolbar.offsetWidth || 45;
@@ -285,6 +293,12 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     const target = event.target;
     if (target instanceof Node && !toolbar.contains(target) && toolbar.dataset.expanded === 'true') setExpanded(false);
   });
+  document.addEventListener('focusin', updateSoftKeyboardState);
+  document.addEventListener('focusout', scheduleViewportRecovery);
+  window.addEventListener('pageshow', scheduleViewportRecovery);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scheduleViewportRecovery();
+  });
   try {
     updateToolbarScale();
     const saved = JSON.parse(window.localStorage.getItem(storageKey) || 'null');
@@ -309,6 +323,7 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     placeToolbar(left, edgeGap + toolbarTopRatio * availableHeight, true);
   });
   window.visualViewport?.addEventListener('resize', () => {
+    updateSoftKeyboardState();
     updateToolbarScale();
     const width = toolbar.offsetWidth || 45;
     const height = toolbar.offsetHeight || 45;
@@ -317,10 +332,12 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     placeToolbar(left, edgeGap + toolbarTopRatio * availableHeight, true);
   });
   window.setTimeout(updateToolbarScale, 0);
+  updateSoftKeyboardState();
   toolbar.dataset.idle = 'true';
 })();`;
 const ZELLIJ_SHORTCUTS = `
 <style id="codepilot-zellij-shortcuts-style">
+  html:not(.codepilot-soft-keyboard-open), html:not(.codepilot-soft-keyboard-open) body, html:not(.codepilot-soft-keyboard-open) #terminal { height: 100dvh !important; min-height: 100dvh !important; }
   #codepilot-zellij-shortcuts { --shortcut-scale: 1; --shortcut-size: 2.8rem; --shortcut-font-size: .78rem; --shortcut-toggle-font-size: 1.15rem; --shortcut-hint-font-size: .58rem; --shortcut-hint-gap: .18rem; --shortcut-idle-offset: -2.35rem; --shortcut-x: -1; --shortcut-1-x: .81rem; --shortcut-1-y: -7.3rem; --shortcut-2-x: 2.94rem; --shortcut-2-y: -4.77rem; --shortcut-3-x: 4.07rem; --shortcut-3-y: -1.66rem; --shortcut-4-x: 4.07rem; --shortcut-4-y: 1.66rem; --shortcut-5-x: 2.94rem; --shortcut-5-y: 4.77rem; --shortcut-6-x: .81rem; --shortcut-6-y: 7.3rem; position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: var(--shortcut-size); height: var(--shortcut-size); pointer-events: none; }
   #codepilot-zellij-shortcuts button { position: absolute; display: grid; place-items: center; width: var(--shortcut-size); height: var(--shortcut-size); padding: 0; border: 1px solid #617a72; border-radius: 50%; color: #eff8f5; background: rgba(27, 44, 39, .97); box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .35); font: 700 var(--shortcut-font-size) ui-monospace, SFMono-Regular, Consolas, monospace; touch-action: manipulation; pointer-events: auto; transition: transform .18s ease, opacity .14s ease, background .14s ease; }
   #codepilot-zellij-shortcuts button:active { background: #45635a; }
