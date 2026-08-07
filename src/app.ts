@@ -69,10 +69,6 @@ const ZELLIJ_SHORTCUTS_SCRIPT_PATH = '/codepilot-zellij-shortcuts.js';
 const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   const toolbar = document.getElementById('codepilot-zellij-shortcuts');
   if (!toolbar) return;
-  const confirmationDialog = document.getElementById('codepilot-shortcut-confirmation');
-  const confirmationMessage = confirmationDialog?.querySelector('.codepilot-confirmation-message');
-  const confirmationCancel = confirmationDialog?.querySelector('[data-confirmation-action="cancel"]');
-  const confirmationAccept = confirmationDialog?.querySelector('[data-confirmation-action="accept"]');
   const storageKey = 'codepilot-zellij-shortcuts-position-v2';
   const mobileWidthStorageKey = 'codepilot-zellij-shortcuts-mobile-width';
   const edgeGap = 8;
@@ -85,7 +81,6 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   let toolbarScale = 1;
   let terminalBaseFontSize = null;
   let suppressToggleClick = false;
-  let pendingConfirmedSequence = null;
   const isTouchDevice = () => navigator.maxTouchPoints > 0;
   const scheduleFrame = window.requestAnimationFrame?.bind(window) || (callback => window.setTimeout(callback, 16));
   const cancelFrame = window.cancelAnimationFrame?.bind(window) || window.clearTimeout.bind(window);
@@ -112,21 +107,6 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   const sendSequence = sequence => {
     const sendFunction = window.__zjImeBypass && window.__zjImeBypass.sendFn;
     if (typeof sendFunction === 'function') sendFunction(sequence);
-  };
-  const closeConfirmation = () => {
-    if (!(confirmationDialog instanceof HTMLElement)) return;
-    confirmationDialog.dataset.open = 'false';
-    confirmationDialog.setAttribute('aria-hidden', 'true');
-    pendingConfirmedSequence = null;
-  };
-  const openConfirmation = (message, sequence) => {
-    if (!(confirmationDialog instanceof HTMLElement) || !(confirmationMessage instanceof HTMLElement)) return false;
-    pendingConfirmedSequence = sequence;
-    confirmationMessage.textContent = message;
-    confirmationDialog.dataset.open = 'true';
-    confirmationDialog.setAttribute('aria-hidden', 'false');
-    if (confirmationCancel instanceof HTMLButtonElement) confirmationCancel.focus();
-    return true;
   };
   const updateTerminalScale = () => {
     const terminal = window.term;
@@ -296,33 +276,13 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     if (sequence) {
       const confirmation = button.dataset.confirm;
       const encodedSequence = String.fromCharCode(...sequence.split(',').map(Number));
-      if (confirmation && openConfirmation(confirmation, encodedSequence)) return;
+      if (confirmation && !window.confirm(confirmation)) return;
       sendSequence(encodedSequence);
       if (button.dataset.keepExpanded !== 'true') setExpanded(false);
     }
   });
-  confirmationDialog?.addEventListener('click', event => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const action = target.closest('[data-confirmation-action]')?.getAttribute('data-confirmation-action');
-    if (action === 'accept' && pendingConfirmedSequence) {
-      const sequence = pendingConfirmedSequence;
-      closeConfirmation();
-      sendSequence(sequence);
-      setExpanded(false);
-      return;
-    }
-    if (action === 'cancel' || target === confirmationDialog) closeConfirmation();
-  });
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && confirmationDialog?.getAttribute('data-open') === 'true') {
-      event.preventDefault();
-      closeConfirmation();
-    }
-  });
   document.addEventListener('pointerdown', event => {
     const target = event.target;
-    if (confirmationDialog?.getAttribute('data-open') === 'true') return;
     if (target instanceof Node && !toolbar.contains(target) && toolbar.dataset.expanded === 'true') setExpanded(false);
   });
   try {
@@ -377,14 +337,6 @@ const ZELLIJ_SHORTCUTS = `
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(6) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-5-x)), var(--shortcut-5-y)) scale(1); }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(7) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-6-x)), var(--shortcut-6-y)) scale(1); }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-shortcut-toggle { opacity: 1; transform: rotate(45deg); }
-  #codepilot-shortcut-confirmation { position: fixed; inset: 0; z-index: 2147483646; display: none; place-items: center; padding: 1rem; background: rgba(2, 9, 7, .72); }
-  #codepilot-shortcut-confirmation[data-open="true"] { display: grid; }
-  #codepilot-shortcut-confirmation .codepilot-confirmation-panel { width: min(26rem, calc(100vw - 2rem)); padding: 1.25rem; border: 1px solid #617a72; border-radius: .5rem; color: #eff8f5; background: #1b2c27; box-shadow: 0 1.2rem 3rem rgba(0, 0, 0, .55); font: 400 1rem/1.55 ui-sans-serif, sans-serif; }
-  #codepilot-shortcut-confirmation .codepilot-confirmation-title { margin: 0 0 .5rem; font-size: 1.1rem; }
-  #codepilot-shortcut-confirmation .codepilot-confirmation-message { margin: 0; color: #c8d8d3; }
-  #codepilot-shortcut-confirmation .codepilot-confirmation-actions { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1.25rem; }
-  #codepilot-shortcut-confirmation button { min-width: 5.5rem; padding: .62rem .9rem; border: 1px solid #617a72; border-radius: .35rem; color: #eff8f5; background: #263c35; font: 600 .95rem ui-sans-serif, sans-serif; }
-  #codepilot-shortcut-confirmation [data-confirmation-action="accept"] { border-color: #e06c75; color: #fff; background: #a73743; }
 </style>
 <div id="codepilot-zellij-shortcuts" role="toolbar" aria-label="终端快捷键盘" data-expanded="false" data-idle="true">
   <button type="button" tabindex="-1" class="codepilot-shortcut-toggle" aria-label="展开快捷键盘" aria-expanded="false">+</button>
@@ -394,16 +346,6 @@ const ZELLIJ_SHORTCUTS = `
   <button type="button" tabindex="-1" class="codepilot-ring-action" data-sequence="9" data-keep-expanded="true" data-hint="Tab" aria-label="发送 Tab">Tab</button>
   <button type="button" tabindex="-1" class="codepilot-ring-action" data-key="ArrowUp" data-sequence="27,91,65" data-keep-expanded="true" data-hint="ArrowUp" aria-label="发送上方向键">↑</button>
   <button type="button" tabindex="-1" class="codepilot-ring-action" data-key="ArrowDown" data-sequence="27,91,66" data-keep-expanded="true" data-hint="ArrowDown" aria-label="发送下方向键">↓</button>
-</div>
-<div id="codepilot-shortcut-confirmation" role="dialog" aria-modal="true" aria-labelledby="codepilot-confirmation-title" aria-describedby="codepilot-confirmation-message" aria-hidden="true" data-open="false">
-  <div class="codepilot-confirmation-panel">
-    <h2 id="codepilot-confirmation-title" class="codepilot-confirmation-title">确认关闭面板</h2>
-    <p id="codepilot-confirmation-message" class="codepilot-confirmation-message"></p>
-    <div class="codepilot-confirmation-actions">
-      <button type="button" data-confirmation-action="cancel">取消</button>
-      <button type="button" data-confirmation-action="accept">确认关闭</button>
-    </div>
-  </div>
 </div>
 <script src="${ZELLIJ_SHORTCUTS_SCRIPT_PATH}"></script>`;
 
