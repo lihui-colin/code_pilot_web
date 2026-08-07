@@ -63,7 +63,8 @@ const ZELLIJ_SHORTCUTS_SCRIPT_PATH = '/codepilot-zellij-shortcuts.js';
 const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   const toolbar = document.getElementById('codepilot-zellij-shortcuts');
   if (!toolbar) return;
-  const storageKey = 'codepilot-zellij-shortcuts-position';
+  const storageKey = 'codepilot-zellij-shortcuts-position-v2';
+  const mobileWidthStorageKey = 'codepilot-zellij-shortcuts-mobile-width';
   const edgeGap = 8;
   let dragState = null;
   let dragFrame = 0;
@@ -72,7 +73,9 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   let toolbarSide = 'right';
   let toolbarTopRatio = 1;
   let toolbarScale = 1;
+  let terminalBaseFontSize = null;
   let suppressToggleClick = false;
+  const isTouchDevice = () => navigator.maxTouchPoints > 0;
   const scheduleFrame = window.requestAnimationFrame?.bind(window) || (callback => window.setTimeout(callback, 16));
   const cancelFrame = window.cancelAnimationFrame?.bind(window) || window.clearTimeout.bind(window);
   const blurEditable = () => {
@@ -99,31 +102,74 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     const sendFunction = window.__zjImeBypass && window.__zjImeBypass.sendFn;
     if (typeof sendFunction === 'function') sendFunction(sequence);
   };
+  const updateTerminalScale = () => {
+    const terminal = window.term;
+    if (!terminal || !terminal.options) return;
+    if (!Number.isFinite(terminalBaseFontSize)) terminalBaseFontSize = terminal.options.fontSize;
+    if (!Number.isFinite(terminalBaseFontSize)) return;
+    terminal.options.fontSize = Math.round(terminalBaseFontSize * toolbarScale * 100) / 100;
+  };
   const updateToolbarScale = () => {
     const visualScale = window.visualViewport && Number.isFinite(window.visualViewport.scale)
       ? window.visualViewport.scale
       : 1;
     const screenWidth = window.screen && Number.isFinite(window.screen.width) ? window.screen.width : window.innerWidth;
-    const desktopModeRatio = navigator.maxTouchPoints > 0 && screenWidth > 0 && window.innerWidth > screenWidth * 1.4
+    const touchDevice = navigator.maxTouchPoints > 0;
+    const mobileUserAgent = /Mobile|iPhone|iPod/u.test(navigator.userAgent);
+    let mobileWidth = 430;
+    let hasSavedMobileWidth = false;
+    try {
+      const savedMobileWidth = Number(window.localStorage.getItem(mobileWidthStorageKey));
+      if (Number.isFinite(savedMobileWidth) && savedMobileWidth >= 280 && savedMobileWidth <= 700) {
+        mobileWidth = savedMobileWidth;
+        hasSavedMobileWidth = true;
+      }
+      if (touchDevice && mobileUserAgent && window.innerWidth < 700) {
+        mobileWidth = window.innerWidth;
+        hasSavedMobileWidth = true;
+        window.localStorage.setItem(mobileWidthStorageKey, String(mobileWidth));
+      }
+    } catch {}
+    const savedViewportRatio = hasSavedMobileWidth && window.innerWidth > mobileWidth * 1.4
+      ? window.innerWidth / mobileWidth
+      : 1;
+    const desktopLikeTouch = touchDevice
+      && !mobileUserAgent
+      && window.innerWidth >= 700
+      && window.innerWidth <= 1400
+      && window.devicePixelRatio >= 1.5;
+    const screenRatio = touchDevice && screenWidth > 0 && window.innerWidth > screenWidth * 1.4
       ? window.innerWidth / screenWidth
       : 1;
-    toolbarScale = Math.max(1, Math.min(2.5, visualScale < .95 ? 1 / visualScale : desktopModeRatio));
+    const desktopModeRatio = Math.max(savedViewportRatio, desktopLikeTouch ? window.innerWidth / mobileWidth : screenRatio);
+    const visualModeRatio = visualScale < .95 ? 1 / visualScale : 1;
+    toolbarScale = Math.min(2.5, Math.max(1, visualModeRatio, desktopModeRatio));
     toolbar.style.setProperty('--shortcut-scale', String(toolbarScale));
+    toolbar.style.setProperty('--shortcut-size', 2.8 * toolbarScale + 'rem');
+    toolbar.style.setProperty('--shortcut-font-size', .78 * toolbarScale + 'rem');
+    toolbar.style.setProperty('--shortcut-toggle-font-size', 1.15 * toolbarScale + 'rem');
+    toolbar.style.setProperty('--shortcut-hint-font-size', .58 * toolbarScale + 'rem');
+    toolbar.style.setProperty('--shortcut-hint-gap', .18 * toolbarScale + 'rem');
+    updateTerminalScale();
   };
   const placeToolbar = (left, top, persist) => {
     const width = toolbar.offsetWidth || 45;
     const height = toolbar.offsetHeight || 45;
-    const radius = 96 * toolbarScale;
+    const innerRadius = 85 * toolbarScale;
+    const outerRadius = innerRadius + 67.5 * toolbarScale;
+    const halfArc = 50;
+    const verticalReach = Math.sin(halfArc * Math.PI / 180) * outerRadius;
     const boundedLeft = Math.max(edgeGap, Math.min(left, window.innerWidth - width - edgeGap));
-    const boundedTop = Math.max(edgeGap, Math.min(top, window.innerHeight - height - edgeGap));
-    const upperSpace = Math.max(0, boundedTop - edgeGap);
-    const lowerSpace = Math.max(0, window.innerHeight - boundedTop - height - edgeGap);
-    const minimumAngle = -Math.asin(Math.min(1, upperSpace / radius)) * 180 / Math.PI;
-    const maximumAngle = Math.asin(Math.min(1, lowerSpace / radius)) * 180 / Math.PI;
-    const arcCenter = Math.max(minimumAngle + 45, Math.min(0, maximumAngle - 45));
-    const arcAngles = [-45, -15, 15, 45].map(offset => (arcCenter + offset) * Math.PI / 180);
-    toolbar.style.left = boundedLeft + 'px';
-    toolbar.style.top = boundedTop + 'px';
+    const minimumTop = edgeGap + verticalReach;
+    const maximumTop = window.innerHeight - height - edgeGap - verticalReach;
+    const boundedTop = Math.max(minimumTop, Math.min(top, Math.max(minimumTop, maximumTop)));
+    const actionCount = toolbar.querySelectorAll('.codepilot-ring-action').length;
+    const arcAngles = Array.from({ length: actionCount }, (_, index) => {
+      const angle = actionCount > 1 ? -halfArc + index * halfArc * 2 / (actionCount - 1) : 0;
+      return angle * Math.PI / 180;
+    });
+    toolbar.style.left = Math.round(boundedLeft * 100) / 100 + 'px';
+    toolbar.style.top = Math.round(boundedTop * 100) / 100 + 'px';
     toolbar.style.right = 'auto';
     toolbar.style.bottom = 'auto';
     const direction = boundedLeft + width / 2 < window.innerWidth / 2 ? 1 : -1;
@@ -131,9 +177,10 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     toolbarSide = direction === 1 ? 'left' : 'right';
     toolbarTopRatio = Math.max(0, Math.min(1, (boundedTop - edgeGap) / availableHeight));
     toolbar.style.setProperty('--shortcut-x', String(direction));
+    toolbar.style.setProperty('--shortcut-idle-translate', direction * width * -.84 + 'px');
     arcAngles.forEach((angle, index) => {
-      toolbar.style.setProperty('--shortcut-' + (index + 1) + '-x', Math.round(Math.cos(angle) * radius * 100) / 100 + 'px');
-      toolbar.style.setProperty('--shortcut-' + (index + 1) + '-y', Math.round(Math.sin(angle) * radius * 100) / 100 + 'px');
+      toolbar.style.setProperty('--shortcut-' + (index + 1) + '-x', Math.round((Math.cos(angle) * outerRadius - innerRadius) * 100) / 100 + 'px');
+      toolbar.style.setProperty('--shortcut-' + (index + 1) + '-y', Math.round(Math.sin(angle) * outerRadius * 100) / 100 + 'px');
     });
     if (persist) {
       try { window.localStorage.setItem(storageKey, JSON.stringify({ side: toolbarSide, topRatio: toolbarTopRatio })); } catch {}
@@ -197,7 +244,7 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     if (!(button instanceof HTMLButtonElement)) return;
     event.preventDefault();
     wakeToolbar();
-    blurEditable();
+    if (!button.classList.contains('codepilot-ring-action') || isTouchDevice()) blurEditable();
     if (!button.classList.contains('codepilot-shortcut-toggle')) return;
     const rect = toolbar.getBoundingClientRect();
     dragState = { pointerId: event.pointerId, pointerX: event.clientX, pointerY: event.clientY, left: rect.left, top: rect.top, moved: false };
@@ -210,7 +257,7 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     const button = event.target instanceof Element ? event.target.closest('button') : null;
     if (!(button instanceof HTMLButtonElement)) return;
     wakeToolbar();
-    blurEditable();
+    if (!button.classList.contains('codepilot-ring-action') || isTouchDevice()) blurEditable();
     if (button.classList.contains('codepilot-shortcut-toggle')) {
       if (suppressToggleClick) {
         suppressToggleClick = false;
@@ -221,7 +268,7 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     }
     const sequence = button.dataset.sequence;
     if (sequence) {
-      for (const value of sequence.split(',')) sendSequence(String.fromCharCode(Number(value)));
+      sendSequence(String.fromCharCode(...sequence.split(',').map(Number)));
       if (button.dataset.keepExpanded !== 'true') setExpanded(false);
     }
   });
@@ -241,7 +288,7 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     } else if (saved && Number.isFinite(saved.top)) {
       placeToolbar(window.innerWidth - width - edgeGap, saved.top, true);
     } else {
-      placeToolbar(window.innerWidth - width - edgeGap, window.innerHeight - height - edgeGap, false);
+      placeToolbar(window.innerWidth - width - edgeGap, (window.innerHeight - height) / 2, false);
     }
   } catch {}
   window.addEventListener('resize', () => {
@@ -252,24 +299,34 @@ const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     const left = toolbarSide === 'left' ? edgeGap : window.innerWidth - width - edgeGap;
     placeToolbar(left, edgeGap + toolbarTopRatio * availableHeight, true);
   });
-  window.visualViewport?.addEventListener('resize', () => window.dispatchEvent(new Event('resize')));
+  window.visualViewport?.addEventListener('resize', () => {
+    updateToolbarScale();
+    const width = toolbar.offsetWidth || 45;
+    const height = toolbar.offsetHeight || 45;
+    const availableHeight = Math.max(1, window.innerHeight - height - edgeGap * 2);
+    const left = toolbarSide === 'left' ? edgeGap : window.innerWidth - width - edgeGap;
+    placeToolbar(left, edgeGap + toolbarTopRatio * availableHeight, true);
+  });
+  window.setTimeout(updateToolbarScale, 0);
   toolbar.dataset.idle = 'true';
 })();`;
 const ZELLIJ_SHORTCUTS = `
 <style id="codepilot-zellij-shortcuts-style">
-  #codepilot-zellij-shortcuts { --shortcut-scale: 1; --shortcut-size: calc(2.8rem * var(--shortcut-scale)); --shortcut-x: -1; --shortcut-1-x: 4.24rem; --shortcut-1-y: -4.24rem; --shortcut-2-x: 5.8rem; --shortcut-2-y: -1.55rem; --shortcut-3-x: 5.8rem; --shortcut-3-y: 1.55rem; --shortcut-4-x: 4.24rem; --shortcut-4-y: 4.24rem; position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: var(--shortcut-size); height: var(--shortcut-size); pointer-events: none; }
-  #codepilot-zellij-shortcuts button { position: absolute; display: grid; place-items: center; width: var(--shortcut-size); height: var(--shortcut-size); padding: 0; border: 1px solid #617a72; border-radius: 50%; color: #eff8f5; background: rgba(27, 44, 39, .97); box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .35); font: 700 calc(.78rem * var(--shortcut-scale)) ui-monospace, SFMono-Regular, Consolas, monospace; touch-action: manipulation; pointer-events: auto; transition: transform .18s ease, opacity .14s ease, background .14s ease; }
+  #codepilot-zellij-shortcuts { --shortcut-scale: 1; --shortcut-size: 2.8rem; --shortcut-font-size: .78rem; --shortcut-toggle-font-size: 1.15rem; --shortcut-hint-font-size: .58rem; --shortcut-hint-gap: .18rem; --shortcut-idle-offset: -2.35rem; --shortcut-x: -1; --shortcut-1-x: .81rem; --shortcut-1-y: -7.3rem; --shortcut-2-x: 2.94rem; --shortcut-2-y: -4.77rem; --shortcut-3-x: 4.07rem; --shortcut-3-y: -1.66rem; --shortcut-4-x: 4.07rem; --shortcut-4-y: 1.66rem; --shortcut-5-x: 2.94rem; --shortcut-5-y: 4.77rem; --shortcut-6-x: .81rem; --shortcut-6-y: 7.3rem; position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: var(--shortcut-size); height: var(--shortcut-size); pointer-events: none; }
+  #codepilot-zellij-shortcuts button { position: absolute; display: grid; place-items: center; width: var(--shortcut-size); height: var(--shortcut-size); padding: 0; border: 1px solid #617a72; border-radius: 50%; color: #eff8f5; background: rgba(27, 44, 39, .97); box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .35); font: 700 var(--shortcut-font-size) ui-monospace, SFMono-Regular, Consolas, monospace; touch-action: manipulation; pointer-events: auto; transition: transform .18s ease, opacity .14s ease, background .14s ease; }
   #codepilot-zellij-shortcuts button:active { background: #45635a; }
-  #codepilot-zellij-shortcuts .codepilot-shortcut-toggle { right: 0; bottom: 0; z-index: 2; color: #07110f; border-color: #8aebca; background: #73e1bd; box-shadow: 0 .18rem .35rem rgba(0, 0, 0, .48), 0 .75rem 1.6rem rgba(0, 0, 0, .42), 0 0 1.15rem rgba(115, 225, 189, .3), inset 0 .12rem .18rem rgba(255, 255, 255, .38), inset 0 -.16rem .22rem rgba(15, 92, 70, .3); font-size: calc(1.15rem * var(--shortcut-scale)); touch-action: none; will-change: left, top, transform; transition: transform .18s ease, opacity .18s ease, background .14s ease; }
-  #codepilot-zellij-shortcuts[data-idle="true"] .codepilot-shortcut-toggle { opacity: .32; transform: translateX(calc(var(--shortcut-x) * var(--shortcut-size) * -.84)); box-shadow: 0 0 .35rem rgba(0, 0, 0, .22); }
+  #codepilot-zellij-shortcuts .codepilot-shortcut-toggle { right: 0; bottom: 0; z-index: 2; color: #07110f; border-color: #8aebca; background: #73e1bd; box-shadow: 0 .18rem .35rem rgba(0, 0, 0, .48), 0 .75rem 1.6rem rgba(0, 0, 0, .42), 0 0 1.15rem rgba(115, 225, 189, .3), inset 0 .12rem .18rem rgba(255, 255, 255, .38), inset 0 -.16rem .22rem rgba(15, 92, 70, .3); font-size: var(--shortcut-toggle-font-size); touch-action: none; will-change: left, top, transform; transition: transform .18s ease, opacity .18s ease, background .14s ease; }
+  #codepilot-zellij-shortcuts[data-idle="true"] .codepilot-shortcut-toggle { opacity: .32; transform: translateX(var(--shortcut-idle-translate, 2.35rem)); box-shadow: 0 0 .35rem rgba(0, 0, 0, .22); }
   #codepilot-zellij-shortcuts .codepilot-shortcut-toggle:active { box-shadow: 0 .1rem .2rem rgba(0, 0, 0, .42), 0 .35rem .8rem rgba(0, 0, 0, .36), 0 0 .8rem rgba(115, 225, 189, .22), inset 0 .16rem .3rem rgba(15, 92, 70, .38); }
   #codepilot-zellij-shortcuts .codepilot-ring-action { right: 0; bottom: 0; opacity: 0; transform: translate(0, 0) scale(.72); }
-  #codepilot-zellij-shortcuts .codepilot-ring-action::after { content: attr(data-hint); position: absolute; top: calc(100% + .18rem); color: #b7cbc5; font: 600 .58rem ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
+  #codepilot-zellij-shortcuts .codepilot-ring-action::after { content: attr(data-hint); position: absolute; top: calc(100% + var(--shortcut-hint-gap)); color: #b7cbc5; font: 600 var(--shortcut-hint-font-size) ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action { opacity: 1; }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(2) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-1-x)), var(--shortcut-1-y)) scale(1); }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(3) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-2-x)), var(--shortcut-2-y)) scale(1); }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(4) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-3-x)), var(--shortcut-3-y)) scale(1); }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(5) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-4-x)), var(--shortcut-4-y)) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(6) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-5-x)), var(--shortcut-5-y)) scale(1); }
+  #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-ring-action:nth-of-type(7) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-6-x)), var(--shortcut-6-y)) scale(1); }
   #codepilot-zellij-shortcuts[data-expanded="true"] .codepilot-shortcut-toggle { opacity: 1; transform: rotate(45deg); }
 </style>
 <div id="codepilot-zellij-shortcuts" role="toolbar" aria-label="终端快捷键盘" data-expanded="false" data-idle="true">
@@ -278,6 +335,8 @@ const ZELLIJ_SHORTCUTS = `
   <button type="button" tabindex="-1" class="codepilot-ring-action" data-sequence="16,120" data-hint="Ctrl+P X" aria-label="发送 Ctrl+P X">X</button>
   <button type="button" tabindex="-1" class="codepilot-ring-action" data-sequence="3" data-hint="Ctrl+C" aria-label="发送 Ctrl+C">C</button>
   <button type="button" tabindex="-1" class="codepilot-ring-action" data-sequence="9" data-keep-expanded="true" data-hint="Tab" aria-label="发送 Tab">Tab</button>
+  <button type="button" tabindex="-1" class="codepilot-ring-action" data-key="ArrowUp" data-sequence="27,91,65" data-keep-expanded="true" data-hint="ArrowUp" aria-label="发送上方向键">↑</button>
+  <button type="button" tabindex="-1" class="codepilot-ring-action" data-key="ArrowDown" data-sequence="27,91,66" data-keep-expanded="true" data-hint="ArrowDown" aria-label="发送下方向键">↓</button>
 </div>
 <script src="${ZELLIJ_SHORTCUTS_SCRIPT_PATH}"></script>`;
 
