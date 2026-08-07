@@ -330,7 +330,10 @@ export function CodexChat() {
   useEffect(() => () => flushStoredConversation(), [repositoryId]);
 
   useEffect(() => {
-    document.title = 'Codex 对话 · CodePilot Web';
+    document.title = repository ? `${repository.name} - Codex` : 'Codex';
+  }, [repository]);
+
+  useEffect(() => {
     if (!repositoryId) {
       setRequestError('缺少 repository ID，请从管理首页打开 Codex 对话。');
       setLoading(false);

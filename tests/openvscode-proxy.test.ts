@@ -37,6 +37,11 @@ describe('OpenVSCode same-origin proxy', () => {
     const upstreamSockets = new Set<Duplex>();
     const upstream = createServer((request, response) => {
       httpRequest = request;
+      if (request.url?.startsWith('/openvscode/?folder=')) {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        response.end('<html><head><title>OpenVSCode Server</title></head><body>editor</body></html>');
+        return;
+      }
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ path: request.url }));
     });
@@ -83,6 +88,12 @@ describe('OpenVSCode same-origin proxy', () => {
       expect(httpRequest?.headers.host).toBe('192.0.2.10:8024');
       expect(httpRequest?.headers['x-forwarded-host']).toBe('192.0.2.10:8024');
       expect(httpRequest?.headers['x-forwarded-proto']).toBe('https');
+
+      const editor = await fetch(`http://127.0.0.1:${appPort}/openvscode/?folder=${encodeURIComponent('/workspace/codepilot-web')}`);
+      const editorHtml = await editor.text();
+      expect(editorHtml).toContain('<title>codepilot-web - openvscode</title>');
+      expect(editorHtml).toContain('<script src="/codepilot-html-title.js"></script>');
+      expect(editorHtml).not.toContain('<script>(()=>');
 
       client = new WebSocket(`ws://127.0.0.1:${appPort}/openvscode/socket?value=2`);
       await new Promise<void>((resolve, reject) => {

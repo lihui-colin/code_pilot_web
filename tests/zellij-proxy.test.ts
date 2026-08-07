@@ -81,7 +81,7 @@ describe('Zellij Web same-origin proxy', () => {
         });
         return;
       }
-      if (request.url === '/session-name') {
+      if (request.url === '/session-name' || request.url === '/managed-session') {
         if (request.headers.cookie !== 'zellij-auth=test-session') {
           response.writeHead(401, { 'content-type': 'text/plain' });
           response.end('missing session cookie');
@@ -133,6 +133,12 @@ describe('Zellij Web same-origin proxy', () => {
       directoryIdSecret: null,
       zellijWebUpstreamUrl: `http://127.0.0.1:${upstreamPort}`,
       zellijAdapter: { listSessions: async () => `${sessionName}\n` },
+      managedSessions: new Map([[sessionName, {
+        repositoryId: `dir_${'a'.repeat(43)}`,
+        relativePath: 'projects/codepilot-web',
+        createdAt: '2026-08-07T00:00:00.000Z',
+        command: 'codex',
+      }]]),
       staticRoot: false,
       https: false,
       logger: false,
@@ -163,6 +169,17 @@ describe('Zellij Web same-origin proxy', () => {
       });
       const htmlBody = await html.text();
       expect(htmlBody).toContain('<base href="/zellij/" />');
+      expect(htmlBody).toContain('<title>session-name - Zellij</title>');
+      expect(htmlBody).toContain('<script src="/codepilot-html-title.js"></script>');
+      expect(htmlBody).not.toContain('<script>(()=>');
+      const titleScriptResponse = await fetch(`http://127.0.0.1:${appPort}/codepilot-html-title.js`);
+      expect(titleScriptResponse.headers.get('content-type')).toContain('application/javascript');
+      expect(await titleScriptResponse.text()).toContain('MutationObserver');
+
+      const managedHtml = await fetch(`http://127.0.0.1:${appPort}/zellij/${sessionName}`, {
+        headers: { cookie: 'codepilot_zellij_8024_zellij-auth=test-session' },
+      });
+      expect(await managedHtml.text()).toContain('<title>codepilot-web - Zellij</title>');
       expect(htmlBody).toContain('id="codepilot-zellij-shortcuts"');
       expect(htmlBody).toContain('data-expanded="false"');
       expect(htmlBody).toContain('data-idle="true"');
@@ -320,7 +337,7 @@ describe('Zellij Web same-origin proxy', () => {
       expect(toolbar?.style.getPropertyValue('--shortcut-scale')).toBe('1');
       expect(terminal.options.fontSize).toBe(15);
       dom.window.close();
-      expect(httpRequest?.url).toBe('/session-name');
+      expect(httpRequest?.url).toBe('/managed-session');
 
       const login = await fetch(`http://127.0.0.1:${appPort}/zellij/command/login`, { method: 'POST' });
       expect(await login.json()).toEqual({ path: '/command/login' });

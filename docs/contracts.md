@@ -430,6 +430,8 @@ Zellij Web 必须只监听 `127.0.0.1:<zellij-port>`。浏览器入口固定为 
 
 管理服务必须移除 `/zellij` 前缀并代理 Zellij Web 的普通 HTTP、登录请求和 WebSocket Upgrade。Zellij `0.44.3` 入口 HTML 固定包含 `<base href="/" />`，管理服务只对合法入口路径 `/zellij/` 和 `/zellij/<session-name>` 的 HTML 响应把它改为 `<base href="/zellij/" />`；静态资源、API 和 WebSocket 响应保持流式转发，不修改正文。入口 HTML 最大允许 1 MiB，超过限制时代理失败。
 
+Zellij Session 入口页面的浏览器标题固定为 `<repository-name> - Zellij`。repository 名称优先通过 managed session metadata 的 repository ID 在服务端解析，其次按固定 repository Session 命名规则匹配；无法映射的 external Session 使用 Session 名称作为标题前缀。入口 HTML 必须锁定标题，防止 Zellij 初始化后用 Session 名称覆盖。前端不得提交或拼接标题。
+
 合法入口 HTML 还必须在桌面和移动浏览器中注入浮动终端快捷键盘。页面首次打开时默认位于右侧垂直中间并贴边收起，隐藏球体主体并只保留一段半透明可点击圆弧，不改变终端容器尺寸；点击或拖动圆弧时立即恢复完整按钮，之后再次收起并闲置 3 秒后自动缩进最近的屏幕边缘。每次进入贴边收起状态前都必须先把浮球从当前位置吸附到最近的左右侧边，不能假设浮球已经处于边缘。浮球已经贴边隐藏时，点击页面其他区域不得将其唤醒。拖动结束后浮球吸附到最近的左右侧边，只保存贴边方向和垂直位置比例；浏览器尺寸、横竖屏或桌面版模式变化时必须使用变化前保存的垂直比例按新视口重新计算位置并保持贴边，不得从变化后的视口和旧像素位置反推比例，也不得使用旧视口的绝对水平像素。移动浏览器切换桌面版模式或页面缩放比例变化时，浮球尺寸、快捷键展开半径、每个快捷按钮内的文字、主浮球文字、按钮提示文字、提示间距及 Zellij xterm 字号必须使用同一缩放系数反向补偿页面缩放并设置合理上限，使终端内容、触摸目标和文字的物理尺寸及相对间距保持稳定；切回普通移动视口时恢复 xterm 初始字号，真正的桌面浏览器保持默认尺寸。快捷球不得通过派发额外的全局 `resize` 事件触发重复终端 fit。展开布局使用两个同心圆：主浮球圆心位于内圆上，所有快捷按钮圆心位于外圆上，外圆半径比内圆半径大约 `1.5` 个小球直径；六个快捷按钮沿外圆面向屏幕内侧的弧线均匀分布且不得重叠。浮球拖到顶部或底部附近时必须限制其垂直位置，使完整外圆按钮弧仍位于浏览器安全区内。再次点击浮动按钮或点击浮动控件以外的页面区域时必须自动收起。前端不得提交自定义按键、命令或参数。所有圆形操作按钮都通过 Zellij Web 已建立的终端发送函数在单次调用中完整写入对应控制序列，不得拆分成多条 WebSocket 消息；其中上方向键写入 `ESC [ A`，下方向键写入 `ESC [ B`，避免浏览器合成键盘事件被 xterm 忽略。桌面浏览器点击任一圆形操作按钮时保持 Zellij xterm 当前编辑焦点；触摸设备点击任一快捷按钮时主动清除可编辑元素焦点以收起软键盘，但仍发送对应终端序列。快捷按钮不得主动聚焦 Zellij xterm 或其他可编辑输入。`Ctrl+P N`、`Ctrl+P X` 和 `Ctrl+C` 发送后自动收起，`Tab`、上方向键和下方向键为便于连续使用而保持展开。浮动控件必须位于浏览器安全区内，并且收起时不得占用整行或缩短终端高度；拖动浮动按钮时必须阻止浏览器平移手势，并按动画帧合并位置更新。
 
 固定 Zellij `0.44.3` 自带的已知 `/zellij/assets/*` 静态资源必须返回 `Cache-Control: private, max-age=86400, immutable` 和包含版本、文件名的弱 `ETag`。浏览器发送匹配的 `If-None-Match` 时，管理服务必须直接返回 `304`，不得访问 Zellij 上游。客户端声明接受 gzip 时，大于等于 1 KiB 的可压缩响应使用 gzip 传输并设置正确的 `Content-Encoding` 与 `Vary`；请求正文解压必须保持关闭。入口 HTML、登录/API 响应和 WebSocket 不得使用静态资源长期缓存策略。
@@ -440,11 +442,15 @@ Zellij Web 保留自身 Token 与 Cookie 认证。通过同源 `/zellij` 入口�
 
 每个 repository 条目的“code-viewer”旁边显示“编辑代码”链接。链接在新标签页打开，并设置 `rel="noopener noreferrer"`。
 
+CodeReviewer 入口页面的浏览器标题固定为 `<repository-name> - CodeReviewer`，其中 repository 名称由 viewer 实例绑定的 repository ID 在服务端重新解析，前端不得提交或拼接标题。只允许改写入口 HTML；静态资源、SSE 和其他代理响应保持流式转发。
+
 OpenVSCode Server 是部署侧独立启动的编辑服务，但不得直接暴露其 HTTP 端口。后端必须对每个 repository ID 重新执行真实路径解析、Git repository 检查和对应来源的路径边界校验，然后基于 `publicBaseUrl` 和校验后的 repository 绝对路径生成同源 HTTPS URL：`<publicBaseUrl>/openvscode/?folder=<encoded-absolute-path>`。`GET /api/repositories` 在每个 repository 条目中返回对应的 `openVSCodeUrl`；OpenVSCode 将 `folder` 参数解析为远程目录并自动打开该 repository。
 
 前端必须直接使用条目中的 `openVSCodeUrl`，不得自行拼接或提交服务器绝对路径、命令、环境变量或任意端口。后端只可为 workspace 扫描结果或已持久化的手动 Git repository 生成 URL；已经消失或不再是 Git repository 的目录不得生成 URL。
 
 管理服务必须把 `/openvscode` 下的普通 HTTP 请求和 WebSocket Upgrade 流式代理到 `http://127.0.0.1:<openVSCode.port>`，保留 `/openvscode` 基路径，并使用 `publicBaseUrl` 的 authority 和 HTTPS Origin 生成上游请求头。这样非 localhost 浏览器仍处于安全上下文，Codex 等依赖 Webview、Worker 或安全浏览器 API 的扩展能够正常渲染。OpenVSCode 上游不得加入防火墙公开端口。
+
+OpenVSCode 入口页面的浏览器标题固定为 `<repository-name> - openvscode`。repository 名称由后端已校验后生成的 `folder` 参数取 basename，入口 HTML 必须锁定该标题以防 OpenVSCode 初始化后覆盖；静态资源、API 和 WebSocket 不修改正文。
 
 OpenVSCode 进程的工作目录必须设置为配置给管理服务的同一 workspace root。部署命令的参数数组固定为：
 
@@ -459,6 +465,8 @@ OpenVSCode 平时仍是独立进程，但统一重启脚本负责停止并重新
 ### 4.7 Codex 浏览器对话
 
 repository 条目的“与 Codex 对话”链接必须在新标签页打开 `/codex-chat?repositoryId=<encoded-id>`，并设置 `rel="noopener noreferrer"`。对话页面必须先通过 `GET /api/repositories` 确认 ID 仍对应当前列表中的 Git repository；前端不得把 relative path 转换为服务器路径，也不得提交绝对路径、命令、命令参数、环境变量、KDL、可执行文件或 Codex 配置。
+
+Codex 对话页面在 repository 校验成功后把浏览器标题设置为 `<repository-name> - Codex`；repository 不可用或尚未加载时使用通用 `Codex` 标题。标题只能使用 `GET /api/repositories` 返回的名称。
 
 对话页面在运行中的助手消息尚无文本时显示等待动画；一旦收到部分助手文本且快照状态仍为 `running`，最新助手消息必须继续显示动态生成提示，直到快照进入非运行状态后移除。历史助手消息和已经完成的最新消息不得显示该提示。用户位于消息列表底部附近时，新增流式内容自动跟随到底部；用户主动向上滚动后停止自动跟随，不得因后续增量快照强制改变阅读位置，并显示可手动回到最新消息的入口。
 

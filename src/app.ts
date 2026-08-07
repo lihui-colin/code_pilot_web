@@ -15,6 +15,12 @@ import { ApiError } from './errors.js';
 import { registerCodexRoutes } from './routes/codex.js';
 import { emptyBodySchema, noBodySchema, repositoryIdSchema, repositoryParamsSchema } from './routes/schemas.js';
 import { CodexChatService, SpawnCodexAppServerAdapter, type CodexChatServiceLike } from './services/codex-chat-service.js';
+import {
+  HTML_TITLE_SCRIPT,
+  HTML_TITLE_SCRIPT_PATH,
+  lockHtmlTitle,
+  readHtmlResponse,
+} from './services/html-title.js';
 import { RepositoryService } from './services/repository-service.js';
 import type { ServiceRestarter } from './services/service-restarter.js';
 import { SpawnViewerProcessAdapter, ViewerManager } from './services/viewer-manager.js';
@@ -435,7 +441,7 @@ async function requestZellijWebLogin(destination: string, token: string) {
   });
 }
 
-async function proxyZellijHtml(destination: string, cookie: string | undefined, cookiePrefix: string) {
+async function proxyZellijHtml(destination: string, cookie: string | undefined, cookiePrefix: string, pageTitle: string) {
   const url = new URL(destination);
   const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
   const upstreamCookie = upstreamZellijCookie(cookie, cookiePrefix);
@@ -465,9 +471,12 @@ async function proxyZellijHtml(destination: string, cookie: string | undefined, 
         resolve({
           statusCode: response.statusCode ?? 502,
           headers,
-          body: Buffer.concat(chunks).toString('utf8')
-            .replace('<base href="/" />', '<base href="/zellij/" />')
-            .replace('</body>', `${ZELLIJ_SHORTCUTS}</body>`),
+          body: lockHtmlTitle(
+            Buffer.concat(chunks).toString('utf8')
+              .replace('<base href="/" />', '<base href="/zellij/" />')
+              .replace('</body>', `${ZELLIJ_SHORTCUTS}</body>`),
+            pageTitle,
+          ),
         });
       });
     });
@@ -521,6 +530,10 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     .type('application/javascript; charset=utf-8')
     .header('cache-control', 'no-cache')
     .send(ZELLIJ_SHORTCUTS_SCRIPT));
+  app.get(HTML_TITLE_SCRIPT_PATH, async (_request, reply) => reply
+    .type('application/javascript; charset=utf-8')
+    .header('cache-control', 'no-cache')
+    .send(HTML_TITLE_SCRIPT));
   app.get('/viewer-launch/:repositoryId', async (request, reply) => {
     const params = repositoryParamsSchema.parse(request.params);
     return reply
@@ -593,10 +606,22 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
         }).send();
       }
       if (request.method === 'GET' && (/^\/zellij\/?$/u.test(pathname) || /^\/zellij\/[A-Za-z0-9_-]{1,64}\/?$/u.test(pathname))) {
+        const sessionName = /^\/zellij\/([A-Za-z0-9_-]{1,64})\/?$/u.exec(pathname)?.[1];
+        let repositoryName: string | undefined;
+        const metadata = sessionName ? dependencies.managedSessions?.get(sessionName) : undefined;
+        if (metadata) repositoryName = path.basename(metadata.relativePath);
+        if (sessionName && repositoryService) {
+          const listing = await repositoryService.list();
+          const repositoryId = metadata?.repositoryId
+            ?? [...repositorySessionNames(listing.entries).entries()]
+              .find(([, name]) => name === sessionName)?.[0];
+          repositoryName = listing.entries.find(entry => entry.id === repositoryId)?.name;
+        }
         const response = await proxyZellijHtml(
           new URL(destination, `${zellijProxyUpstream}/`).toString(),
           request.headers.cookie,
           zellijBrowserCookiePrefix,
+          `${repositoryName ?? sessionName ?? 'Zellij'} - Zellij`,
         );
         return reply.code(response.statusCode).headers(response.headers).send(response.body);
       }
@@ -611,12 +636,32 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     websocket: true,
     disableRequestLogging: true,
     replyOptions: {
-      rewriteRequestHeaders: (_request, headers) => ({
-        ...headers,
-        host: openVSCodePublicUrl.host,
-        'x-forwarded-host': openVSCodePublicUrl.host,
-        'x-forwarded-proto': 'https',
-      }),
+      rewriteRequestHeaders: (request, headers) => {
+        const pathname = new URL(request.raw.url ?? '/', config.publicBaseUrl).pathname;
+        return {
+          ...headers,
+          ...(request.method === 'GET' && /^\/openvscode\/?$/u.test(pathname) ? { 'accept-encoding': 'identity' } : {}),
+          host: openVSCodePublicUrl.host,
+          'x-forwarded-host': openVSCodePublicUrl.host,
+          'x-forwarded-proto': 'https',
+        };
+      },
+      onResponse: (request, reply, response) => {
+        const requestUrl = new URL(request.raw.url ?? '/', config.publicBaseUrl);
+        const responseHeaders = (response as unknown as { headers: IncomingHttpHeaders }).headers;
+        const contentType = responseHeaders['content-type'];
+        if (request.method !== 'GET' || !/^\/openvscode\/?$/u.test(requestUrl.pathname)
+          || typeof contentType !== 'string' || !contentType.includes('text/html')) {
+          reply.send(response.stream);
+          return;
+        }
+        const folder = requestUrl.searchParams.get('folder');
+        const repositoryName = folder ? path.basename(folder) : 'OpenVSCode';
+        void readHtmlResponse(response.stream, 'OpenVSCode').then(html => {
+          reply.removeHeader('content-length');
+          reply.send(lockHtmlTitle(html, `${repositoryName} - openvscode`));
+        }).catch(error => reply.send(error));
+      },
     },
     wsClientOptions: {
       headers: {
@@ -856,12 +901,22 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       const requestUrl = new URL(request.raw.url ?? '/', config.publicBaseUrl);
       const prefixed = requestUrl.pathname.match(/^\/viewer\/(viewer_[A-Za-z0-9_-]{22})(\/.*)?$/u);
       if (prefixed?.[1]) {
+        let pageTitle: string | undefined;
+        if (!prefixed[2] || prefixed[2] === '/') {
+          const repositoryId = viewerManager.repositoryIdFor(prefixed[1]);
+          if (repositoryId && repositoryService) {
+            const listing = await repositoryService.list();
+            const repository = listing.entries.find(entry => entry.id === repositoryId);
+            if (repository) pageTitle = `${repository.name} - CodeReviewer`;
+          }
+        }
         return proxyViewerRequest(
           request,
           reply,
           viewerManager,
           prefixed[1],
           `${prefixed[2] ?? '/'}${requestUrl.search}`,
+          pageTitle,
         );
       }
       const managementPage = requestUrl.pathname === '/' || requestUrl.pathname === '/codex-chat';

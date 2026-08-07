@@ -102,6 +102,7 @@ describe('CodexChat', () => {
   it('loads the selected repository and renders a background conversation snapshot', async () => {
     render(<CodexChat />);
     expect(await screen.findByRole('heading', { name: 'codepilot-web' })).toBeInTheDocument();
+    expect(document.title).toBe('codepilot-web - Codex');
     const input = screen.getByRole('textbox', { name: '发送给 Codex 的消息' });
     fireEvent.change(input, { target: { value: '分析项目结构' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));

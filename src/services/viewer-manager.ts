@@ -112,6 +112,12 @@ export class ViewerManager {
     return this.active?.instance.status === 'running' ? this.active.instance.id : null;
   }
 
+  repositoryIdFor(viewerId: string): string | null {
+    return this.active?.instance.id === viewerId && this.active.instance.status === 'running'
+      ? this.active.instance.repositoryId
+      : null;
+  }
+
   async create(repositoryId: string, repositoryRealPath: string): Promise<{ instance: ViewerInstance; created: boolean }> {
     if (this.starting) {
       const instance = await this.starting;

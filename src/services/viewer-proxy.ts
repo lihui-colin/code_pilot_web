@@ -1,4 +1,6 @@
+import type { IncomingHttpHeaders } from 'node:http';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { lockHtmlTitle, readHtmlResponse } from './html-title.js';
 import type { ViewerManager } from './viewer-manager.js';
 
 export const VIEWER_COOKIE_NAME = 'codepilot_web_viewer';
@@ -18,6 +20,7 @@ export function proxyViewerRequest(
   manager: ViewerManager,
   viewerId: string,
   upstreamPath: string,
+  pageTitle?: string,
 ): FastifyReply {
   const upstreamBaseUrl = manager.upstreamFor(viewerId);
   if (!upstreamBaseUrl) {
@@ -29,6 +32,7 @@ export function proxyViewerRequest(
   return reply.from(upstreamPath, {
     rewriteRequestHeaders: (_incomingRequest, headers) => {
       const rewritten = { ...headers, host: upstream.host };
+      if (pageTitle) rewritten['accept-encoding'] = 'identity';
       delete rewritten.cookie;
       if (rewritten.origin) rewritten.origin = upstream.origin;
       if (rewritten.referer) rewritten.referer = `${upstream.origin}/`;
@@ -38,5 +42,17 @@ export function proxyViewerRequest(
       ...headers,
       'set-cookie': [`${VIEWER_COOKIE_NAME}=${viewerId}; Path=/; HttpOnly; SameSite=Strict`],
     }),
+    onResponse: (_incomingRequest, responseReply, response) => {
+      const responseHeaders = (response as unknown as { headers: IncomingHttpHeaders }).headers;
+      const contentType = responseHeaders['content-type'];
+      if (!pageTitle || typeof contentType !== 'string' || !contentType.includes('text/html')) {
+        responseReply.send(response.stream);
+        return;
+      }
+      void readHtmlResponse(response.stream, 'CodeReviewer').then(html => {
+        responseReply.removeHeader('content-length');
+        responseReply.send(lockHtmlTitle(html, pageTitle));
+      }).catch(error => responseReply.send(error));
+    },
   });
 }
