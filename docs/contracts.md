@@ -186,7 +186,7 @@ Session 出现在结果中即为 `running`。MVP 不探测 Session 内 Codex 是
 
 Session URL 由服务端生成。打开入口先由同源管理服务使用服务端保存的 Token 登录 localhost Zellij Web，把上游认证 Cookie 写入浏览器响应，再重定向到实际 Session 页面；Token 不得出现在 URL、HTML 或重定向响应中：
 
-浏览器 Cookie 不按端口隔离。为避免同一主机上不同管理端口或不同容器实例的 Zellij `session_token` 互相覆盖，管理代理必须按 `publicBaseUrl` 端口改写浏览器侧 Cookie 名，并把 Path 收敛为 `/zellij`；转发 HTTP 和 WebSocket 请求到各自 localhost Zellij 上游前，再还原为 Zellij 原始 Cookie 名。不得把其他管理端口的认证 Cookie 转发给当前实例。
+浏览器 Cookie 不按端口隔离。为避免同一主机上不同管理端口或不同容器实例的 Zellij `session_token` 互相覆盖，管理代理必须按 `publicBaseUrl` 端口改写浏览器侧 Cookie 名，并把 Path 收敛为 `/zellij`；转发 HTTP 和 WebSocket 请求到各自 localhost Zellij 上游前，再还原为 Zellij 原始 Cookie 名。不得把其他管理端口的认证 Cookie 转发给当前实例。服务端登录固定使用 `remember_me: true`，保留 Zellij 返回的 `Secure`、`HttpOnly`、`SameSite=Strict` 和 `Max-Age` 属性，使手机浏览器后台回收页面后仍可恢复认证。浏览器直接刷新 `/zellij/<session>` 时若 Cookie 缺失，管理代理必须自动重定向到对应 `/zellij/open/<session>`；Cookie 已失效且上游返回未认证入口 HTML 时，代理必须使用服务端 Token 重新登录并返回当前 Session，不得要求用户手工输入 Token。
 
 ```typescript
 new URL(`${encodeURIComponent(name)}`, `${baseUrl}/open/`).toString()

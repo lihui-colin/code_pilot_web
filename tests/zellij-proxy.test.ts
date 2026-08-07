@@ -72,7 +72,7 @@ describe('Zellij Web same-origin proxy', () => {
         request.on('end', () => {
           if (requestBody) {
             loginBody = requestBody;
-            response.writeHead(200, { 'set-cookie': 'zellij-auth=test-session; Path=/; HttpOnly; SameSite=Strict' });
+            response.writeHead(200, { 'set-cookie': 'zellij-auth=test-session; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=2419200' });
             response.end('{}');
           } else {
             response.writeHead(200, { 'content-type': 'application/json' });
@@ -157,12 +157,16 @@ describe('Zellij Web same-origin proxy', () => {
       expect(openSession.status).toBe(302);
       expect(openSession.headers.get('location')).toBe(`/zellij/${sessionName}`);
       expect(openSession.headers.get('set-cookie')).toBe(
-        'codepilot_zellij_8024_zellij-auth=test-session; Path=/zellij; HttpOnly; SameSite=Strict',
+        'codepilot_zellij_8024_zellij-auth=test-session; Path=/zellij; HttpOnly; SameSite=Strict; Secure; Max-Age=2419200',
       );
       expect(JSON.parse(loginBody)).toEqual({
         auth_token: '123e4567-e89b-42d3-a456-426614174000',
-        remember_me: false,
+        remember_me: true,
       });
+
+      const refreshWithoutCookie = await fetch(`http://127.0.0.1:${appPort}/zellij/${sessionName}`, { redirect: 'manual' });
+      expect(refreshWithoutCookie.status).toBe(302);
+      expect(refreshWithoutCookie.headers.get('location')).toBe(`/zellij/open/${sessionName}`);
 
       const html = await fetch(`http://127.0.0.1:${appPort}/zellij/session-name`, {
         headers: { cookie: 'codepilot_zellij_8024_zellij-auth=test-session; codepilot_zellij_9024_zellij-auth=other-session' },
