@@ -184,7 +184,10 @@ describe('Zellij Web same-origin proxy', () => {
       expect(htmlBody).toContain('data-expanded="false"');
       expect(htmlBody).toContain('data-idle="true"');
       expect(htmlBody).toContain('data-sequence="16,110" data-hint="Ctrl+P N"');
-      expect(htmlBody).toContain('data-sequence="16,120" data-hint="Ctrl+P X"');
+      expect(htmlBody).toContain('data-sequence="16,120" data-confirm="Ctrl+P X 会关闭当前 Zellij 面板，是否继续？" data-hint="Ctrl+P X"');
+      expect(htmlBody).toContain('aria-label="关闭当前 Zellij 面板（需确认）"');
+      expect(htmlBody).toContain('id="codepilot-shortcut-confirmation" role="dialog"');
+      expect(htmlBody).toContain('position: fixed; inset: 0; z-index: 2147483646; display: none; place-items: center');
       expect(htmlBody).toContain('data-sequence="3" data-hint="Ctrl+C"');
       expect(htmlBody).toContain('data-sequence="9" data-keep-expanded="true" data-hint="Tab"');
       expect(htmlBody).toContain('data-key="ArrowUp" data-sequence="27,91,65" data-keep-expanded="true"');
@@ -224,7 +227,10 @@ describe('Zellij Web same-origin proxy', () => {
       const dom = new JSDOM(htmlBody, { runScripts: 'outside-only', url: 'https://codepilot.test/zellij/session-name' });
       const sentSequences: string[] = [];
       const terminal = { options: { fontSize: 15 } };
-      Object.assign(dom.window, { __zjImeBypass: { sendFn: (sequence: string) => sentSequences.push(sequence) }, term: terminal });
+      Object.assign(dom.window, {
+        __zjImeBypass: { sendFn: (sequence: string) => sentSequences.push(sequence) },
+        term: terminal,
+      });
       Object.defineProperty(dom.window.navigator, 'maxTouchPoints', { configurable: true, value: 0 });
       dom.window.eval(shortcutScript);
       const terminalInput = dom.window.document.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
@@ -260,14 +266,33 @@ describe('Zellij Web same-origin proxy', () => {
       expect(toggle?.getAttribute('aria-expanded')).toBe('false');
       expect(toggle?.getAttribute('aria-label')).toBe('展开快捷键盘');
       clickToggle();
+      const closePane = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="16,120"]');
+      const confirmationDialog = dom.window.document.querySelector<HTMLElement>('#codepilot-shortcut-confirmation');
+      const confirmationCancel = dom.window.document.querySelector<HTMLButtonElement>('[data-confirmation-action="cancel"]');
+      const confirmationAccept = dom.window.document.querySelector<HTMLButtonElement>('[data-confirmation-action="accept"]');
+      closePane?.click();
+      expect(confirmationDialog?.dataset.open).toBe('true');
+      expect(confirmationDialog?.getAttribute('aria-hidden')).toBe('false');
+      expect(confirmationDialog?.textContent).toContain('Ctrl+P X 会关闭当前 Zellij 面板，是否继续？');
+      expect(sentSequences).toEqual(['\x10n']);
+      expect(toolbar?.getAttribute('data-expanded')).toBe('true');
+      confirmationCancel?.click();
+      expect(confirmationDialog?.dataset.open).toBe('false');
+      expect(sentSequences).toEqual(['\x10n']);
+      closePane?.click();
+      confirmationAccept?.click();
+      expect(sentSequences).toEqual(['\x10n', '\x10x']);
+      expect(confirmationDialog?.dataset.open).toBe('false');
+      expect(toolbar?.getAttribute('data-expanded')).toBe('false');
+      clickToggle();
       const interrupt = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="3"]');
       interrupt?.click();
-      expect(sentSequences).toEqual(['\x10n', '\x03']);
+      expect(sentSequences).toEqual(['\x10n', '\x10x', '\x03']);
       clickToggle();
       const tab = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="9"]');
       tab?.click();
       tab?.click();
-      expect(sentSequences).toEqual(['\x10n', '\x03', '\t', '\t']);
+      expect(sentSequences).toEqual(['\x10n', '\x10x', '\x03', '\t', '\t']);
       expect(toolbar?.getAttribute('data-expanded')).toBe('true');
       const arrowUp = dom.window.document.querySelector<HTMLButtonElement>('[data-key="ArrowUp"]');
       const arrowDown = dom.window.document.querySelector<HTMLButtonElement>('[data-key="ArrowDown"]');
@@ -276,7 +301,7 @@ describe('Zellij Web same-origin proxy', () => {
       expect(dom.window.document.activeElement).toBe(terminalInput);
       arrowUp?.click();
       arrowDown?.click();
-      expect(sentSequences).toEqual(['\x10n', '\x03', '\t', '\t', '\x1b[A', '\x1b[B']);
+      expect(sentSequences).toEqual(['\x10n', '\x10x', '\x03', '\t', '\t', '\x1b[A', '\x1b[B']);
       expect(dom.window.document.activeElement).not.toBe(terminalInput);
       expect(toolbar?.getAttribute('data-expanded')).toBe('true');
       Object.defineProperty(toolbar, 'offsetWidth', { configurable: true, value: 45 });
