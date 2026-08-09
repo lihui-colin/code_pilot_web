@@ -1,5 +1,6 @@
-import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import type {
+  CodexActivitySnapshot,
   CodexChatAppearance,
   CodexChatMessageSnapshot,
   CodexCliStatus,
@@ -16,6 +17,7 @@ import {
   getRepositoryContextFiles,
   subscribeCodexConversation,
   startCodexMessage,
+  steerCodexConversation,
   stopCodexConversation,
 } from './api.js';
 import { errorMessage, readBrowserStorage, writeBrowserStorage } from './browser-utils.js';
@@ -87,6 +89,32 @@ function reconcileMessages(
     : next;
 }
 
+function sameActivity(left: CodexActivitySnapshot, right: CodexActivitySnapshot): boolean {
+  return left.id === right.id
+    && left.assistantMessageId === right.assistantMessageId
+    && left.kind === right.kind
+    && left.title === right.title
+    && left.status === right.status
+    && left.detail === right.detail
+    && JSON.stringify(left.files ?? []) === JSON.stringify(right.files ?? []);
+}
+
+function reconcileActivities(
+  previous: CodexActivitySnapshot[],
+  incoming: CodexActivitySnapshot[],
+  preserveHistory: boolean,
+): CodexActivitySnapshot[] {
+  const previousById = new Map(previous.map(activity => [activity.id, activity]));
+  const incomingIds = new Set(incoming.map(activity => activity.id));
+  const next = incoming.map(activity => {
+    const current = previousById.get(activity.id);
+    return current && sameActivity(current, activity) ? current : activity;
+  });
+  return preserveHistory
+    ? [...previous.filter(activity => !incomingIds.has(activity.id)), ...next]
+    : next;
+}
+
 interface ChatMessageProps {
   message: CodexChatMessageSnapshot;
   displayName: string;
@@ -133,6 +161,39 @@ const ChatMessage = memo(function ChatMessage({
             : streaming
             ? <div className="chat-thinking"><i /><i /><i /></div>
             : <div className="chat-message-empty">未收到回复</div>}
+      </div>
+    </article>
+  );
+});
+
+const activityStatusLabels: Record<CodexActivitySnapshot['status'], string> = {
+  running: '进行中',
+  completed: '完成',
+  failed: '失败',
+};
+
+const activityIcons: Record<CodexActivitySnapshot['kind'], string> = {
+  thinking: '◇',
+  command: '>_',
+  'file-change': '±',
+  tool: '⚙',
+};
+
+const CodexActivity = memo(function CodexActivity({ activity }: { activity: CodexActivitySnapshot }) {
+  return (
+    <article className={`chat-activity ${activity.kind} ${activity.status}`} aria-label={activity.title}>
+      <span className="chat-activity-icon" aria-hidden="true">{activityIcons[activity.kind]}</span>
+      <div className="chat-activity-body">
+        <div className="chat-activity-heading">
+          <strong>{activity.title}</strong>
+          <span>{activityStatusLabels[activity.status]}</span>
+        </div>
+        {activity.detail && <div className="chat-activity-detail">{activity.detail}</div>}
+        {activity.files?.length ? (
+          <ul className="chat-activity-files">
+            {activity.files.map(file => <li key={`${file.kind}:${file.path}`}><b>{file.kind}</b>{file.path}</li>)}
+          </ul>
+        ) : null}
       </div>
     </article>
   );
@@ -218,6 +279,7 @@ export function CodexChat() {
   const [loading, setLoading] = useState(true);
   const [checkingCodexStatus, setCheckingCodexStatus] = useState(false);
   const [startingTurn, setStartingTurn] = useState(false);
+  const [steeringTurn, setSteeringTurn] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const [contextFiles, setContextFiles] = useState<RepositoryContextFile[] | null>(null);
@@ -241,6 +303,15 @@ export function CodexChat() {
   const displayAvatar = Array.from(displayName)[0]?.toLocaleUpperCase() ?? 'M';
   const appearance = appearanceOverride ?? configuredAppearance;
   const messages = conversation?.messages ?? [];
+  const activitiesByAssistantMessage = useMemo(() => {
+    const grouped = new Map<string, CodexActivitySnapshot[]>();
+    for (const activity of conversation?.activities ?? []) {
+      const activities = grouped.get(activity.assistantMessageId) ?? [];
+      activities.push(activity);
+      grouped.set(activity.assistantMessageId, activities);
+    }
+    return grouped;
+  }, [conversation?.activities]);
   const conversationId = conversation?.conversationId ?? null;
   const starting = startingTurn || (conversation?.status === 'running' && conversation.phase === 'starting');
   const running = startingTurn || conversation?.status === 'running';
@@ -310,7 +381,14 @@ export function CodexChat() {
     const nextMessages = snapshot
       ? reconcileMessages(previous?.messages ?? [], snapshot.messages, preserveHistory && Boolean(sameConversation))
       : null;
-    const unchanged = snapshot && previous && nextMessages
+    const nextActivities = snapshot
+      ? reconcileActivities(
+        previous?.activities ?? [],
+        snapshot.activities ?? [],
+        preserveHistory && Boolean(sameConversation),
+      )
+      : null;
+    const unchanged = snapshot && previous && nextMessages && nextActivities
       && snapshot.repositoryId === previous.repositoryId
       && snapshot.conversationId === previous.conversationId
       && snapshot.status === previous.status
@@ -318,10 +396,12 @@ export function CodexChat() {
       && snapshot.error === previous.error
       && snapshot.updatedAt === previous.updatedAt
       && nextMessages.length === previous.messages.length
-      && nextMessages.every((message, index) => message === previous.messages[index]);
+      && nextMessages.every((message, index) => message === previous.messages[index])
+      && nextActivities.length === (previous.activities?.length ?? 0)
+      && nextActivities.every((activity, index) => activity === previous.activities?.[index]);
     setRequestError(null);
     if (unchanged) return;
-    const next = snapshot ? { ...snapshot, messages: nextMessages! } : null;
+    const next = snapshot ? { ...snapshot, messages: nextMessages!, activities: nextActivities! } : null;
     conversationRef.current = next;
     setConversation(next);
     storeConversation(next);
@@ -364,9 +444,11 @@ export function CodexChat() {
 
   useEffect(() => {
     if (!repositoryId || loading || typeof subscribeCodexConversation !== 'function') return;
-    return subscribeCodexConversation(repositoryId, snapshot => {
-      if (!snapshot && conversationRef.current) return;
-      applySnapshot(snapshot);
+    return subscribeCodexConversation(repositoryId, (snapshot, event) => {
+      if (!snapshot && conversationRef.current && event?.type === 'conversation.snapshot') return;
+      const authoritativeRollback = event?.type === 'turn.completed'
+        && Boolean(event.rollbackMessageIds?.length);
+      applySnapshot(snapshot, !authoritativeRollback);
     });
   }, [repositoryId, loading]);
 
@@ -472,7 +554,23 @@ export function CodexChat() {
 
   const send = async (message = draft) => {
     const content = message.trim();
-    if (!content || !repositoryId || !repository || !codexStatus?.available || running) return;
+    if (!content || !repositoryId || !repository || !codexStatus?.available || starting || steeringTurn) return;
+    if (running) {
+      setDraft('');
+      setRequestError(null);
+      autoScrollRef.current = true;
+      setFollowingLatest(true);
+      setSteeringTurn(true);
+      try {
+        applySnapshot(await steerCodexConversation(repositoryId, content));
+      } catch (caught) {
+        setDraft(content);
+        setRequestError(errorMessage(caught, 'Codex 追加输入失败'));
+      } finally {
+        setSteeringTurn(false);
+      }
+      return;
+    }
     const attachedFiles = selectedContextFiles;
     setDraft('');
     setSelectedContextFiles([]);
@@ -689,8 +787,8 @@ export function CodexChat() {
           </span>
         </header>
 
-        <div className="chat-message-region">
-          <div ref={messagesContainerRef} className="chat-messages" aria-live="polite" onScroll={onMessagesScroll}>
+        <div ref={messagesContainerRef} className="chat-message-region" onScroll={onMessagesScroll}>
+          <div className="chat-messages" aria-live="polite">
             {error && <div className="error" role="alert">{error}</div>}
             {!loading && repository && codexStatus?.available && messages.length === 0 && (
               <div className="chat-empty">
@@ -705,14 +803,20 @@ export function CodexChat() {
               </div>
             )}
             {messages.map((message, index) => (
-              <ChatMessage
-                key={message.id}
-                message={message}
-                displayName={displayName}
-                displayAvatar={displayAvatar}
-                streaming={running && message.role === 'assistant' && index === messages.length - 1}
-                starting={starting && message.role === 'assistant' && index === messages.length - 1}
-              />
+              <Fragment key={message.id}>
+                {message.role === 'assistant'
+                  ? activitiesByAssistantMessage.get(message.id)?.map(activity => (
+                    <CodexActivity key={activity.id} activity={activity} />
+                  ))
+                  : null}
+                <ChatMessage
+                  message={message}
+                  displayName={displayName}
+                  displayAvatar={displayAvatar}
+                  streaming={running && message.role === 'assistant' && index === messages.length - 1}
+                  starting={starting && message.role === 'assistant' && index === messages.length - 1}
+                />
+              </Fragment>
             ))}
           </div>
           {!followingLatest && messages.length > 0 && (
@@ -720,71 +824,77 @@ export function CodexChat() {
               ↓ 回到最新消息
             </button>
           )}
-        </div>
 
-        <div className="chat-composer-wrap">
-          {filePickerOpen && (
-            <section ref={filePickerRef} className="chat-file-picker" role="dialog" aria-label="选择上下文文件">
-              <div className="chat-file-picker-heading">
-                <div><strong>Add file</strong><small>最多选择 8 个文本文件</small></div>
-                <button type="button" aria-label="关闭文件选择" onClick={() => setFilePickerOpen(false)}>×</button>
-              </div>
-              <input
-                aria-label="搜索仓库文件"
-                value={fileSearch}
-                onChange={event => setFileSearch(event.target.value)}
-                placeholder="搜索相对路径…"
-              />
-              <div className="chat-file-list">
-                {filesLoading && <p>正在读取仓库文件…</p>}
-                {!filesLoading && renderContextFileTree(contextFileTree)}
-                {!filesLoading && visibleContextFileCount === 0 && <p>没有匹配的可附加文本文件。</p>}
-              </div>
-              {contextFilesTruncated && (
-                <small className="chat-file-limit-note">文件较多，请通过路径搜索缩小范围。</small>
-              )}
-            </section>
-          )}
-          <form className="chat-composer" onSubmit={submit}>
-            {selectedContextFiles.length > 0 && (
-              <div className="chat-selected-files">
-                {selectedContextFiles.map(file => (
-                  <button type="button" key={file.id} onClick={() => toggleContextFile(file)} title="移除附件">
-                    <span>📎 {file.relativePath}</span><b>×</b>
-                  </button>
-                ))}
-              </div>
+          <div className="chat-composer-wrap">
+            {filePickerOpen && (
+              <section ref={filePickerRef} className="chat-file-picker" role="dialog" aria-label="选择上下文文件">
+                <div className="chat-file-picker-heading">
+                  <div><strong>Add file</strong><small>最多选择 8 个文本文件</small></div>
+                  <button type="button" aria-label="关闭文件选择" onClick={() => setFilePickerOpen(false)}>×</button>
+                </div>
+                <input
+                  aria-label="搜索仓库文件"
+                  value={fileSearch}
+                  onChange={event => setFileSearch(event.target.value)}
+                  placeholder="搜索相对路径…"
+                />
+                <div className="chat-file-list">
+                  {filesLoading && <p>正在读取仓库文件…</p>}
+                  {!filesLoading && renderContextFileTree(contextFileTree)}
+                  {!filesLoading && visibleContextFileCount === 0 && <p>没有匹配的可附加文本文件。</p>}
+                </div>
+                {contextFilesTruncated && (
+                  <small className="chat-file-limit-note">文件较多，请通过路径搜索缩小范围。</small>
+                )}
+              </section>
             )}
-            <textarea
-              ref={draftInputRef}
-              aria-label="发送给 Codex 的消息"
-              value={draft}
-              onChange={event => setDraft(event.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="给 Codex 发送消息…"
-              rows={1}
-              maxLength={20_000}
-              disabled={!repository || !codexStatus?.available || running}
-            />
-            <div className="chat-composer-footer">
-              <div className="chat-composer-tools">
-                <button
-                  ref={filePickerTriggerRef}
-                  type="button"
-                  onClick={() => void openFilePicker()}
-                  disabled={!repository || !codexStatus?.available || running}
-                >＋ Add file</button>
-                <span>{selectedContextFiles.length > 0 ? `已选 ${selectedContextFiles.length}/8` : 'Enter 发送 · Shift+Enter 换行'}</span>
-              </div>
-              {running ? (
-                <button className="danger-button" type="button" onClick={() => void stop()}>
-                  {starting ? '取消启动' : '停止'}
-                </button>
-              ) : (
-                <button type="submit" disabled={!draft.trim() || !repository || !codexStatus?.available}>发送</button>
+            <form className="chat-composer" onSubmit={submit}>
+              {selectedContextFiles.length > 0 && (
+                <div className="chat-selected-files">
+                  {selectedContextFiles.map(file => (
+                    <button type="button" key={file.id} onClick={() => toggleContextFile(file)} title="移除附件">
+                      <span>📎 {file.relativePath}</span><b>×</b>
+                    </button>
+                  ))}
+                </div>
               )}
-            </div>
-          </form>
+              <textarea
+                ref={draftInputRef}
+                aria-label="发送给 Codex 的消息"
+                value={draft}
+                onChange={event => setDraft(event.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder={running ? '在当前 turn 中追加输入…' : '给 Codex 发送消息…'}
+                rows={1}
+                maxLength={20_000}
+                disabled={!repository || !codexStatus?.available || starting}
+              />
+              <div className="chat-composer-footer">
+                <div className="chat-composer-tools">
+                  <button
+                    ref={filePickerTriggerRef}
+                    type="button"
+                    onClick={() => void openFilePicker()}
+                    disabled={!repository || !codexStatus?.available || running}
+                  >＋ Add file</button>
+                  <span>{selectedContextFiles.length > 0 ? `已选 ${selectedContextFiles.length}/8` : 'Enter 发送 · Shift+Enter 换行'}</span>
+                </div>
+                {running ? (
+                  <div className="chat-running-actions">
+                    <button
+                      type="submit"
+                      disabled={starting || steeringTurn || !draft.trim() || !repository || !codexStatus?.available}
+                    >{steeringTurn ? '追加中…' : '追加输入'}</button>
+                    <button className="danger-button" type="button" onClick={() => void stop()}>
+                      {starting ? '取消启动' : '停止'}
+                    </button>
+                  </div>
+                ) : (
+                  <button type="submit" disabled={!draft.trim() || !repository || !codexStatus?.available}>发送</button>
+                )}
+              </div>
+            </form>
+          </div>
         </div>
       </section>
     </main>

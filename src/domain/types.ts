@@ -139,19 +139,120 @@ export interface CodexChatMessageSnapshot {
   contextFiles?: string[];
 }
 
+export interface CodexActivitySnapshot {
+  id: string;
+  assistantMessageId: string;
+  kind: 'thinking' | 'command' | 'file-change' | 'tool';
+  title: string;
+  status: 'running' | 'completed' | 'failed';
+  detail?: string;
+  files?: Array<{
+    path: string;
+    kind: string;
+  }>;
+}
+
+export interface CodexAppServerEventSnapshot {
+  id: string;
+  sequence: number;
+  kind: 'notification' | 'request' | 'response';
+  method: string;
+  requestId: string | null;
+  threadId: string | null;
+  turnId: string | null;
+  itemId: string | null;
+  status: 'received' | 'completed' | 'failed';
+  updatedAt: string;
+}
+
 export interface CodexConversationSnapshot {
   repositoryId: string;
   conversationId: string | null;
   messages: CodexChatMessageSnapshot[];
+  activities?: CodexActivitySnapshot[];
   status: 'idle' | 'running' | 'failed' | 'stopped';
   phase?: 'starting' | 'generating';
   error: string | null;
   updatedAt: string;
 }
 
-export type CodexConversationStreamEvent = {
-  conversation: CodexConversationSnapshot | null;
-};
+export type CodexConversationStreamEvent =
+  | {
+    type: 'conversation.snapshot';
+    conversation: CodexConversationSnapshot | null;
+  }
+  | {
+    type: 'turn.started';
+    repositoryId: string;
+    conversationId: string | null;
+    userMessage: CodexChatMessageSnapshot;
+    assistantMessage: CodexChatMessageSnapshot;
+    phase: 'starting';
+    updatedAt: string;
+  }
+  | {
+    type: 'thread.started';
+    repositoryId: string;
+    conversationId: string;
+    phase: 'generating';
+    updatedAt: string;
+  }
+  | {
+    type: 'turn.steered';
+    repositoryId: string;
+    conversationId: string;
+    userMessage: CodexChatMessageSnapshot;
+    assistantMessage: CodexChatMessageSnapshot;
+    phase: 'generating';
+    updatedAt: string;
+  }
+  | {
+    type: 'app-server.event';
+    repositoryId: string;
+    event: CodexAppServerEventSnapshot;
+    updatedAt: string;
+  }
+  | {
+    type: 'message.delta';
+    repositoryId: string;
+    conversationId: string | null;
+    messageId: string;
+    delta: string;
+    phase: 'generating';
+    updatedAt: string;
+  }
+  | {
+    type: 'message.completed';
+    repositoryId: string;
+    conversationId: string | null;
+    message: CodexChatMessageSnapshot;
+    phase: 'generating';
+    updatedAt: string;
+  }
+  | {
+    type: 'activity.updated';
+    repositoryId: string;
+    conversationId: string | null;
+    activity: CodexActivitySnapshot;
+    phase: 'generating';
+    updatedAt: string;
+  }
+  | {
+    type: 'turn.completed';
+    repositoryId: string;
+    conversationId: string | null;
+    assistantMessageId: string;
+    assistantMessage: CodexChatMessageSnapshot | null;
+    rollbackMessageIds?: string[];
+    status: 'idle' | 'failed' | 'stopped';
+    error: string | null;
+    updatedAt: string;
+  }
+  | {
+    type: 'conversation.cleared';
+    repositoryId: string;
+    updatedAt: string;
+  };
 
 export interface CodexConversationActivity {
   runningRepositoryIds: string[];

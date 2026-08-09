@@ -150,12 +150,13 @@ describe('MVP-1 routes', () => {
     await app.close();
   });
 
-  it('gets, stops, and clears a repository Codex conversation', async () => {
+  it('gets, steers, stops, and clears a repository Codex conversation', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-codex-lifecycle-'));
     temporaryDirectories.push(root);
     await mkdir(path.join(root, 'repository', '.git'), { recursive: true });
     let stoppedRepositoryId = '';
     let clearedRepositoryId = '';
+    let steeredInput: { repositoryId: string; message: string } | undefined;
     const app = await createApp(createTestConfig(root), {
       readiness: ready,
       directoryIdSecret: Buffer.from('route test secret'),
@@ -170,6 +171,18 @@ describe('MVP-1 routes', () => {
           error: null,
           updatedAt: '2026-08-04T00:00:00.000Z',
         }),
+        steerConversation: (repositoryId, message) => {
+          steeredInput = { repositoryId, message };
+          return {
+            repositoryId,
+            conversationId: '123e4567-e89b-42d3-a456-426614174000',
+            messages: [{ id: 'user-steered', role: 'user', content: message }],
+            status: 'running',
+            phase: 'generating',
+            error: null,
+            updatedAt: '2026-08-04T00:00:01.000Z',
+          };
+        },
         stopConversation: repositoryId => { stoppedRepositoryId = repositoryId; },
         clearConversation: repositoryId => { clearedRepositoryId = repositoryId; },
         close: async () => undefined,
@@ -184,6 +197,41 @@ describe('MVP-1 routes', () => {
     const snapshot = await app.inject({ method: 'GET', url: `/api/codex/conversations/${repositoryId}` });
     expect(snapshot.statusCode).toBe(200);
     expect(snapshot.json().conversation).toMatchObject({ repositoryId, status: 'running' });
+
+    const rejectedExtraField = await app.inject({
+      method: 'POST',
+      url: `/api/codex/conversations/${repositoryId}/steer`,
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { message: 'Run tests', method: 'turn/steer' },
+    });
+    expect(rejectedExtraField.statusCode).toBe(400);
+    expect(rejectedExtraField.json().error.code).toBe('INVALID_REQUEST');
+
+    const rejectedOrigin = await app.inject({
+      method: 'POST',
+      url: `/api/codex/conversations/${repositoryId}/steer`,
+      headers: { origin: 'https://attacker.example' },
+      payload: { message: 'Run tests' },
+    });
+    expect(rejectedOrigin.statusCode).toBe(403);
+
+    const rejectedRepository = await app.inject({
+      method: 'POST',
+      url: `/api/codex/conversations/dir_${'b'.repeat(43)}/steer`,
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { message: 'Run tests' },
+    });
+    expect(rejectedRepository.statusCode).toBe(404);
+
+    const steered = await app.inject({
+      method: 'POST',
+      url: `/api/codex/conversations/${repositoryId}/steer`,
+      headers: { origin: 'https://192.0.2.10:8024' },
+      payload: { message: 'Run tests' },
+    });
+    expect(steered.statusCode).toBe(202);
+    expect(steered.json().conversation).toMatchObject({ status: 'running', phase: 'generating' });
+    expect(steeredInput).toEqual({ repositoryId, message: 'Run tests' });
 
     const stopped = await app.inject({
       method: 'POST',
@@ -219,14 +267,30 @@ describe('MVP-1 routes', () => {
         getRunningRepositoryIds: () => [],
         subscribe: (repositoryId, listener) => {
           listener({
-            conversation: {
-              repositoryId,
-              conversationId: '123e4567-e89b-42d3-a456-426614174000',
-              messages: [{ id: 'assistant-live', role: 'assistant', content: '实时输出' }],
-              status: 'running',
-              error: null,
+            type: 'app-server.event',
+            repositoryId,
+            event: {
+              id: 'app-server-1',
+              sequence: 1,
+              kind: 'request',
+              method: 'item/tool/requestUserInput',
+              requestId: '91',
+              threadId: '123e4567-e89b-42d3-a456-426614174000',
+              turnId: 'turn-live',
+              itemId: 'item-live',
+              status: 'received',
               updatedAt: '2026-08-04T00:00:00.000Z',
             },
+            updatedAt: '2026-08-04T00:00:00.000Z',
+          });
+          listener({
+            type: 'message.delta',
+            repositoryId,
+            conversationId: '123e4567-e89b-42d3-a456-426614174000',
+            messageId: 'assistant-live',
+            delta: '实时输出',
+            phase: 'generating',
+            updatedAt: '2026-08-04T00:00:00.000Z',
           });
           return () => { unsubscribeCalls += 1; };
         },
@@ -243,14 +307,23 @@ describe('MVP-1 routes', () => {
     const address = await app.listen({ host: '127.0.0.1', port: 0 });
     const response = await fetch(`${address}/api/codex/conversations/${repositoryId}/events`);
     const reader = response.body!.getReader();
-    const chunk = await reader.read();
+    const decoder = new TextDecoder();
+    let eventChunk = '';
+    for (let readCount = 0; readCount < 4 && !eventChunk.includes('event: message.delta'); readCount += 1) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      eventChunk += decoder.decode(chunk.value, { stream: true });
+    }
     await reader.cancel();
     for (let attempt = 0; attempt < 20 && unsubscribeCalls === 0; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
 
     expect(response.headers.get('content-type')).toContain('text/event-stream');
-    expect(new TextDecoder().decode(chunk.value)).toContain('实时输出');
+    expect(eventChunk).toContain('event: app-server.event');
+    expect(eventChunk).toContain('item/tool/requestUserInput');
+    expect(eventChunk).toContain('event: message.delta');
+    expect(eventChunk).toContain('实时输出');
     expect(unsubscribeCalls).toBe(1);
     const reentry = await fetch(`${address}/api/codex/conversations/${repositoryId}`);
     expect(reentry.status).toBe(200);

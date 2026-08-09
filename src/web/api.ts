@@ -3,6 +3,7 @@ import type {
   CodexChatRequest,
   CodexCliStatus,
   CodexConversationActivity,
+  CodexConversationStreamEvent,
   CodexConversationSnapshot,
   ReadinessResult,
   RepositoryContextFileListing,
@@ -130,21 +131,181 @@ export async function getCodexConversation(repositoryId: string): Promise<CodexC
   return result.conversation;
 }
 
+const CODEX_CONVERSATION_EVENT_TYPES: CodexConversationStreamEvent['type'][] = [
+  'conversation.snapshot',
+  'turn.started',
+  'thread.started',
+  'turn.steered',
+  'app-server.event',
+  'message.delta',
+  'message.completed',
+  'activity.updated',
+  'turn.completed',
+  'conversation.cleared',
+];
+
+function applyCodexConversationEvent(
+  current: CodexConversationSnapshot | null,
+  event: CodexConversationStreamEvent,
+): CodexConversationSnapshot | null {
+  if (event.type === 'conversation.snapshot') return event.conversation;
+  if (event.type === 'conversation.cleared') return null;
+  if (event.type === 'app-server.event') return current;
+
+  const baseMessages = current?.repositoryId === event.repositoryId ? current.messages : [];
+  if (event.type === 'turn.started') {
+    const replacingIds = new Set([event.userMessage.id, event.assistantMessage.id]);
+    return {
+      repositoryId: event.repositoryId,
+      conversationId: event.conversationId,
+      messages: [
+        ...baseMessages.filter(message => !replacingIds.has(message.id)),
+        event.userMessage,
+        event.assistantMessage,
+      ],
+      ...(current?.repositoryId === event.repositoryId && current.activities
+        ? { activities: current.activities }
+        : {}),
+      status: 'running',
+      phase: event.phase,
+      error: null,
+      updatedAt: event.updatedAt,
+    };
+  }
+
+  const base: CodexConversationSnapshot = current?.repositoryId === event.repositoryId
+    ? current
+    : {
+      repositoryId: event.repositoryId,
+      conversationId: event.conversationId,
+      messages: [],
+      status: 'running',
+      error: null,
+      updatedAt: event.updatedAt,
+    };
+  if (event.type === 'thread.started') {
+    return {
+      ...base,
+      conversationId: event.conversationId,
+      status: 'running',
+      phase: event.phase,
+      error: null,
+      updatedAt: event.updatedAt,
+    };
+  }
+  if (event.type === 'turn.steered') {
+    const replacingIds = new Set([event.userMessage.id, event.assistantMessage.id]);
+    return {
+      ...base,
+      conversationId: event.conversationId,
+      messages: [
+        ...base.messages.filter(message => !replacingIds.has(message.id)),
+        event.userMessage,
+        event.assistantMessage,
+      ],
+      status: 'running',
+      phase: event.phase,
+      error: null,
+      updatedAt: event.updatedAt,
+    };
+  }
+  if (event.type === 'message.delta') {
+    const existingIndex = base.messages.findIndex(message => message.id === event.messageId);
+    const messages = [...base.messages];
+    if (existingIndex >= 0) {
+      const existing = messages[existingIndex]!;
+      messages[existingIndex] = { ...existing, content: `${existing.content}${event.delta}` };
+    } else {
+      messages.push({ id: event.messageId, role: 'assistant', content: event.delta });
+    }
+    return {
+      ...base,
+      conversationId: event.conversationId,
+      messages,
+      status: 'running',
+      phase: event.phase,
+      error: null,
+      updatedAt: event.updatedAt,
+    };
+  }
+  if (event.type === 'message.completed') {
+    const messages = base.messages.some(message => message.id === event.message.id)
+      ? base.messages.map(message => message.id === event.message.id ? event.message : message)
+      : [...base.messages, event.message];
+    return {
+      ...base,
+      conversationId: event.conversationId,
+      messages,
+      status: 'running',
+      phase: event.phase,
+      error: null,
+      updatedAt: event.updatedAt,
+    };
+  }
+  if (event.type === 'activity.updated') {
+    const currentActivities = base.activities ?? [];
+    const activities = currentActivities.some(activity => activity.id === event.activity.id)
+      ? currentActivities.map(activity => activity.id === event.activity.id ? event.activity : activity)
+      : [...currentActivities, event.activity];
+    return {
+      ...base,
+      conversationId: event.conversationId,
+      activities,
+      status: 'running',
+      phase: event.phase,
+      error: null,
+      updatedAt: event.updatedAt,
+    };
+  }
+
+  const rollbackMessageIds = new Set(event.rollbackMessageIds ?? []);
+  const remainingMessages = rollbackMessageIds.size > 0
+    ? base.messages.filter(message => !rollbackMessageIds.has(message.id))
+    : base.messages;
+  const messages = event.assistantMessage
+    ? remainingMessages.some(message => message.id === event.assistantMessageId)
+      ? remainingMessages.map(message => message.id === event.assistantMessageId ? event.assistantMessage! : message)
+      : [...remainingMessages, event.assistantMessage]
+    : remainingMessages.filter(message => message.id !== event.assistantMessageId);
+  const { phase: _phase, ...completedBase } = base;
+  return {
+    ...completedBase,
+    conversationId: event.conversationId,
+    messages,
+    ...(rollbackMessageIds.size > 0
+      ? { activities: (base.activities ?? []).filter(activity => !rollbackMessageIds.has(activity.assistantMessageId)) }
+      : {}),
+    status: event.status,
+    error: event.error,
+    updatedAt: event.updatedAt,
+  };
+}
+
 export function subscribeCodexConversation(
   repositoryId: string,
-  onSnapshot: (snapshot: CodexConversationSnapshot | null) => void,
+  onSnapshot: (
+    snapshot: CodexConversationSnapshot | null,
+    event?: CodexConversationStreamEvent,
+  ) => void,
   onError?: () => void,
 ): () => void {
   if (typeof EventSource === 'undefined') return () => undefined;
   const source = new EventSource(`/api/codex/conversations/${encodeURIComponent(repositoryId)}/events`);
-  source.onmessage = event => {
+  let conversation: CodexConversationSnapshot | null = null;
+  const handleEvent = (rawEvent: Event) => {
     try {
-      const payload = JSON.parse(event.data) as { conversation?: CodexConversationSnapshot | null };
-      if ('conversation' in payload) onSnapshot(payload.conversation ?? null);
+      const messageEvent = rawEvent as MessageEvent<string>;
+      const payload = JSON.parse(messageEvent.data) as CodexConversationStreamEvent;
+      if (payload.type !== rawEvent.type) throw new Error('Codex event type mismatch');
+      conversation = applyCodexConversationEvent(conversation, payload);
+      onSnapshot(conversation, payload);
     } catch {
       onError?.();
     }
   };
+  for (const eventType of CODEX_CONVERSATION_EVENT_TYPES) {
+    source.addEventListener(eventType, handleEvent);
+  }
   source.onerror = () => onError?.();
   const page = typeof window === 'undefined' ? null : window;
   let closed = false;
@@ -152,6 +313,9 @@ export function subscribeCodexConversation(
     if (closed) return;
     closed = true;
     page?.removeEventListener('pagehide', close);
+    for (const eventType of CODEX_CONVERSATION_EVENT_TYPES) {
+      source.removeEventListener(eventType, handleEvent);
+    }
     source.close();
   };
   page?.addEventListener('pagehide', close, { once: true });
@@ -160,6 +324,17 @@ export function subscribeCodexConversation(
 
 export async function startCodexMessage(request: CodexChatRequest): Promise<CodexConversationSnapshot> {
   const result = await postJson<{ conversation: CodexConversationSnapshot }>('/api/codex/messages', request);
+  return result.conversation;
+}
+
+export async function steerCodexConversation(
+  repositoryId: string,
+  message: string,
+): Promise<CodexConversationSnapshot> {
+  const result = await postJson<{ conversation: CodexConversationSnapshot }>(
+    `/api/codex/conversations/${encodeURIComponent(repositoryId)}/steer`,
+    { message },
+  );
   return result.conversation;
 }
 

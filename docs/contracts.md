@@ -470,7 +470,7 @@ repository 条目的“与 Codex 对话”链接必须在新标签页打开 `/co
 
 Codex 对话页面在 repository 校验成功后把浏览器标题设置为 `<repository-name> - Codex`；repository 不可用或尚未加载时使用通用 `Codex` 标题。标题只能使用 `GET /api/repositories` 返回的名称。
 
-对话页面在运行中的助手消息尚无文本时显示等待动画；一旦收到部分助手文本且快照状态仍为 `running`，最新助手消息必须继续显示动态生成提示，直到快照进入非运行状态后移除。历史助手消息和已经完成的最新消息不得显示该提示。用户位于消息列表底部附近时，新增流式内容自动跟随到底部；用户主动向上滚动后停止自动跟随，不得因后续增量快照强制改变阅读位置，并显示可手动回到最新消息的入口。
+对话页面在运行中的助手消息尚无文本时显示等待动画；一旦收到部分助手文本且快照状态仍为 `running`，最新助手消息必须继续显示动态生成提示，直到快照进入非运行状态后移除。历史助手消息和已经完成的最新消息不得显示该提示。脱敏活动卡片按所属助手消息显示在回复正文之前。用户位于消息列表底部附近时，新增流式内容自动跟随到底部；用户主动向上滚动后停止自动跟随，不得因后续增量快照强制改变阅读位置，并显示可手动回到最新消息的入口。消息输入区必须位于同一滚动区域末尾并随消息滚动，不得固定或 sticky 在视口底部。
 
 对话页面加载时还必须调用 `GET /api/codex/status`。后端使用 `execFile()`、参数数组 `['--version']`、`shell: false`、5 秒超时和 64 KiB 输出上限检查服务进程实际使用的 Codex 可执行文件。命令成功且 stdout 去除空白后匹配受限的 `codex-cli <version>` 格式时返回 `{ available: true, version: string, mode: 'yolo' | 'sandbox' }`；可执行文件不存在、不可执行、超时、退出非零或版本输出不匹配时返回 `{ available: false, version: null, mode: 'yolo' | 'sandbox' }`。当前 app-server 固定 `approvalPolicy: "never"`，因此 `mode` 返回兼容标签 `yolo`；该标签不改变下文的 `workspaceWrite` 沙箱约束。原始错误和未匹配的命令输出不得返回浏览器或写入普通错误响应。
 
@@ -500,19 +500,27 @@ interface CodexChatRequest {
 首次对话使用服务端固定的 Codex app-server JSON-RPC 调用。管理服务以参数数组
 `["app-server", "--listen", "stdio://"]`、`cwd` 为重新校验后的 repository 真实路径、
 `shell: false` 启动独立进程，并先完成 `initialize`/`initialized` 握手，再调用
-`thread/start`。继续对话调用 `thread/resume`。页面需要历史但服务端进程内没有快照时，必须调用 `thread/read` 并设置 `includeTurns: true`，从已保存的 thread turns 恢复脱敏的用户与助手消息；不得把原始历史事件、工具输出、附件内容、标准错误或服务器绝对路径返回浏览器。每个 turn 使用 `turn/start`，输入为服务端
+`thread/start`。继续对话调用 `thread/resume`。页面需要历史但服务端进程内没有快照时，必须调用 `thread/read` 并设置 `includeTurns: true`，从已保存的 thread turns 恢复脱敏的用户与助手消息及受支持的活动摘要；不得把原始历史事件、工具输出、附件内容、标准错误或服务器绝对路径返回浏览器。每个 turn 使用 `turn/start`，输入为服务端
 生成的 prompt 文本，固定 `approvalPolicy: "never"`、`sandboxPolicy.type: "workspaceWrite"`，
-可写根目录只包含当前 repository。前端不得提交任意 app-server 方法或字段。
+`summary: "detailed"`，可写根目录只包含当前 repository。前端不得提交任意 app-server 方法或字段。
 
 app-server 进程使用独立进程组，浏览器不能控制可执行文件、参数、cwd、沙箱或审批策略。服务端进程内和状态文件中已知的 conversation ID 必须保持 repository 归属校验。
 
-服务端按 repository ID 保存进程内对话快照，包括 conversation ID、用户与助手消息、运行状态、脱敏错误和更新时间。浏览器关闭、刷新或网络断开不得取消后台 turn；只有显式停止、30 分钟超时、输出超限或管理服务关闭才终止进程组。同一 repository 同时只能有一个运行中的 turn。只有 Codex turn 成功完成并返回合法 thread ID 后，服务端才把 repository ID 到 conversation ID 的映射原子写入状态文件；运行中、失败、停止或超时的 turn 不得覆盖已持久化 ID。管理服务重启后从状态文件恢复该映射，页面无需依赖浏览器缓存即可获得可继续的 conversation ID。
+同一 thread 正在其他 Codex 客户端中持有 active writer 时，`thread/resume` 失败必须分类为 `409 CODEX_CONVERSATION_IN_USE`，对话快照只显示“该对话正在另一个 Codex 客户端中使用，请关闭该客户端或新建对话。”，不返回 thread ID 或原始错误。本次未进入 `turn/start` 的用户消息、助手占位和活动必须从服务端快照回滚，`turn.completed` 同时携带安全的回滚消息 ID，浏览器必须立即删除对应的本地占位，避免重试后留下重复消息。服务端不得自动终止其他客户端或自动 fork 对话。其他 app-server 错误继续返回通用脱敏错误。
 
-`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`；如果只有状态文件中的 conversation ID，则服务端先通过 `thread/read` 恢复完整的脱敏历史后再返回。运行中的快照 `phase` 为 `starting` 或 `generating`：前者表示 Codex app-server 尚未完成 initialize/thread 握手，后者表示已建立 thread 并开始 turn；失败、停止或完成的快照不返回该字段。`GET /api/codex/activity` 返回当前仍在运行的 repository ID 列表，供管理首页在 Codex 对话页关闭后显示“生成中”状态；该状态只来自服务端活动 turn，不依赖浏览器缓存。页面进入时先读取该快照，并建立同源 `GET /api/codex/conversations/:repositoryId/events` SSE 连接。服务端在连接建立和状态改变时立即发送当前脱敏快照；密集的 app-server `item/agentMessage/delta` 可以在不超过 40 毫秒的窗口内合并为一次快照发送。连接断开不得取消后台 turn，浏览器自动重连后重新收到当前快照；服务端必须在响应关闭、响应错误或客户端请求中止时释放该 SSE 订阅和心跳定时器。浏览器以不超过每 100 毫秒一次的频率把运行中快照保存到 `localStorage`，最终状态必须立即保存；快照不含服务器路径和文件内容。浏览器快照只用于兼容回退和未完成流的短暂恢复，不得阻止新浏览器或新设备通过服务端 thread 历史恢复。旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 app-server 的 `thread/resume` 继续该 conversation。
+服务端按 repository ID 保存进程内对话快照，包括 conversation ID、用户与助手消息、脱敏活动摘要、运行状态、脱敏错误和更新时间。浏览器关闭、刷新或网络断开不得取消后台 turn；只有显式停止、30 分钟超时、输出超限或管理服务关闭才终止进程组。同一 repository 同时只能有一个运行中的 turn。只有 Codex turn 成功完成并返回合法 thread ID 后，服务端才把 repository ID 到 conversation ID 的映射原子写入状态文件；运行中、失败、停止或超时的 turn 不得覆盖已持久化 ID。管理服务重启后从状态文件恢复该映射，页面无需依赖浏览器缓存即可获得可继续的 conversation ID。
 
-`POST /api/codex/messages` 成功启动后台 turn 时返回 `202` 和启动后的对话快照。`POST /api/codex/conversations/:repositoryId/stop` 显式停止当前 turn；`DELETE /api/codex/conversations/:repositoryId` 仅在没有运行中 turn 时清空快照，供“新对话”使用。Codex app-server 原始 JSONL/JSON-RPC 事件只在服务端用于更新快照，不直接返回浏览器。
+`GET /api/codex/conversations/:repositoryId` 返回当前服务进程内的快照或 `null`；如果只有状态文件中的 conversation ID，则服务端先通过 `thread/read` 恢复完整的脱敏历史后再返回。运行中的快照 `phase` 为 `starting` 或 `generating`：前者表示 Codex app-server 尚未完成 initialize/thread 握手，后者表示已建立 thread 并开始 turn；失败、停止或完成的快照不返回该字段。`GET /api/codex/activity` 返回当前仍在运行的 repository ID 列表，供管理首页在 Codex 对话页关闭后显示“生成中”状态；该状态只来自服务端活动 turn，不依赖浏览器缓存。
 
-服务端只从 app-server 的 `item/agentMessage/delta` 和已完成 `agentMessage` 项提取助手文本，不转发原始事件、工具调用、usage、stderr 或原始失败详情。助手文本中出现的当前 repository 绝对路径替换为 `.`。流开始后的失败写入脱敏的失败快照；流开始前的 schema、Origin、repository 和就绪错误继续使用标准 JSON 错误响应。
+页面进入时先读取该快照，并建立同源 `GET /api/codex/conversations/:repositoryId/events` SSE 连接。SSE 使用命名事件而不是反复发送完整快照：连接建立或自动重连时先发送一次 `conversation.snapshot`，运行中发送 `turn.started`、`thread.started`、`turn.steered`、`app-server.event`、`activity.updated`、`message.delta`、`message.completed` 和 `turn.completed`，清空对话时发送 `conversation.cleared`。每条 SSE 的 `event` 字段和 JSON `data.type` 必须相同。每一条从 app-server stdout 成功解析的 JSON-RPC response、notification 或 server request 都必须按接收顺序产生一个递增 sequence 的 `app-server.event`；该事件只包含消息类型、method、request/thread/turn/item ID、接收或完成状态和时间，不得包含原始 `params`、`result`、`error` 或完整 payload。`message.delta` 只包含助手消息 ID 和新增文本；密集的 app-server `item/agentMessage/delta` 可以在不超过 40 毫秒的窗口内合并为一个 `message.delta`。`message.completed` 携带该助手消息的最终脱敏文本，`turn.completed` 携带最终状态、脱敏错误和最终助手消息或明确的空值，供浏览器校正丢失的增量。
+
+`activity.updated` 只转换以下 app-server 事件：`reasoning`/`plan` 的对外 detailed summary、`commandExecution` 的实际命令文本与开始/完成状态、`fileChange` 的 repository 内相对路径与变更类型、`mcpToolCall`/`dynamicToolCall`/`collabToolCall` 的服务和工具名称，以及 `webSearch`、`imageView`、`contextCompaction` 的通用动作名称。命令文本和 summary 中的当前 repository 绝对路径替换为 `.`，单项 detail 最多保留 8000 个字符。原始 private reasoning content、命令输出、工具 arguments/result/error、diff 正文、usage、stderr、repository 外文件内容和原始失败详情不得进入活动摘要或浏览器响应。
+
+浏览器按顺序把这些类型化事件归并为本地快照。连接断开不得取消后台 turn，浏览器自动重连后通过新的 `conversation.snapshot` 恢复完整当前状态；服务端必须在响应关闭、响应错误或客户端请求中止时释放该 SSE 订阅和心跳定时器。浏览器以不超过每 100 毫秒一次的频率把运行中快照保存到 `localStorage`，最终状态必须立即保存；快照不含服务器路径和文件内容。浏览器快照只用于兼容回退和未完成流的短暂恢复，不得阻止新浏览器或新设备通过服务端 thread 历史恢复。旧的 `running` 状态必须转换为已中断，不得假装后台仍在运行。用户发送下一条消息时通过 app-server 的 `thread/resume` 继续该 conversation。
+
+`POST /api/codex/messages` 成功启动后台 turn 时返回 `202` 和启动后的对话快照。运行中的输入只能提交到 `POST /api/codex/conversations/:repositoryId/steer`，请求体严格为 `{ "message": string }`；后端在 repository 和 Origin 校验后把它固定转换为 `turn/steer`，参数只能包含服务端保存的 `threadId`、当前 `expectedTurnId` 和 text input。成功时追加新的用户消息和助手消息锚点，发送 `turn.steered` 并返回 `202` 快照。握手未完成、turn 已结束或没有活动控制器时返回 `409`。浏览器不得提交 JSON-RPC method、request ID、thread/turn ID 或任意 app-server params。`POST /api/codex/conversations/:repositoryId/stop` 显式停止当前 turn；`DELETE /api/codex/conversations/:repositoryId` 仅在没有运行中 turn 时清空快照，供“新对话”使用。Codex app-server 原始 JSONL/JSON-RPC payload 不直接返回浏览器，只发送上文定义的安全元数据与类型化内容事件。
+
+服务端从 app-server 的 `item/agentMessage/delta` 和已完成 `agentMessage` 项提取助手文本，并按上文规则把受支持的 item 生命周期转换为脱敏活动摘要；其他原始事件只产生安全的 `app-server.event` 元数据，不转换原始 payload。助手文本、命令文本和 reasoning summary 中出现的当前 repository 绝对路径替换为 `.`。流开始后的失败写入脱敏的失败快照；流开始前的 schema、Origin、repository 和就绪错误继续使用标准 JSON 错误响应。
 
 每次 Codex turn 最长运行 30 分钟，stdout 上限为 4 MiB，保留的 stderr 诊断上限为 64 KiB且不得返回前端。显式停止、输出超限、超时或管理服务关闭时，必须先向 Codex 独立进程组发送 `SIGTERM`；5 秒后仍未退出则发送 `SIGKILL`。浏览器取消请求或 HTTP 响应关闭不得终止后台 turn。管理服务关闭时取消所有活动 Codex turn，但仍不得删除 Zellij Session。
 
@@ -544,6 +552,7 @@ app-server 进程使用独立进程组，浏览器不能控制可执行文件、
 | `GET` | `/api/codex/conversations/:repositoryId/events` | `200` | 通过同源 SSE 实时推送 Codex 对话快照 |
 | `GET` | `/api/repositories/:repositoryId/files` | `200` | 返回可作为 Codex 上下文的 repository 文件 opaque ID |
 | `POST` | `/api/codex/messages` | `202` | 在后台创建或继续 Codex 对话 |
+| `POST` | `/api/codex/conversations/:repositoryId/steer` | `202` | 向当前运行中的 Codex turn 追加自然语言输入 |
 | `POST` | `/api/codex/conversations/:repositoryId/stop` | `202` | 停止 repository 当前运行的 Codex turn |
 | `DELETE` | `/api/codex/conversations/:repositoryId` | `204` | 清空 repository 当前 Codex 对话快照 |
 | `POST` | `/api/services/restart` | `202` | 重启管理、Zellij Web、code-viewer 和 OpenVSCode 服务 |

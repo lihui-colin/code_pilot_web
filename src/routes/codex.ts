@@ -17,6 +17,9 @@ const codexChatSchema = z.object({
   ).optional(),
   message: z.string().trim().min(1).max(20_000),
 }).strict();
+const codexSteerSchema = z.object({
+  message: z.string().trim().min(1).max(20_000),
+}).strict();
 interface CodexRouteDependencies {
   repositoryService: RepositoryService | null;
   codexChatService: CodexChatServiceLike;
@@ -61,7 +64,9 @@ export function registerCodexRoutes(app: FastifyInstance, dependencies: CodexRou
       'x-accel-buffering': 'no',
     });
     const send = (event: CodexConversationStreamEvent) => {
-      if (!response.destroyed) response.write(`data: ${JSON.stringify(event)}\n\n`);
+      if (!response.destroyed) {
+        response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      }
     };
     let heartbeat: NodeJS.Timeout | undefined;
     let unsubscribe: (() => void) | undefined;
@@ -119,6 +124,17 @@ export function registerCodexRoutes(app: FastifyInstance, dependencies: CodexRou
       }
     });
     return reply.code(202).send({ conversation: codexChatService.getConversation(body.repositoryId) });
+  });
+  app.post('/api/codex/conversations/:repositoryId/steer', async (request, reply) => {
+    requireSameOrigin(request.headers.origin);
+    const params = repositoryParamsSchema.parse(request.params);
+    const body = codexSteerSchema.parse(request.body);
+    await repositoryService().resolveRepository(params.repositoryId);
+    if (!codexChatService.steerConversation) {
+      throw new ApiError(503, 'SERVICE_NOT_READY', 'Interactive Codex input is not ready');
+    }
+    const conversation = codexChatService.steerConversation(params.repositoryId, body.message);
+    return reply.code(202).send({ conversation });
   });
   app.post('/api/codex/conversations/:repositoryId/stop', async (request, reply) => {
     requireSameOrigin(request.headers.origin);

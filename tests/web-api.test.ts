@@ -9,6 +9,7 @@ import {
   getRepositoryFolders,
   restartServices,
   startCodexMessage,
+  steerCodexConversation,
   stopCodexConversation,
   subscribeCodexConversation,
 } from '../src/web/api.js';
@@ -155,31 +156,247 @@ describe('web API', () => {
     });
   });
 
-  it('subscribes to same-origin Codex SSE snapshots and closes cleanly', () => {
-    let source: { url: string; onmessage?: (event: MessageEvent) => void; onerror?: () => void; close: ReturnType<typeof vi.fn> };
-    class FakeEventSource {
-      onmessage?: (event: MessageEvent) => void;
+  it('sends interactive input only to the fixed Codex steer endpoint', async () => {
+    const repositoryId = `dir_${'a'.repeat(43)}`;
+    const snapshot = {
+      repositoryId,
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      messages: [],
+      status: 'running',
+      phase: 'generating',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    } as const;
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ conversation: snapshot }), {
+      status: 202,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(steerCodexConversation(repositoryId, 'Also run tests')).resolves.toEqual(snapshot);
+
+    expect(fetchMock).toHaveBeenCalledWith(`/api/codex/conversations/${repositoryId}/steer`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Also run tests' }),
+    });
+  });
+
+  it('reduces typed same-origin Codex SSE events into snapshots and closes cleanly', () => {
+    let source: FakeEventSource;
+    class FakeEventSource extends EventTarget {
       onerror?: () => void;
       close = vi.fn();
       constructor(public readonly url: string) {
+        super();
         source = this;
+      }
+
+      emit(type: string, payload: unknown): void {
+        this.dispatchEvent(new MessageEvent(type, { data: JSON.stringify(payload) }));
       }
     }
     vi.stubGlobal('EventSource', FakeEventSource);
     vi.stubGlobal('window', new EventTarget());
     const received: unknown[] = [];
+    const eventTypes: string[] = [];
     const unsubscribe = subscribeCodexConversation(
       `dir_${'a'.repeat(43)}`,
-      snapshot => received.push(snapshot),
+      (snapshot, event) => {
+        received.push(snapshot);
+        if (event) eventTypes.push(event.type);
+      },
     );
 
-    source!.onmessage?.({ data: JSON.stringify({ conversation: { repositoryId: 'repo', status: 'running' } }) } as MessageEvent);
+    source!.emit('conversation.snapshot', {
+      type: 'conversation.snapshot',
+      conversation: null,
+    });
+    source!.emit('turn.started', {
+      type: 'turn.started',
+      repositoryId: 'repo',
+      conversationId: null,
+      userMessage: { id: 'user-live', role: 'user', content: '问题' },
+      assistantMessage: { id: 'assistant-live', role: 'assistant', content: '' },
+      phase: 'starting',
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    });
+    source!.emit('thread.started', {
+      type: 'thread.started',
+      repositoryId: 'repo',
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      phase: 'generating',
+      updatedAt: '2026-08-04T00:00:00.500Z',
+    });
+    source!.emit('app-server.event', {
+      type: 'app-server.event',
+      repositoryId: 'repo',
+      event: {
+        id: 'app-server-1',
+        sequence: 1,
+        kind: 'notification',
+        method: 'turn/started',
+        requestId: null,
+        threadId: '123e4567-e89b-42d3-a456-426614174000',
+        turnId: 'turn-live',
+        itemId: null,
+        status: 'received',
+        updatedAt: '2026-08-04T00:00:00.600Z',
+      },
+      updatedAt: '2026-08-04T00:00:00.600Z',
+    });
+    source!.emit('turn.steered', {
+      type: 'turn.steered',
+      repositoryId: 'repo',
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      userMessage: { id: 'user-steered', role: 'user', content: '再运行测试' },
+      assistantMessage: { id: 'assistant-steered', role: 'assistant', content: '' },
+      phase: 'generating',
+      updatedAt: '2026-08-04T00:00:00.700Z',
+    });
+    source!.emit('activity.updated', {
+      type: 'activity.updated',
+      repositoryId: 'repo',
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      activity: {
+        id: 'activity-thinking',
+        assistantMessageId: 'assistant-steered',
+        kind: 'thinking',
+        title: '思考',
+        status: 'running',
+        detail: '分析代码',
+      },
+      phase: 'generating',
+      updatedAt: '2026-08-04T00:00:00.750Z',
+    });
+    source!.emit('message.delta', {
+      type: 'message.delta',
+      repositoryId: 'repo',
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      messageId: 'assistant-steered',
+      delta: '实时输出',
+      phase: 'generating',
+      updatedAt: '2026-08-04T00:00:01.000Z',
+    });
+    source!.emit('message.completed', {
+      type: 'message.completed',
+      repositoryId: 'repo',
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      message: { id: 'assistant-steered', role: 'assistant', content: '实时输出完成' },
+      phase: 'generating',
+      updatedAt: '2026-08-04T00:00:02.000Z',
+    });
+    source!.emit('turn.completed', {
+      type: 'turn.completed',
+      repositoryId: 'repo',
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      assistantMessageId: 'assistant-steered',
+      assistantMessage: { id: 'assistant-steered', role: 'assistant', content: '实时输出完成' },
+      status: 'idle',
+      error: null,
+      updatedAt: '2026-08-04T00:00:03.000Z',
+    });
+    source!.emit('conversation.cleared', {
+      type: 'conversation.cleared',
+      repositoryId: 'repo',
+      updatedAt: '2026-08-04T00:00:04.000Z',
+    });
     window.dispatchEvent(new Event('pagehide'));
     unsubscribe();
 
     expect(source!.url).toBe(`/api/codex/conversations/dir_${'a'.repeat(43)}/events`);
-    expect(received).toEqual([{ repositoryId: 'repo', status: 'running' }]);
+    expect(eventTypes).toEqual([
+      'conversation.snapshot',
+      'turn.started',
+      'thread.started',
+      'app-server.event',
+      'turn.steered',
+      'activity.updated',
+      'message.delta',
+      'message.completed',
+      'turn.completed',
+      'conversation.cleared',
+    ]);
+    expect(received.at(-2)).toMatchObject({
+      repositoryId: 'repo',
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      messages: [
+        { content: '问题' },
+        { content: '' },
+        { content: '再运行测试' },
+        { content: '实时输出完成' },
+      ],
+      activities: [{ title: '思考', detail: '分析代码' }],
+      status: 'idle',
+    });
+    expect(received.at(-1)).toBeNull();
     expect(source!.close).toHaveBeenCalledOnce();
+  });
+
+  it('removes both local placeholders when a completed event rolls back a writer conflict', () => {
+    let source: FakeEventSource;
+    class FakeEventSource extends EventTarget {
+      onerror?: () => void;
+      close = vi.fn();
+      constructor(public readonly url: string) {
+        super();
+        source = this;
+      }
+
+      emit(type: string, payload: unknown): void {
+        this.dispatchEvent(new MessageEvent(type, { data: JSON.stringify(payload) }));
+      }
+    }
+    vi.stubGlobal('EventSource', FakeEventSource);
+    vi.stubGlobal('window', new EventTarget());
+    const received: unknown[] = [];
+    const unsubscribe = subscribeCodexConversation('repo', snapshot => received.push(snapshot));
+
+    source!.emit('conversation.snapshot', {
+      type: 'conversation.snapshot',
+      conversation: {
+        repositoryId: 'repo',
+        conversationId: '123e4567-e89b-42d3-a456-426614174000',
+        messages: [
+          { id: 'user-existing', role: 'user', content: '已有问题' },
+          { id: 'assistant-existing', role: 'assistant', content: '已有回复' },
+        ],
+        status: 'idle',
+        error: null,
+        updatedAt: '2026-08-09T00:00:00.000Z',
+      },
+    });
+    source!.emit('turn.started', {
+      type: 'turn.started',
+      repositoryId: 'repo',
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      userMessage: { id: 'user-retry', role: 'user', content: '重试' },
+      assistantMessage: { id: 'assistant-retry', role: 'assistant', content: '' },
+      phase: 'starting',
+      updatedAt: '2026-08-09T00:00:01.000Z',
+    });
+    source!.emit('turn.completed', {
+      type: 'turn.completed',
+      repositoryId: 'repo',
+      conversationId: '123e4567-e89b-42d3-a456-426614174000',
+      assistantMessageId: 'assistant-retry',
+      assistantMessage: null,
+      rollbackMessageIds: ['user-retry', 'assistant-retry'],
+      status: 'failed',
+      error: '该对话正在另一个 Codex 客户端中使用，请关闭该客户端或新建对话。',
+      updatedAt: '2026-08-09T00:00:02.000Z',
+    });
+
+    expect(received.at(-1)).toMatchObject({
+      messages: [
+        { id: 'user-existing', content: '已有问题' },
+        { id: 'assistant-existing', content: '已有回复' },
+      ],
+      status: 'failed',
+      error: '该对话正在另一个 Codex 客户端中使用，请关闭该客户端或新建对话。',
+    });
+    unsubscribe();
   });
 
   it('reads running Codex repository activity', async () => {

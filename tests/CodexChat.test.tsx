@@ -15,6 +15,7 @@ vi.mock('../src/web/api.js', () => ({
   getRepositoryContextFiles: vi.fn(),
   subscribeCodexConversation: vi.fn(() => () => undefined),
   startCodexMessage: vi.fn(),
+  steerCodexConversation: vi.fn(),
   stopCodexConversation: vi.fn(),
 }));
 
@@ -72,6 +73,15 @@ beforeEach(() => {
     error: null,
     updatedAt: '2026-08-04T00:00:00.000Z',
   }));
+  vi.mocked(api.steerCodexConversation).mockResolvedValue({
+    repositoryId,
+    conversationId,
+    messages: [],
+    status: 'running',
+    phase: 'generating',
+    error: null,
+    updatedAt: '2026-08-04T00:00:00.000Z',
+  });
   vi.mocked(api.clearCodexConversation).mockResolvedValue(undefined);
   vi.mocked(api.stopCodexConversation).mockResolvedValue(undefined);
 });
@@ -113,6 +123,102 @@ describe('CodexChat', () => {
     expect(screen.getByRole('img', { name: 'Codex' })).toHaveAttribute('src', '/codex-icon.svg');
     expect(screen.getByText('me')).toBeInTheDocument();
     expect(screen.getByText('M')).toBeInTheDocument();
+  });
+
+  it('sends input through turn/steer while Codex is already generating', async () => {
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-running', role: 'user', content: '先分析项目' },
+        { id: 'assistant-running', role: 'assistant', content: '正在分析' },
+      ],
+      status: 'running',
+      phase: 'generating',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    });
+    vi.mocked(api.steerCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-running', role: 'user', content: '先分析项目' },
+        { id: 'assistant-running', role: 'assistant', content: '正在分析' },
+        { id: 'user-steered', role: 'user', content: '同时运行测试' },
+        { id: 'assistant-steered', role: 'assistant', content: '' },
+      ],
+      status: 'running',
+      phase: 'generating',
+      error: null,
+      updatedAt: '2026-08-04T00:00:01.000Z',
+    });
+
+    render(<CodexChat />);
+    expect(await screen.findByText('正在分析')).toBeInTheDocument();
+    const input = screen.getByRole('textbox', { name: '发送给 Codex 的消息' });
+    expect(input).toBeEnabled();
+    fireEvent.change(input, { target: { value: '同时运行测试' } });
+    fireEvent.click(screen.getByRole('button', { name: '追加输入' }));
+
+    await waitFor(() => expect(api.steerCodexConversation).toHaveBeenCalledWith(repositoryId, '同时运行测试'));
+    expect(api.startCodexMessage).not.toHaveBeenCalled();
+    expect(await screen.findByText('同时运行测试')).toBeInTheDocument();
+  });
+
+  it('renders sanitized thinking, file-change, and tool activities before the assistant message', async () => {
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-activity', role: 'user', content: '修改代码' },
+        { id: 'assistant-activity', role: 'assistant', content: '修改完成。' },
+      ],
+      activities: [
+        {
+          id: 'activity-thinking',
+          assistantMessageId: 'assistant-activity',
+          kind: 'thinking',
+          title: '思考',
+          status: 'completed',
+          detail: '检查相关模块和测试。',
+        },
+        {
+          id: 'activity-files',
+          assistantMessageId: 'assistant-activity',
+          kind: 'file-change',
+          title: '修改文件',
+          status: 'completed',
+          files: [{ path: 'src/app.ts', kind: 'update' }],
+        },
+        {
+          id: 'activity-command',
+          assistantMessageId: 'assistant-activity',
+          kind: 'command',
+          title: '运行命令',
+          status: 'completed',
+          detail: 'npm test -- --run tests/app.test.ts',
+        },
+        {
+          id: 'activity-tool',
+          assistantMessageId: 'assistant-activity',
+          kind: 'tool',
+          title: '工具调用 · docs/search',
+          status: 'completed',
+        },
+      ],
+      status: 'idle',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    });
+
+    const { container } = render(<CodexChat />);
+    expect(await screen.findByText('检查相关模块和测试。')).toBeInTheDocument();
+    expect(screen.getByText('npm test -- --run tests/app.test.ts')).toBeInTheDocument();
+    expect(screen.getByText('src/app.ts')).toBeInTheDocument();
+    expect(screen.getByLabelText('工具调用 · docs/search')).toBeInTheDocument();
+    expect(screen.getByText('修改完成。')).toBeInTheDocument();
+    expect(container.querySelector('.chat-message-region > .chat-composer-wrap')).not.toBeNull();
+    expect(container.querySelector('.chat-main > .chat-composer-wrap')).toBeNull();
   });
 
   it('renders Codex output as SSE snapshots arrive', async () => {
@@ -186,6 +292,37 @@ describe('CodexChat', () => {
     expect(conversationWrites()).toHaveLength(2);
   });
 
+  it('clears the visible conversation when the typed SSE clear event arrives', async () => {
+    let onSnapshot: ((
+      snapshot: import('../src/domain/types.js').CodexConversationSnapshot | null,
+      event?: import('../src/domain/types.js').CodexConversationStreamEvent,
+    ) => void) | undefined;
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [{ id: 'assistant-existing', role: 'assistant', content: '已有对话' }],
+      status: 'idle',
+      error: null,
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    });
+    vi.mocked(api.subscribeCodexConversation).mockImplementation((_repositoryId, listener) => {
+      onSnapshot = listener;
+      return () => undefined;
+    });
+
+    render(<CodexChat />);
+    expect(await screen.findByText('已有对话')).toBeInTheDocument();
+
+    act(() => onSnapshot?.(null, {
+      type: 'conversation.cleared',
+      repositoryId,
+      updatedAt: '2026-08-04T00:00:01.000Z',
+    }));
+
+    expect(screen.queryByText('已有对话')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '向 Codex 提问' })).toBeInTheDocument();
+  });
+
   it('rechecks a transient unavailable CLI status when a background turn finishes', async () => {
     let onSnapshot: ((snapshot: import('../src/domain/types.js').CodexConversationSnapshot | null) => void) | undefined;
     vi.mocked(api.getCodexStatus)
@@ -249,7 +386,7 @@ describe('CodexChat', () => {
     const { container } = render(<CodexChat />);
     await screen.findByText('已有内容');
     await new Promise(resolve => window.setTimeout(resolve, 0));
-    const messageList = container.querySelector('.chat-messages') as HTMLDivElement;
+    const messageList = container.querySelector('.chat-message-region') as HTMLDivElement;
     let scrollTop = 100;
     Object.defineProperties(messageList, {
       scrollHeight: { configurable: true, get: () => 1_000 },
@@ -535,6 +672,103 @@ describe('CodexChat', () => {
     expect(screen.getByText('未收到回复')).toBeInTheDocument();
     expect(container.querySelector('.chat-thinking')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Codex is temporarily unavailable');
+  });
+
+  it('shows a clear active-writer conflict message', async () => {
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-existing', role: 'user', content: '已有问题' },
+        { id: 'assistant-existing', role: 'assistant', content: '已有回复' },
+      ],
+      status: 'failed',
+      error: '该对话正在另一个 Codex 客户端中使用，请关闭该客户端或新建对话。',
+      updatedAt: '2026-08-09T00:00:00.000Z',
+    });
+
+    render(<CodexChat />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '该对话正在另一个 Codex 客户端中使用，请关闭该客户端或新建对话。',
+    );
+    expect(screen.getByText('已有问题')).toBeInTheDocument();
+    expect(screen.getByText('已有回复')).toBeInTheDocument();
+  });
+
+  it('removes the failed retry immediately when the active-writer completion event arrives', async () => {
+    let onSnapshot: ((
+      snapshot: import('../src/domain/types.js').CodexConversationSnapshot | null,
+      event?: import('../src/domain/types.js').CodexConversationStreamEvent,
+    ) => void) | undefined;
+    vi.mocked(api.getCodexConversation).mockResolvedValue({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-existing', role: 'user', content: '已有问题' },
+        { id: 'assistant-existing', role: 'assistant', content: '已有回复' },
+      ],
+      status: 'idle',
+      error: null,
+      updatedAt: '2026-08-09T00:00:00.000Z',
+    });
+    vi.mocked(api.subscribeCodexConversation).mockImplementation((_repositoryId, listener) => {
+      onSnapshot = listener;
+      return () => undefined;
+    });
+    render(<CodexChat />);
+    expect(await screen.findByText('已有回复')).toBeInTheDocument();
+
+    act(() => onSnapshot?.({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-existing', role: 'user', content: '已有问题' },
+        { id: 'assistant-existing', role: 'assistant', content: '已有回复' },
+        { id: 'user-retry', role: 'user', content: '会冲突的重试' },
+        { id: 'assistant-retry', role: 'assistant', content: '' },
+      ],
+      status: 'running',
+      phase: 'starting',
+      error: null,
+      updatedAt: '2026-08-09T00:00:01.000Z',
+    }, {
+      type: 'turn.started',
+      repositoryId,
+      conversationId,
+      userMessage: { id: 'user-retry', role: 'user', content: '会冲突的重试' },
+      assistantMessage: { id: 'assistant-retry', role: 'assistant', content: '' },
+      phase: 'starting',
+      updatedAt: '2026-08-09T00:00:01.000Z',
+    }));
+    expect(screen.getByText('会冲突的重试')).toBeInTheDocument();
+
+    act(() => onSnapshot?.({
+      repositoryId,
+      conversationId,
+      messages: [
+        { id: 'user-existing', role: 'user', content: '已有问题' },
+        { id: 'assistant-existing', role: 'assistant', content: '已有回复' },
+      ],
+      status: 'failed',
+      error: '该对话正在另一个 Codex 客户端中使用，请关闭该客户端或新建对话。',
+      updatedAt: '2026-08-09T00:00:02.000Z',
+    }, {
+      type: 'turn.completed',
+      repositoryId,
+      conversationId,
+      assistantMessageId: 'assistant-retry',
+      assistantMessage: null,
+      rollbackMessageIds: ['user-retry', 'assistant-retry'],
+      status: 'failed',
+      error: '该对话正在另一个 Codex 客户端中使用，请关闭该客户端或新建对话。',
+      updatedAt: '2026-08-09T00:00:02.000Z',
+    }));
+
+    expect(screen.queryByText('会冲突的重试')).not.toBeInTheDocument();
+    expect(screen.getByText('已有问题')).toBeInTheDocument();
+    expect(screen.getByText('已有回复')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('该对话正在另一个 Codex 客户端中使用');
   });
 
   it('combines a server-persisted conversation ID with browser message history after restart', async () => {
