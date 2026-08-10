@@ -11,6 +11,10 @@ import type {
   CodexConversationSnapshot,
 } from '../domain/types.js';
 import { ApiError } from '../errors.js';
+import type {
+  BackgroundProcessRegistration,
+  BackgroundProcessRegistry,
+} from './background-process-registry.js';
 
 const MAX_STDOUT_BYTES = 4 * 1024 * 1024;
 const MAX_STDERR_BYTES = 64 * 1024;
@@ -160,6 +164,7 @@ export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
     private readonly spawnProcess: SpawnProcess = spawn,
     private readonly killProcess: KillProcess = process.kill,
     private readonly versionRunner: VersionRunner = runVersionCheck,
+    private readonly processRegistry?: BackgroundProcessRegistry,
   ) {}
 
   async checkAvailability(): Promise<CodexCliAvailability> {
@@ -178,6 +183,19 @@ export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
       child.once('error', reject);
     });
     if (!child.pid) throw new Error('Codex did not provide a process ID');
+    let registration: BackgroundProcessRegistration | undefined;
+    if (this.processRegistry) {
+      try {
+        registration = await this.processRegistry.register('codex', child.pid);
+      } catch (error) {
+        try {
+          this.killProcess(-child.pid, 'SIGKILL');
+        } catch {
+          // The child may already have exited.
+        }
+        throw error;
+      }
+    }
 
     let stdoutBytes = 0;
     let exited = false;
@@ -277,6 +295,7 @@ export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
     child.stdin.on('error', () => undefined);
     child.once('exit', (code, signal) => {
       exited = true;
+      void registration?.release().catch(() => undefined);
       if (killTimeout) clearTimeout(killTimeout);
       if (!requestCompleted) {
         rejectRead?.(new Error(`Codex app-server exited (${code ?? signal ?? 'unknown'})`));
@@ -313,6 +332,19 @@ export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
       child.once('error', reject);
     });
     if (!child.pid) throw new Error('Codex did not provide a process ID');
+    let registration: BackgroundProcessRegistration | undefined;
+    if (this.processRegistry) {
+      try {
+        registration = await this.processRegistry.register('codex', child.pid);
+      } catch (error) {
+        try {
+          this.killProcess(-child.pid, 'SIGKILL');
+        } catch {
+          // The child may already have exited.
+        }
+        throw error;
+      }
+    }
 
     let stdoutBytes = 0;
     let stderr = '';
@@ -510,6 +542,7 @@ export class SpawnCodexAppServerAdapter implements CodexProcessAdapter {
     child.stdin.on('error', () => undefined);
     child.once('exit', (code, signal) => {
       exited = true;
+      void registration?.release().catch(() => undefined);
       resolveExit?.();
       if (killTimeout) clearTimeout(killTimeout);
       if (!turnCompleted && !request.signal.aborted && !timedOut) {

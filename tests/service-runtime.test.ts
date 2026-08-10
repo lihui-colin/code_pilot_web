@@ -2,7 +2,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // @ts-expect-error The runtime helper is an intentionally standalone JavaScript lifecycle script.
-import { matchesManagementArguments } from '../scripts/service-runtime.mjs';
+import { matchesManagementArguments, matchesRegisteredProcess } from '../scripts/service-runtime.mjs';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const runtime = {
@@ -36,5 +36,20 @@ describe('service runtime process identity', () => {
       '--config', runtime.configFile,
       '--workspace-root', '/workspace/other',
     ], runtime)).toBe(false);
+  });
+
+  it('requires the complete registered background process identity before cleanup', () => {
+    const entry = {
+      kind: 'codex',
+      pid: 7331,
+      processGroup: 7331,
+      startTime: '912345',
+      arguments: ['/usr/bin/codex', 'app-server', '--listen', 'stdio://'],
+    };
+
+    expect(matchesRegisteredProcess(entry, '912345', entry.arguments, 7331)).toBe(true);
+    expect(matchesRegisteredProcess(entry, '912346', entry.arguments, 7331)).toBe(false);
+    expect(matchesRegisteredProcess(entry, '912345', [...entry.arguments, '--extra'], 7331)).toBe(false);
+    expect(matchesRegisteredProcess({ ...entry, kind: 'zellij' }, '912345', entry.arguments, 7331)).toBe(false);
   });
 });

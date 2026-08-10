@@ -2,6 +2,10 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import type { ViewerInstance } from '../domain/types.js';
 import { ApiError } from '../errors.js';
+import type {
+  BackgroundProcessRegistration,
+  BackgroundProcessRegistry,
+} from './background-process-registry.js';
 
 const MAX_OUTPUT_BYTES = 64 * 1024;
 
@@ -23,7 +27,10 @@ function limitedAppend(current: string, chunk: Buffer): string {
 }
 
 export class SpawnViewerProcessAdapter implements ViewerProcessAdapter {
-  constructor(private readonly executablePath = 'code-viewer') {}
+  constructor(
+    private readonly executablePath = 'code-viewer',
+    private readonly processRegistry?: BackgroundProcessRegistry,
+  ) {}
 
   async start(repositoryRealPath: string, port: number): Promise<ViewerProcessHandle> {
     const child = spawn(this.executablePath, ['--cwd', repositoryRealPath, '--port', String(port)], {
@@ -40,9 +47,23 @@ export class SpawnViewerProcessAdapter implements ViewerProcessAdapter {
       child.once('error', reject);
     });
     if (!child.pid) throw new Error('code-viewer did not provide a process ID');
+    let registration: BackgroundProcessRegistration | undefined;
+    if (this.processRegistry) {
+      try {
+        registration = await this.processRegistry.register('viewer', child.pid);
+      } catch (error) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // The child may already have exited.
+        }
+        throw error;
+      }
+    }
     let hasExited = false;
     const exitPromise = new Promise<void>(resolve => child.once('exit', () => {
       hasExited = true;
+      void registration?.release().catch(() => undefined);
       resolve();
     }));
     return {

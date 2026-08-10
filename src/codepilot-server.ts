@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { loadConfiguration, persistZellijWebToken } from './config.js';
+import { FileBackgroundProcessRegistry } from './services/background-process-registry.js';
 import { checkToolReadiness } from './services/tool-readiness.js';
 import { CodexChatService, SpawnCodexAppServerAdapter } from './services/codex-chat-service.js';
 import { StateStore } from './services/state-store.js';
@@ -50,12 +51,15 @@ async function main(): Promise<void> {
     codeViewerExecutablePath,
     stateAvailable,
   );
+  const projectRoot = fileURLToPath(new URL('../', import.meta.url));
+  const backgroundProcessRegistry = new FileBackgroundProcessRegistry(
+    path.join(projectRoot, 'data/background-processes.json'),
+  );
   const codexChatService = new CodexChatService(
-    new SpawnCodexAppServerAdapter(),
+    new SpawnCodexAppServerAdapter('codex', undefined, undefined, undefined, backgroundProcessRegistry),
     stateStore.codexConversations(),
     conversations => stateStore.persistCodexConversations(conversations),
   );
-  const projectRoot = fileURLToPath(new URL('../', import.meta.url));
   const app = await createApp(loaded.config, {
     readiness,
     directoryIdSecret: loaded.directoryIdSecret,
@@ -65,6 +69,7 @@ async function main(): Promise<void> {
     manualRepositoryPaths: stateStore.repositoryPaths(),
     persistManualRepositoryPaths: paths => stateStore.persistRepositoryPaths(paths),
     codeViewerExecutablePath,
+    viewerProcessRegistry: backgroundProcessRegistry,
     codexChatService,
     zellijTokenService,
     serviceRestarter: new SpawnServiceRestarter(

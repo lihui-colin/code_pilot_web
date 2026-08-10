@@ -223,10 +223,11 @@
 15. systemd 重启后服务自动恢复 ready 状态。
 16. 停止脚本在 10 秒优雅退出等待期显示百分比和耗时进度，提前退出和升级 `SIGKILL` 都有明确结果提示。
 17. 同源重启请求返回 `202`，额外字段和跨 Origin 请求被拒绝。
-18. 重启先优雅停止管理服务和当前 viewer，再停止 Zellij Web 与 OpenVSCode；Zellij Session 保持存在。
+18. 重启先优雅停止管理服务、活动 Codex turn 和当前 viewer，再停止 Zellij Web 与 OpenVSCode；Zellij Session 保持存在。
 19. 只有命令路径、固定参数和端口均匹配本项目的遗留进程会被终止；无关进程占用任一配置端口时重启失败且不误杀。
-20. OpenVSCode 和 code-viewer 的独立进程组及子进程被清理，PID 文件以 `0600` 重建，配置端口不残留旧监听者。
+20. OpenVSCode、Codex 和 code-viewer 的独立进程组及子进程被清理，配置端口不残留旧监听者；重启完成后只重建管理服务与 Zellij Web 的 `0600` PID 文件，OpenVSCode、Codex 和 code-viewer 不自动恢复。
 21. 前端二次确认后发送固定空请求，重启期间禁用按钮，并在观察到服务离线后等待恢复再刷新。
+22. Codex 与 code-viewer 启动后以 `0600` 原子登记 PID、进程组、启动时间和完整参数；正常退出移除登记，管理服务被强杀时 restart cleanup 只终止登记身份仍完全匹配的遗留进程组。
 
 ## 完成标准
 

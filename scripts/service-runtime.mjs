@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 const execFile = promisify(execFileCallback);
 const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const dataDirectory = path.join(projectRoot, 'data');
+const backgroundProcessRegistryFile = path.join(dataDirectory, 'background-processes.json');
 const openVSCodePidFile = path.join(dataDirectory, 'openvscode.pid');
 const zellijWebPidFile = path.join(dataDirectory, 'zellij-web.pid');
 
@@ -116,6 +117,15 @@ async function processGroup(pid) {
   return Number(fields[2]);
 }
 
+async function processStartTime(pid) {
+  try {
+    const content = await readFile(`/proc/${pid}/stat`, 'utf8');
+    return content.slice(content.lastIndexOf(')') + 2).split(' ')[19] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function hasOption(arguments_, option, value) {
   const index = arguments_.indexOf(option);
   return index >= 0 && arguments_[index + 1] === value;
@@ -208,6 +218,67 @@ async function stopPid(runtime, pid, kind) {
   if (!(await waitForProcessExit(pid, 5_000))) throw new Error(`${kind} process ${pid} did not stop`);
 }
 
+async function registeredBackgroundProcesses() {
+  try {
+    const value = JSON.parse(await readFile(backgroundProcessRegistryFile, 'utf8'));
+    if (!Array.isArray(value)) throw new Error('Invalid background process registry');
+    return value;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+function validRegisteredProcess(entry) {
+  return entry
+    && (entry.kind === 'codex' || entry.kind === 'viewer')
+    && Number.isInteger(entry.pid) && entry.pid > 1
+    && Number.isInteger(entry.processGroup) && entry.processGroup > 1
+    && typeof entry.startTime === 'string'
+    && Array.isArray(entry.arguments)
+    && entry.arguments.length > 0
+    && entry.arguments.every(argument => typeof argument === 'string');
+}
+
+export function matchesRegisteredProcess(entry, startTime, arguments_, group) {
+  return validRegisteredProcess(entry)
+    && startTime === entry.startTime
+    && group === entry.processGroup
+    && arguments_.length === entry.arguments.length
+    && arguments_.every((argument, index) => argument === entry.arguments[index]);
+}
+
+async function stopRegisteredBackgroundProcess(entry) {
+  if (!validRegisteredProcess(entry) || !(await processExists(entry.pid))) return;
+  const [startTime, arguments_, group] = await Promise.all([
+    processStartTime(entry.pid),
+    commandArguments(entry.pid),
+    processGroup(entry.pid).catch(() => null),
+  ]);
+  if (!matchesRegisteredProcess(entry, startTime, arguments_, group)) return;
+  try {
+    process.kill(-entry.processGroup, 'SIGTERM');
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error;
+  }
+  if (await waitForProcessExit(entry.pid, 5_000)) return;
+  try {
+    process.kill(-entry.processGroup, 'SIGKILL');
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error;
+  }
+  if (!(await waitForProcessExit(entry.pid, 5_000))) {
+    throw new Error(`${entry.kind} process ${entry.pid} did not stop`);
+  }
+}
+
+async function cleanupRegisteredBackgroundProcesses() {
+  for (const entry of await registeredBackgroundProcesses()) {
+    await stopRegisteredBackgroundProcess(entry);
+  }
+  await rm(backgroundProcessRegistryFile, { force: true });
+}
+
 async function cleanupPort(runtime, port, expectedKinds) {
   const pids = [...new Set(await listenerPids(port))];
   for (const pid of pids) {
@@ -243,6 +314,7 @@ async function cleanup(runtime) {
   for (const port of runtime.viewerPorts) await cleanupPort(runtime, port, ['viewer']);
   await cleanupPort(runtime, runtime.openVSCodePort, ['openvscode']);
   await cleanupPort(runtime, runtime.zellijWebPort, ['zellij-web']);
+  await cleanupRegisteredBackgroundProcesses();
   await Promise.all([
     rm(openVSCodePidFile, { force: true }),
     rm(zellijWebPidFile, { force: true }),
@@ -389,15 +461,25 @@ async function ensureSupport(runtime) {
   }
 }
 
+async function ensureZellij(runtime) {
+  await ensureManagedListener(
+    runtime, runtime.zellijWebPort, 'zellij-web', zellijWebPidFile, startZellijWeb,
+  );
+}
+
 async function main() {
   const [operation, configFile, workspaceRoot, managementPortOverride, runtimeSnapshot] = process.argv.slice(2);
-  if (!['cleanup', 'start-support', 'ensure-support'].includes(operation) || !configFile || !workspaceRoot) {
-    throw new Error('usage: service-runtime.mjs <cleanup|start-support|ensure-support> <config-file> <workspace-root>');
+  if (!['cleanup', 'start-support', 'ensure-support', 'ensure-zellij'].includes(operation)
+    || !configFile || !workspaceRoot) {
+    throw new Error(
+      'usage: service-runtime.mjs <cleanup|start-support|ensure-support|ensure-zellij> <config-file> <workspace-root>',
+    );
   }
   const runtime = await loadRuntime(configFile, workspaceRoot, managementPortOverride, runtimeSnapshot);
   if (operation === 'cleanup') await cleanup(runtime);
   else if (operation === 'start-support') await startSupport(runtime);
-  else await ensureSupport(runtime);
+  else if (operation === 'ensure-support') await ensureSupport(runtime);
+  else await ensureZellij(runtime);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

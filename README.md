@@ -101,6 +101,8 @@ codepilot-server stop
 
 停止操作会关闭管理服务、Codex CLI、code-viewer、Zellij Web 和 OpenVSCode，但不会删除已有的 Zellij Session。
 
+`codepilot-server restart` 会执行同样的后台进程清理，但只重新启动管理服务并确保 Zellij Web 可用。Codex、code-viewer 和 OpenVSCode 不会自动恢复，已有 Zellij Session 保持不变。
+
 ## 注意事项
 
 - 管理页面没有应用层登录，请通过防火墙限制为仅允许 VPN 或公司内网访问。

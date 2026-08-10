@@ -47,13 +47,13 @@ Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。
 
 统一重启通过固定的 Node.js CLI `codepilot-server restart` 执行。网页只能调用不接受路径、命令、参数或环境变量的 `POST /api/services/restart`；后端只启动已安装应用自身的 `dist/cli.js restart`，并使用启动时保存且已校验的运行元数据。接口返回 `202` 后，CLI 必须：
 
-1. 向管理服务发送 `SIGTERM`，等待其停止当前 code-viewer 进程组。
+1. 向管理服务发送 `SIGTERM`，等待其停止当前 code-viewer 和活动 Codex app-server 进程组。
 2. 调用固定 Zellij CLI 的 `web --stop`，只停止 Zellij Web，不删除任何 Zellij Session。
-3. 按项目可执行路径、固定参数、配置文件和端口共同验证遗留的管理服务、code-viewer、Zellij Web 与 OpenVSCode 进程身份；只终止验证通过的进程或独立进程组。
-4. 删除本项目的陈旧 PID 记录，并确认管理、viewer、Zellij Web 和 OpenVSCode 配置端口均已释放。端口属于无法验证的进程时重启失败，不得误杀或覆盖端口。
-5. 使用同一 workspace root 重新启动 Zellij Web、OpenVSCode 和管理服务，并原子重建权限为 `0600` 的 PID 文件。
+3. 按托管进程登记、项目可执行路径、固定参数、启动时间、配置文件和端口共同验证遗留的管理服务、Codex、code-viewer、Zellij Web 与 OpenVSCode 进程身份；只终止验证通过的进程或独立进程组。
+4. 删除本项目的陈旧 PID 与托管进程登记，并确认管理、viewer、Zellij Web 和 OpenVSCode 配置端口均已释放。端口属于无法验证的进程时重启失败，不得误杀或覆盖端口。
+5. 使用同一 workspace root 只重新启动 Zellij Web 和管理服务，并原子重建权限为 `0600` 的对应 PID 文件。code-viewer、Codex 与 OpenVSCode 在 cleanup 后保持停止，不得由 restart 自动恢复。
 
-网页触发的重启输出追加到 `data/codepilot-web-restart.log`。部分启动失败时必须再次执行相同的身份校验和端口清理；Zellij Session 始终保留。
+网页触发的重启输出追加到 `data/codepilot-web-restart.log`。部分启动失败时必须再次执行相同的身份校验和端口清理；Zellij Session 始终保留。重启后的管理服务不得恢复重启前仍在运行的 Codex turn 或 code-viewer 实例，OpenVSCode 也保持停止；只有显式的完整 `start`/`run` 流程才确保 OpenVSCode 运行。
 
 管理应用不设置用户名、密码、Basic Auth、Bearer Token 或登录页面。页面、API 和后续 viewer 代理在 VPN/公司内网边界内通过 HTTPS 访问，并复用 Zellij Web 证书和私钥。
 
@@ -555,7 +555,7 @@ app-server 进程使用独立进程组，浏览器不能控制可执行文件、
 | `POST` | `/api/codex/conversations/:repositoryId/steer` | `202` | 向当前运行中的 Codex turn 追加自然语言输入 |
 | `POST` | `/api/codex/conversations/:repositoryId/stop` | `202` | 停止 repository 当前运行的 Codex turn |
 | `DELETE` | `/api/codex/conversations/:repositoryId` | `204` | 清空 repository 当前 Codex 对话快照 |
-| `POST` | `/api/services/restart` | `202` | 重启管理、Zellij Web、code-viewer 和 OpenVSCode 服务 |
+| `POST` | `/api/services/restart` | `202` | 清理全部托管后台进程，并只重启管理服务与 Zellij Web |
 
 `DELETE` 请求不接受请求体。`POST /api/services/restart` 只接受空 JSON 对象并拒绝额外字段。`GET /api/viewers` 按 `createdAt` 升序返回。
 
@@ -656,9 +656,9 @@ Zellij Web 保留自身 Token 验证。管理服务按第 1.3 节保存和管理
 
 首版不接管历史 viewer。历史 PID 只在同时验证命令和启动时间属于本服务时终止，随后清空 viewer 和端口记录。用户下次访问时重新创建。
 
-Node.js CLI 必须以 `0600` 原子保存启动时已校验的配置文件、workspace root、浏览器 host 和管理端口。`codepilot-server stop` 必须先验证 PID 文件指向本应用的管理服务，再发送 `SIGTERM`；管理服务的 Fastify close hook 必须停止所有 code-viewer 和活动 Codex CLI 进程组。最多等待 10 秒优雅退出，超时后明确升级为 `SIGKILL`。管理进程退出后，CLI 必须使用已保存的运行元数据调用统一 runtime cleanup，按进程身份和固定端口停止 Zellij Web、残留 code-viewer、OpenVSCode 和其他本项目托管后台进程。即使 PID 文件缺失或失效，只要运行元数据存在也必须执行 cleanup。任何停止路径都不得删除 Zellij Session。
+Node.js CLI 必须以 `0600` 原子保存启动时已校验的配置文件、workspace root、浏览器 host 和管理端口。`codepilot-server stop` 必须先验证 PID 文件指向本应用的管理服务，再发送 `SIGTERM`；管理服务的 Fastify close hook 必须停止所有 code-viewer 和活动 Codex CLI 进程组。每个独立启动的 code-viewer 与 Codex app-server 还必须把 PID、进程组、启动时间和完整参数原子登记到权限为 `0600` 的托管进程文件，并在退出时移除；登记失败时立即终止对应进程组。最多等待 10 秒优雅退出，超时后明确升级为 `SIGKILL`。管理进程退出后，CLI 必须使用已保存的运行元数据调用统一 runtime cleanup，按登记身份、进程身份和固定端口停止 Zellij Web、残留 Codex、code-viewer、OpenVSCode 和其他本项目托管后台进程。即使 PID 文件缺失或失效，只要运行元数据存在也必须执行 cleanup。任何停止路径都不得删除 Zellij Session。
 
-`codepilot-server start` 在启动管理进程前必须执行幂等的 support-service ensure：Zellij Web 或 OpenVSCode 端口空闲时启动对应服务；已由配置匹配的本项目进程监听时复用并重建 `0600` PID 文件；被无关进程占用时拒绝启动。该检查不要求管理端口或按需 code-viewer 端口空闲，因此既可用于单独启动管理服务，也可安全衔接统一重启流程。
+`codepilot-server start` 在启动管理进程前必须执行幂等的 support-service ensure：Zellij Web 或 OpenVSCode 端口空闲时启动对应服务；已由配置匹配的本项目进程监听时复用并重建 `0600` PID 文件；被无关进程占用时拒绝启动。该检查不要求管理端口或按需 code-viewer 端口空闲。统一 restart 使用其只确保 Zellij Web 的受限变体，不得自动恢复 OpenVSCode。
 
 收到 `SIGTERM` 时：
 

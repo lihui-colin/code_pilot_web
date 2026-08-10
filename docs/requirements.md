@@ -49,7 +49,7 @@ Workspace 管理区提供“会话列表”按钮，点击后以默认隐藏的�
 
 管理服务退出或重启时不得删除 Zellij Session。
 
-主页提供统一“重启后台服务”操作。重启会断开当前 Zellij Web、code-viewer 和 OpenVSCode 浏览器连接，必须二次确认；后台应清理本项目管理的相关进程、进程组、PID 状态和配置端口后重新拉起服务，但不得按名称误杀其他项目实例或删除 Zellij Session。
+主页提供统一“重启后台服务”操作。重启会终止当前 Zellij Web、Codex、code-viewer 和 OpenVSCode 后台进程，必须二次确认；后台应清理本项目管理的相关进程、进程组、PID 状态和配置端口，但不得按名称误杀其他项目实例或删除 Zellij Session。cleanup 完成后只重新启动管理服务并确保 Zellij Web 正常，Codex、code-viewer 和 OpenVSCode 不自动恢复。
 
 ## 工作目录体验
 

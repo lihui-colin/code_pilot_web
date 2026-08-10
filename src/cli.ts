@@ -11,6 +11,10 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { loadConfiguration } from './config.js';
 import { initializeCodePilot, type InitOptions } from './init.js';
+import {
+  supportServiceOperation,
+  type SupportServiceOperation,
+} from './services/lifecycle-policy.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -318,7 +322,10 @@ async function writeSecureFile(file: string, content: string): Promise<void> {
   await chmod(file, 0o600);
 }
 
-async function runServiceRuntime(operation: 'cleanup' | 'ensure-support', metadata: RuntimeMetadata): Promise<void> {
+async function runServiceRuntime(
+  operation: 'cleanup' | SupportServiceOperation,
+  metadata: RuntimeMetadata,
+): Promise<void> {
   const child = spawn(process.execPath, [
     serviceRuntimeFile,
     operation,
@@ -394,7 +401,10 @@ async function resolveMetadata(
   };
 }
 
-async function start(arguments_: string[]): Promise<void> {
+async function start(
+  arguments_: string[],
+  supportOperation: SupportServiceOperation = supportServiceOperation('start'),
+): Promise<void> {
   if (arguments_.some(argument => argument === '--help' || argument === '-h')) {
     parseStartOptions('start', arguments_);
     return;
@@ -424,7 +434,7 @@ async function start(arguments_: string[]): Promise<void> {
     progress.update(2, 'checking management port');
     await waitForPort(metadata.port, false, 1_000);
     progress.update(3, 'starting support services');
-    await runServiceRuntime('ensure-support', metadata);
+    await runServiceRuntime(supportOperation, metadata);
     let child: ChildProcess | undefined;
     try {
       await writeSecureFile(runtimeFile, `${JSON.stringify(metadata, null, 2)}\n`);
@@ -588,7 +598,7 @@ async function run(arguments_: string[]): Promise<void> {
   const resolved = await resolveMetadata(arguments_, 'run');
   if (!resolved) return;
   const { metadata, serverArguments } = resolved;
-  await runServiceRuntime('ensure-support', metadata);
+  await runServiceRuntime(supportServiceOperation('run'), metadata);
   const child = spawn(process.execPath, [serverFile, ...serverArguments], {
     cwd: projectRoot,
     shell: false,
@@ -618,7 +628,7 @@ async function restart(): Promise<void> {
     '--host', metadata.browserHost,
     '--port', String(metadata.port),
     '--workspace', metadata.workspaceRoot,
-  ]);
+  ], supportServiceOperation('restart'));
 }
 
 async function main(): Promise<void> {

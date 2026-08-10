@@ -359,7 +359,7 @@ export function App() {
   };
 
   const restartAllServices = async () => {
-    if (!window.confirm('重启会断开当前 Zellij Web、code-viewer 和 OpenVSCode 连接，但不会删除 Zellij Session。是否继续？')) return;
+    if (!window.confirm('重启会终止当前 Codex、code-viewer、OpenVSCode 和 Zellij Web 后台进程，但不会删除 Zellij Session；完成后只恢复管理服务和 Zellij Web。是否继续？')) return;
     setServicesRestarting(true);
     try {
       await restartServices();
@@ -487,7 +487,7 @@ export function App() {
               <div className="settings-section-heading">
                 <div><p className="eyebrow">SERVICE</p><h3 id="service-settings-heading">后台服务</h3></div>
               </div>
-              <p className="settings-description">重启会暂时断开 Web、编辑器和代码浏览连接，但不会删除 Zellij Session。</p>
+              <p className="settings-description">重启会清理后台进程并保留 Zellij Session；完成后只恢复管理服务和 Zellij Web。</p>
               <button className="restart-button settings-restart-button" type="button" disabled={servicesRestarting} onClick={() => void restartAllServices()}>
                 {servicesRestarting ? '服务重启中…' : '重启后台服务'}
               </button>

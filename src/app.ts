@@ -23,6 +23,7 @@ import {
 } from './services/html-title.js';
 import { RepositoryService } from './services/repository-service.js';
 import type { ServiceRestarter } from './services/service-restarter.js';
+import type { BackgroundProcessRegistry } from './services/background-process-registry.js';
 import { SpawnViewerProcessAdapter, ViewerManager } from './services/viewer-manager.js';
 import { proxyViewerRequest, viewerIdFromCookie } from './services/viewer-proxy.js';
 import { ZELLIJ_VERSION } from './services/zellij-installer.js';
@@ -511,6 +512,7 @@ export interface AppDependencies {
   zellijExecutablePath?: string;
   zellijWebUpstreamUrl?: string;
   codeViewerExecutablePath?: string;
+  viewerProcessRegistry?: BackgroundProcessRegistry;
   codexExecutablePath?: string;
   zellijAdapter?: ConstructorParameters<typeof ZellijService>[0];
   managedSessions?: Map<string, ManagedSessionMetadata>;
@@ -721,7 +723,7 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     dependencies.persistManagedSessions,
   );
   const viewerManager = dependencies.viewerManager ?? new ViewerManager(
-    new SpawnViewerProcessAdapter(dependencies.codeViewerExecutablePath),
+    new SpawnViewerProcessAdapter(dependencies.codeViewerExecutablePath, dependencies.viewerProcessRegistry),
     config.viewerPortRange.start,
     config.publicBaseUrl,
   );
