@@ -198,7 +198,7 @@ describe('Zellij Web same-origin proxy', () => {
       expect(htmlBody).toContain('id="codepilot-zellij-shortcuts-arrows"');
       expect(htmlBody).toContain('data-storage-key="codepilot-zellij-shortcuts-position-v2"');
       expect(htmlBody).toContain('data-storage-key="codepilot-zellij-shortcuts-position-v2-arrows"');
-      expect(htmlBody).toContain('data-initial-side="left" data-no-auto-collapse="true"');
+      expect(htmlBody).toContain('data-initial-side="left" role="toolbar" aria-label="方向键快捷键盘"');
       expect(htmlBody).toContain('data-key="ArrowLeft" data-sequence="27,91,68" data-keep-expanded="true"');
       expect(htmlBody).toContain('data-key="ArrowRight" data-sequence="27,91,67" data-keep-expanded="true"');
       expect(htmlBody).toContain('aria-label="发送左方向键"');
@@ -299,25 +299,22 @@ describe('Zellij Web same-origin proxy', () => {
       toolbar!.dataset.idle = 'true';
       dom.window.document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
       expect(toolbar?.getAttribute('data-idle')).toBe('true');
-      // The direction-key ball starts expanded and never auto-collapses.
-      expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('true');
-      expect(arrowsToolbar?.getAttribute('data-idle')).toBe('false');
-      expect(arrowsToggle?.getAttribute('aria-expanded')).toBe('true');
+      // The direction-key ball shares the main ball's behavior: it starts
+      // collapsed and auto-collapses when clicking outside.
+      expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('false');
+      expect(arrowsToggle?.getAttribute('aria-expanded')).toBe('false');
       const clickArrowsToggle = () => {
         arrowsToggle?.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
         arrowsToggle?.click();
       };
       clickArrowsToggle(); // consumes the stale suppressToggleClick from the drag test
-      clickArrowsToggle(); // manual collapse is still allowed
-      expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('false');
-      expect(arrowsToggle?.getAttribute('aria-expanded')).toBe('false');
-      clickArrowsToggle(); // manual re-expand
-      expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('true');
-      // Clicking outside must not collapse the direction-key ball.
-      dom.window.document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+      clickArrowsToggle(); // expand
       expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('true');
       expect(arrowsToggle?.getAttribute('aria-expanded')).toBe('true');
-      expect(arrowsToolbar?.getAttribute('data-idle')).toBe('false');
+      // Clicking outside collapses the ring, like the main ball.
+      dom.window.document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+      expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('false');
+      expect(arrowsToggle?.getAttribute('aria-expanded')).toBe('false');
       dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true }));
       clickToggle();
       const shortcut = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="16,110"]');

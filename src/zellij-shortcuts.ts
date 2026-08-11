@@ -28,8 +28,6 @@ export interface ShortcutBallSpec {
   ariaLabel: string;
   storageKey: string;
   initialSide?: 'left' | 'right';
-  /** Never auto-collapse (no idle hide and no collapse on outside clicks). */
-  noAutoCollapse?: boolean;
   buttons: ShortcutButtonSpec[];
 }
 
@@ -59,7 +57,6 @@ export const SHORTCUT_BALLS: ShortcutBallSpec[] = [
     ariaLabel: '方向键快捷键盘',
     storageKey: 'codepilot-zellij-shortcuts-position-v2-arrows',
     initialSide: 'left',
-    noAutoCollapse: true,
     buttons: [
       { key: 'ArrowUp', sequence: [27, 91, 65], hint: 'ArrowUp', ariaLabel: '发送上方向键', label: '↑', keepExpanded: true },
       { key: 'ArrowLeft', sequence: [27, 91, 68], hint: 'ArrowLeft', ariaLabel: '发送左方向键', label: '←', keepExpanded: true },
@@ -82,20 +79,18 @@ const renderShortcutButton = (button: ShortcutButtonSpec): string => {
 };
 
 const renderShortcutBall = (ball: ShortcutBallSpec): string => {
-  const expanded = ball.noAutoCollapse === true;
   const attributes = [
     `id="${ball.id}"`,
     'class="codepilot-zellij-toolbar"',
     `data-storage-key="${ball.storageKey}"`,
     ball.initialSide ? `data-initial-side="${ball.initialSide}"` : '',
-    ball.noAutoCollapse ? 'data-no-auto-collapse="true"' : '',
     'role="toolbar"',
     `aria-label="${ball.ariaLabel}"`,
-    `data-expanded="${String(expanded)}"`,
-    `data-idle="${String(!expanded)}"`,
+    'data-expanded="false"',
+    'data-idle="true"',
   ].filter(Boolean).join(' ');
   return `<div ${attributes}>
-  <button type="button" tabindex="-1" class="codepilot-shortcut-toggle" aria-label="${expanded ? '收起快捷键盘' : '展开快捷键盘'}" aria-expanded="${String(expanded)}">+</button>
+  <button type="button" tabindex="-1" class="codepilot-shortcut-toggle" aria-label="展开快捷键盘" aria-expanded="false">+</button>
 ${ball.buttons.map(button => `  ${renderShortcutButton(button)}`).join('\n')}
 </div>`;
 };
@@ -164,7 +159,6 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     }
     scheduleIdle() {
       this.wakeToolbar();
-      if (this.toolbar.dataset.noAutoCollapse === 'true') return;
       if (this.toolbar.dataset.expanded === 'true') return;
       this.idleTimer = window.setTimeout(() => {
         this.idleTimer = 0;
@@ -308,7 +302,7 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
       const deltaX = event.clientX - this.dragState.pointerX;
       const deltaY = event.clientY - this.dragState.pointerY;
       if (!this.dragState.moved && Math.hypot(deltaX, deltaY) < 5) return;
-      if (!this.dragState.moved && this.toolbar.dataset.noAutoCollapse !== 'true') this.setExpanded(false);
+      if (!this.dragState.moved) this.setExpanded(false);
       this.dragState.moved = true;
       this.pendingDragPoint = { left: this.dragState.left + deltaX, top: this.dragState.top + deltaY };
       if (!this.dragFrame) {
@@ -361,8 +355,7 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
       const target = event.target;
       if (target instanceof Node
         && !this.toolbar.contains(target)
-        && this.toolbar.dataset.expanded === 'true'
-        && this.toolbar.dataset.noAutoCollapse !== 'true') {
+        && this.toolbar.dataset.expanded === 'true') {
         this.setExpanded(false);
       }
     }
@@ -409,7 +402,7 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
       } catch {}
       window.setTimeout(() => this.updateToolbarScale(), 0);
       updateSoftKeyboardState();
-      if (this.toolbar.dataset.noAutoCollapse !== 'true') this.toolbar.dataset.idle = 'true';
+      this.toolbar.dataset.idle = 'true';
     }
   }
   document.querySelectorAll('.codepilot-zellij-toolbar').forEach(toolbar => new CodepilotShortcutBall(toolbar));
