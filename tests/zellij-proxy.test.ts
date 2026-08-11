@@ -195,8 +195,21 @@ describe('Zellij Web same-origin proxy', () => {
       expect(htmlBody).toContain('data-sequence="9" data-keep-expanded="true" data-hint="Tab"');
       expect(htmlBody).toContain('data-key="ArrowUp" data-sequence="27,91,65" data-keep-expanded="true"');
       expect(htmlBody).toContain('data-key="ArrowDown" data-sequence="27,91,66" data-keep-expanded="true"');
+      expect(htmlBody).toContain('id="codepilot-zellij-shortcuts-arrows"');
+      expect(htmlBody).toContain('data-storage-key="codepilot-zellij-shortcuts-position-v2"');
+      expect(htmlBody).toContain('data-storage-key="codepilot-zellij-shortcuts-position-v2-arrows"');
+      expect(htmlBody).toContain('data-initial-side="left" data-no-auto-collapse="true"');
+      expect(htmlBody).toContain('data-key="ArrowLeft" data-sequence="27,91,68" data-keep-expanded="true"');
+      expect(htmlBody).toContain('data-key="ArrowRight" data-sequence="27,91,67" data-keep-expanded="true"');
+      expect(htmlBody).toContain('aria-label="发送左方向键"');
+      expect(htmlBody).toContain('aria-label="发送右方向键"');
+      const arrowsHtml = htmlBody.slice(
+        htmlBody.indexOf('id="codepilot-zellij-shortcuts-arrows"'),
+        htmlBody.indexOf('<script src="/codepilot-zellij-shortcuts.js"></script>'),
+      );
+      expect(arrowsHtml.match(/data-key="Arrow(Up|Down|Left|Right)"/gu)).toHaveLength(4);
       expect(htmlBody).not.toContain('Ctrl+O D');
-      expect(htmlBody.match(/data-sequence=/gu)).toHaveLength(6);
+      expect(htmlBody.match(/data-sequence=/gu)).toHaveLength(10);
       expect(htmlBody).not.toContain('#terminal { height: calc');
       expect(htmlBody).toContain('height: 100dvh !important');
       expect(htmlBody).toContain('border-radius: 50%');
@@ -221,8 +234,12 @@ describe('Zellij Web same-origin proxy', () => {
       expect(shortcutScript).toContain("toolbar.style.setProperty('--shortcut-scale'");
       expect(shortcutScript).toContain("toolbar.style.setProperty('--shortcut-size', 2.8 * toolbarScale + 'rem')");
       expect(shortcutScript).not.toContain('terminal.options.fontSize =');
+      expect(shortcutScript).toContain('class CodepilotShortcutBall');
+      expect(shortcutScript).toContain('new CodepilotShortcutBall(toolbar)');
       expect(shortcutScript).toContain('const updateSoftKeyboardState = () =>');
       expect(shortcutScript).toContain("document.addEventListener('focusout', scheduleViewportRecovery)");
+      expect(shortcutScript).toContain("!active.classList.contains('xterm-helper-textarea')");
+      expect(shortcutScript).toContain('terminalWasFocused && !isTerminalFocused()');
       expect(shortcutScript).toContain('}, 3000)');
       const dom = new JSDOM(htmlBody, { runScripts: 'outside-only', url: 'https://codepilot.test/zellij/session-name' });
       const sentSequences: string[] = [];
@@ -237,9 +254,34 @@ describe('Zellij Web same-origin proxy', () => {
       dom.window.eval(shortcutScript);
       const terminalInput = dom.window.document.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
       const toolbar = dom.window.document.querySelector<HTMLElement>('#codepilot-zellij-shortcuts');
+      const arrowsToolbar = dom.window.document.querySelector<HTMLElement>('#codepilot-zellij-shortcuts-arrows');
       const toggle = dom.window.document.querySelector<HTMLButtonElement>('.codepilot-shortcut-toggle');
       expect(toolbar?.style.left).toBe('971px');
       expect(toolbar?.style.top).toBe('361.5px');
+      expect(arrowsToolbar?.style.left).toBe('8px');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-x')).toBe('1');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-1-x')).toBe('47.07px');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-1-y')).toBe('-76.25px');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-2-x')).toBe('65.18px');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-2-y')).toBe('-26.48px');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-3-x')).toBe('65.18px');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-3-y')).toBe('26.48px');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-4-x')).toBe('47.07px');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-4-y')).toBe('76.25px');
+      Object.defineProperty(arrowsToolbar, 'offsetWidth', { configurable: true, value: 45 });
+      Object.defineProperty(arrowsToolbar, 'offsetHeight', { configurable: true, value: 45 });
+      arrowsToolbar!.getBoundingClientRect = () => {
+        const left = Number.parseFloat(arrowsToolbar?.style.left || '8');
+        const top = Number.parseFloat(arrowsToolbar?.style.top || '361.5');
+        return { left, top, right: left + 45, bottom: top + 45, width: 45, height: 45, x: left, y: top, toJSON: () => ({}) };
+      };
+      const arrowsToggle = dom.window.document.querySelector<HTMLButtonElement>('#codepilot-zellij-shortcuts-arrows .codepilot-shortcut-toggle');
+      arrowsToggle?.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, clientX: 20, clientY: 390 }));
+      dom.window.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 900, clientY: 390 }));
+      dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 900, clientY: 390 }));
+      expect(arrowsToolbar?.style.left).toBe('971px');
+      expect(arrowsToolbar?.style.getPropertyValue('--shortcut-x')).toBe('-1');
+      expect(JSON.parse(dom.window.localStorage.getItem('codepilot-zellij-shortcuts-position-v2-arrows') || '{}')).toMatchObject({ side: 'right' });
       const clickToggle = () => {
         toggle?.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
         toggle?.click();
@@ -257,6 +299,26 @@ describe('Zellij Web same-origin proxy', () => {
       toolbar!.dataset.idle = 'true';
       dom.window.document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
       expect(toolbar?.getAttribute('data-idle')).toBe('true');
+      // The direction-key ball starts expanded and never auto-collapses.
+      expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('true');
+      expect(arrowsToolbar?.getAttribute('data-idle')).toBe('false');
+      expect(arrowsToggle?.getAttribute('aria-expanded')).toBe('true');
+      const clickArrowsToggle = () => {
+        arrowsToggle?.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+        arrowsToggle?.click();
+      };
+      clickArrowsToggle(); // consumes the stale suppressToggleClick from the drag test
+      clickArrowsToggle(); // manual collapse is still allowed
+      expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('false');
+      expect(arrowsToggle?.getAttribute('aria-expanded')).toBe('false');
+      clickArrowsToggle(); // manual re-expand
+      expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('true');
+      // Clicking outside must not collapse the direction-key ball.
+      dom.window.document.body.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+      expect(arrowsToolbar?.getAttribute('data-expanded')).toBe('true');
+      expect(arrowsToggle?.getAttribute('aria-expanded')).toBe('true');
+      expect(arrowsToolbar?.getAttribute('data-idle')).toBe('false');
+      dom.window.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true }));
       clickToggle();
       const shortcut = dom.window.document.querySelector<HTMLButtonElement>('[data-sequence="16,110"]');
       terminalInput?.focus();
@@ -296,8 +358,29 @@ describe('Zellij Web same-origin proxy', () => {
       arrowUp?.click();
       arrowDown?.click();
       expect(sentSequences).toEqual(['\x10n', '\x10x', '\x03', '\t', '\t', '\x1b[A', '\x1b[B']);
-      expect(dom.window.document.activeElement).not.toBe(terminalInput);
+      expect(dom.window.document.activeElement).toBe(terminalInput);
       expect(toolbar?.getAttribute('data-expanded')).toBe('true');
+      const arrowLeft = dom.window.document.querySelector<HTMLButtonElement>('[data-key="ArrowLeft"]');
+      const arrowRight = dom.window.document.querySelector<HTMLButtonElement>('[data-key="ArrowRight"]');
+      arrowLeft?.click();
+      arrowRight?.click();
+      expect(sentSequences).toEqual(['\x10n', '\x10x', '\x03', '\t', '\t', '\x1b[A', '\x1b[B', '\x1b[D', '\x1b[C']);
+      expect(dom.window.document.activeElement).toBe(terminalInput);
+      expect(toolbar?.getAttribute('data-expanded')).toBe('true');
+      // If a mobile browser steals terminal focus during the tap despite
+      // pointerdown preventDefault, sendSequence must restore it so the Codex
+      // TUI input stays editable.
+      const focusSpy = vi.fn(() => terminalInput?.focus());
+      Object.assign(dom.window, { term: { focus: focusSpy } });
+      terminalInput?.focus();
+      arrowUp?.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true }));
+      terminalInput?.blur();
+      expect(dom.window.document.activeElement).not.toBe(terminalInput);
+      arrowUp?.click();
+      expect(focusSpy).toHaveBeenCalledTimes(1);
+      expect(dom.window.document.activeElement).toBe(terminalInput);
+      expect(sentSequences.at(-1)).toBe('\x1b[A');
+      Object.assign(dom.window, { term: terminal });
       Object.defineProperty(toolbar, 'offsetWidth', { configurable: true, value: 45 });
       Object.defineProperty(toolbar, 'offsetHeight', { configurable: true, value: 45 });
       toolbar!.getBoundingClientRect = () => {
