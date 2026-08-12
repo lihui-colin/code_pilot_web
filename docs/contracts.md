@@ -51,9 +51,9 @@ Zellij 查询、创建、删除默认超时分别为 5 秒、15 秒和 15 秒。
 2. 调用固定 Zellij CLI 的 `web --stop`，只停止 Zellij Web，不删除任何 Zellij Session。
 3. 按托管进程登记、项目可执行路径、固定参数、启动时间、配置文件和端口共同验证遗留的管理服务、Codex、code-viewer、Zellij Web 与 OpenVSCode 进程身份；只终止验证通过的进程或独立进程组。
 4. 删除本项目的陈旧 PID 与托管进程登记，并确认管理、viewer、Zellij Web 和 OpenVSCode 配置端口均已释放。端口属于无法验证的进程时重启失败，不得误杀或覆盖端口。
-5. 使用同一 workspace root 只重新启动 Zellij Web 和管理服务，并原子重建权限为 `0600` 的对应 PID 文件。code-viewer、Codex 与 OpenVSCode 在 cleanup 后保持停止，不得由 restart 自动恢复。
+5. 使用同一 workspace root 只重新启动 Zellij Web 和管理服务，并原子重建权限为 `0600` 的对应 PID 文件。code-viewer 与 Codex 在 cleanup 后保持停止，不得由 restart 自动恢复；OpenVSCode 由管理服务按需自动启动，不要求 restart 预先拉起。
 
-网页触发的重启输出追加到 `data/codepilot-web-restart.log`。部分启动失败时必须再次执行相同的身份校验和端口清理；Zellij Session 始终保留。重启后的管理服务不得恢复重启前仍在运行的 Codex turn 或 code-viewer 实例，OpenVSCode 也保持停止；只有显式的完整 `start`/`run` 流程才确保 OpenVSCode 运行。
+网页触发的重启输出追加到 `data/codepilot-web-restart.log`。部分启动失败时必须再次执行相同的身份校验和端口清理；Zellij Session 始终保留。重启后的管理服务不得恢复重启前仍在运行的 Codex turn 或 code-viewer 实例；OpenVSCode 由管理服务在首次请求 `/openvscode` 时按需自动启动。
 
 管理应用不设置用户名、密码、Basic Auth、Bearer Token 或登录页面。页面、API 和后续 viewer 代理在 VPN/公司内网边界内通过 HTTPS 访问，并复用 Zellij Web 证书和私钥。
 
@@ -450,7 +450,7 @@ OpenVSCode Server 是部署侧独立启动的编辑服务，但不得直接暴�
 
 前端必须直接使用条目中的 `openVSCodeUrl`，不得自行拼接或提交服务器绝对路径、命令、环境变量或任意端口。后端只可为 workspace 扫描结果或已持久化的手动 Git repository 生成 URL；已经消失或不再是 Git repository 的目录不得生成 URL。
 
-管理服务必须把 `/openvscode` 下的普通 HTTP 请求和 WebSocket Upgrade 流式代理到 `http://127.0.0.1:<openVSCode.port>`，保留 `/openvscode` 基路径，并使用 `publicBaseUrl` 的 authority 和 HTTPS Origin 生成上游请求头。这样非 localhost 浏览器仍处于安全上下文，Codex 等依赖 Webview、Worker 或安全浏览器 API 的扩展能够正常渲染。OpenVSCode 上游不得加入防火墙公开端口。
+管理服务必须把 `/openvscode` 下的普通 HTTP 请求和 WebSocket Upgrade 流式代理到 `http://127.0.0.1:<openVSCode.port>`，保留 `/openvscode` 基路径，并使用 `publicBaseUrl` 的 authority 和 HTTPS Origin 生成上游请求头。首次请求时若上游未运行，管理服务必须按下方固定参数数组自动启动 OpenVSCode 并等待端口就绪后再代理；进程登记到 `data/openvscode.pid`，管理服务关闭时停止该进程，并发首请求只允许启动一次。这样非 localhost 浏览器仍处于安全上下文，Codex 等依赖 Webview、Worker 或安全浏览器 API 的扩展能够正常渲染。OpenVSCode 上游不得加入防火墙公开端口。
 
 OpenVSCode 入口页面的浏览器标题固定为 `<repository-name> - openvscode`。repository 名称由后端已校验后生成的 `folder` 参数取 basename，入口 HTML 必须锁定该标题以防 OpenVSCode 初始化后覆盖；静态资源、API 和 WebSocket 不修改正文。
 

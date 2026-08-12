@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage } from 'node:http';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import type { Duplex } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import type { ReadinessResult } from '../src/domain/types.js';
+import { OpenVSCodeService } from '../src/services/openvscode-service.js';
 import { createTestConfig } from './helpers.js';
 
 const temporaryDirectories: string[] = [];
@@ -25,6 +26,72 @@ function websocketAccept(key: string): string {
 }
 
 describe('OpenVSCode same-origin proxy', () => {
+  it('starts the OpenVSCode upstream lazily on the first request', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-openvscode-lazy-'));
+    temporaryDirectories.push(root);
+
+    // A tiny stand-in executable that binds the configured port and echoes the
+    // request path back, so the lazy-start path can be exercised without a
+    // real OpenVSCode installation.
+    const stubExecutable = path.join(root, 'fake-openvscode.mjs');
+    await writeFile(stubExecutable, [
+      '#!/usr/bin/env node',
+      "import { createServer } from 'node:http';",
+      "const portIndex = process.argv.indexOf('--port');",
+      'const port = Number(process.argv[portIndex + 1]);',
+      'createServer((request, response) => {',
+      "  response.writeHead(200, { 'content-type': 'application/json' });",
+      '  response.end(JSON.stringify({ started: true, path: request.url }));',
+      "}).listen(port, '127.0.0.1');",
+      '',
+    ].join('\n'));
+    await chmod(stubExecutable, 0o755);
+
+    const freePort = await new Promise<number>((resolve, reject) => {
+      const probe = createServer();
+      probe.once('error', reject);
+      probe.listen(0, '127.0.0.1', () => {
+        const port = (probe.address() as AddressInfo).port;
+        probe.close(() => resolve(port));
+      });
+    });
+
+    const config = createTestConfig(root);
+    config.openVSCodePort = freePort;
+    config.openVSCodeExecutableFile = stubExecutable;
+    const openVSCodeService = new OpenVSCodeService({
+      executablePath: stubExecutable,
+      port: freePort,
+      workspaceRoot: root,
+      pidFile: path.join(root, 'openvscode.pid'),
+      logFile: path.join(root, 'openvscode.log'),
+    });
+    const app = await createApp(config, {
+      readiness: ready,
+      directoryIdSecret: null,
+      staticRoot: false,
+      https: false,
+      logger: false,
+      openVSCodeService,
+    });
+
+    try {
+      await app.listen({ host: '127.0.0.1', port: 0 });
+      const appPort = (app.server.address() as AddressInfo).port;
+      const first = await fetch(`http://127.0.0.1:${appPort}/openvscode/probe?value=1`);
+      expect(first.status).toBe(200);
+      expect(await first.json()).toEqual({ started: true, path: '/openvscode/probe?value=1' });
+      const pid = Number((await readFile(path.join(root, 'openvscode.pid'), 'utf8')).trim());
+      expect(Number.isInteger(pid) && pid > 1).toBe(true);
+      const second = await fetch(`http://127.0.0.1:${appPort}/openvscode/probe?value=2`);
+      expect(second.status).toBe(200);
+      expect(await second.json()).toEqual({ started: true, path: '/openvscode/probe?value=2' });
+    } finally {
+      await app.close();
+      await expect(readFile(path.join(root, 'openvscode.pid'), 'utf8')).rejects.toThrow();
+    }
+  });
+
   it('preserves the base path and proxies HTTP and WebSocket traffic', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'codepilot-web-openvscode-proxy-'));
     temporaryDirectories.push(root);

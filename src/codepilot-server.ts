@@ -6,6 +6,7 @@ import { loadConfiguration, persistZellijWebToken } from './config.js';
 import { FileBackgroundProcessRegistry } from './services/background-process-registry.js';
 import { checkToolReadiness } from './services/tool-readiness.js';
 import { CodexChatService, SpawnCodexAppServerAdapter } from './services/codex-chat-service.js';
+import { OpenVSCodeService } from './services/openvscode-service.js';
 import { StateStore } from './services/state-store.js';
 import { SpawnServiceRestarter } from './services/service-restarter.js';
 import { bootstrapZellij } from './services/zellij-bootstrap.js';
@@ -52,6 +53,13 @@ async function main(): Promise<void> {
     stateAvailable,
   );
   const projectRoot = fileURLToPath(new URL('../', import.meta.url));
+  const openVSCodeService = new OpenVSCodeService({
+    executablePath: loaded.config.openVSCodeExecutableFile,
+    port: loaded.config.openVSCodePort,
+    workspaceRoot: loaded.config.workspaceRootRealPath,
+    pidFile: path.join(projectRoot, 'data/openvscode.pid'),
+    logFile: path.join(projectRoot, 'data/openvscode.log'),
+  });
   const backgroundProcessRegistry = new FileBackgroundProcessRegistry(
     path.join(projectRoot, 'data/background-processes.json'),
   );
@@ -71,6 +79,7 @@ async function main(): Promise<void> {
     codeViewerExecutablePath,
     viewerProcessRegistry: backgroundProcessRegistry,
     codexChatService,
+    openVSCodeService,
     zellijTokenService,
     serviceRestarter: new SpawnServiceRestarter(
       path.join(projectRoot, 'dist/cli.js'),

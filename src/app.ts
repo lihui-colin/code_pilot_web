@@ -26,6 +26,7 @@ import type { ServiceRestarter } from './services/service-restarter.js';
 import type { BackgroundProcessRegistry } from './services/background-process-registry.js';
 import { SpawnViewerProcessAdapter, ViewerManager } from './services/viewer-manager.js';
 import { proxyViewerRequest, viewerIdFromCookie } from './services/viewer-proxy.js';
+import type { OpenVSCodeService } from './services/openvscode-service.js';
 import { ZELLIJ_VERSION } from './services/zellij-installer.js';
 import { ExecFileZellijAdapter, repositorySessionNames, ZellijService, type ManagedSessionMetadata } from './services/zellij-service.js';
 import type { ZellijTokenService } from './services/zellij-token-service.js';
@@ -221,6 +222,7 @@ export interface AppDependencies {
   manualRepositoryPaths?: readonly string[];
   persistManualRepositoryPaths?: (paths: readonly string[]) => Promise<void>;
   viewerManager?: ViewerManager;
+  openVSCodeService?: OpenVSCodeService;
   zellijTokenService?: ZellijTokenService;
   serviceRestarter?: ServiceRestarter;
   codexChatService?: CodexChatServiceLike;
@@ -370,6 +372,16 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
     rewritePrefix: '/openvscode',
     websocket: true,
     disableRequestLogging: true,
+    preHandler: async (_request, reply) => {
+      const service = dependencies.openVSCodeService;
+      if (!service) return;
+      try {
+        await service.ensureRunning();
+      } catch (error) {
+        app.log.warn({ error }, 'OpenVSCode upstream failed to start');
+        return reply.code(503).type('text/plain; charset=utf-8').send('OpenVSCode upstream is not available');
+      }
+    },
     replyOptions: {
       rewriteRequestHeaders: (request, headers) => {
         const pathname = new URL(request.raw.url ?? '/', config.publicBaseUrl).pathname;
@@ -673,7 +685,11 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
   }
 
   app.addHook('onClose', async () => {
-    await Promise.all([viewerManager.close(), codexChatService.close()]);
+    await Promise.all([
+      viewerManager.close(),
+      codexChatService.close(),
+      dependencies.openVSCodeService?.stop(),
+    ]);
   });
 
   return app;
