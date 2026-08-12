@@ -450,6 +450,10 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     // conversation grows, so scan the whole visible buffer and match any
     // Codex-only UI marker before hijacking touch scrolling.
     const isCodexTerminal = () => {
+      // Managed repository sessions are created with the fixed Codex command,
+      // so the server-side marker remains reliable after Codex's identifying
+      // text has scrolled out of Zellij's zero-scrollback xterm buffer.
+      if (pill?.dataset.codexSession === 'true') return true;
       // The markers can wrap across narrow mobile lines, so collapse any
       // newline/space runs before matching multi-word UI text.
       const full = bufferHead(Number.POSITIVE_INFINITY).replace(/\\s+/gu, ' ');
@@ -586,7 +590,7 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   });
 })();`;
 
-export const ZELLIJ_SHORTCUTS = `
+export const renderZellijShortcuts = (codexSession = false): string => `
 <style id="codepilot-zellij-shortcuts-style">
   html:not(.codepilot-soft-keyboard-open), html:not(.codepilot-soft-keyboard-open) body, html:not(.codepilot-soft-keyboard-open) #terminal { height: 100dvh !important; min-height: 100dvh !important; }
   .codepilot-zellij-toolbar { --shortcut-scale: 1; --shortcut-size: 2.8rem; --shortcut-font-size: .78rem; --shortcut-toggle-font-size: 1.15rem; --shortcut-hint-font-size: .58rem; --shortcut-hint-gap: .18rem; --shortcut-idle-offset: -2.35rem; --shortcut-x: -1; --shortcut-1-x: .81rem; --shortcut-1-y: -7.3rem; --shortcut-2-x: 2.94rem; --shortcut-2-y: -4.77rem; --shortcut-3-x: 4.07rem; --shortcut-3-y: -1.66rem; --shortcut-4-x: 4.07rem; --shortcut-4-y: 1.66rem; --shortcut-5-x: 2.94rem; --shortcut-5-y: 4.77rem; --shortcut-6-x: .81rem; --shortcut-6-y: 7.3rem; position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: var(--shortcut-size); height: var(--shortcut-size); pointer-events: none; }
@@ -610,5 +614,7 @@ export const ZELLIJ_SHORTCUTS = `
   .codepilot-transcript-close:active { background: #45635a; }
 </style>
 ${SHORTCUT_BALLS.map(renderShortcutBall).join('\n')}
-<button type="button" id="codepilot-transcript-close" class="codepilot-transcript-close" aria-label="收起对话全文，返回聊天" hidden>‹ 返回</button>
+<button type="button" id="codepilot-transcript-close" class="codepilot-transcript-close" data-codex-session="${String(codexSession)}" aria-label="收起对话全文，返回聊天" hidden>‹ 返回</button>
 <script src="${ZELLIJ_SHORTCUTS_SCRIPT_PATH}"></script>`;
+
+export const ZELLIJ_SHORTCUTS = renderZellijShortcuts();

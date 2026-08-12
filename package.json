@@ -27,6 +27,7 @@
     "probe:mvp0": "node scripts/probe-mvp0.mjs",
     "probe:mvp1": "node scripts/probe-mvp1.mjs",
     "probe:zellij-web-attach": "node scripts/probe-zellij-web-attach.mjs",
+    "deploy:pi-web-jmf": "bash scripts/deploy-pi-web-jmfederico.sh",
     "service:start": "node dist/cli.js start",
     "service:restart": "node dist/cli.js restart",
     "service:stop": "node dist/cli.js stop",

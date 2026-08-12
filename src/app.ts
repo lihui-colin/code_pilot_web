@@ -30,7 +30,7 @@ import type { OpenVSCodeService } from './services/openvscode-service.js';
 import { ZELLIJ_VERSION } from './services/zellij-installer.js';
 import { ExecFileZellijAdapter, repositorySessionNames, ZellijService, type ManagedSessionMetadata } from './services/zellij-service.js';
 import type { ZellijTokenService } from './services/zellij-token-service.js';
-import { ZELLIJ_SHORTCUTS, ZELLIJ_SHORTCUTS_SCRIPT, ZELLIJ_SHORTCUTS_SCRIPT_PATH } from './zellij-shortcuts.js';
+import { renderZellijShortcuts, ZELLIJ_SHORTCUTS_SCRIPT, ZELLIJ_SHORTCUTS_SCRIPT_PATH } from './zellij-shortcuts.js';
 
 const repositoryQuerySchema = z.object({}).strict();
 const folderIdSchema = z.string().regex(/^folder_[A-Za-z0-9_-]{43}$/u);
@@ -164,7 +164,13 @@ async function requestZellijWebLogin(destination: string, token: string) {
   });
 }
 
-async function proxyZellijHtml(destination: string, cookie: string | undefined, cookiePrefix: string, pageTitle: string) {
+async function proxyZellijHtml(
+  destination: string,
+  cookie: string | undefined,
+  cookiePrefix: string,
+  pageTitle: string,
+  codexSession: boolean,
+) {
   const url = new URL(destination);
   const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
   const upstreamCookie = upstreamZellijCookie(cookie, cookiePrefix);
@@ -197,7 +203,7 @@ async function proxyZellijHtml(destination: string, cookie: string | undefined, 
           body: lockHtmlTitle(
             Buffer.concat(chunks).toString('utf8')
               .replace('<base href="/" />', '<base href="/zellij/" />')
-              .replace('</body>', `${ZELLIJ_SHORTCUTS}</body>`),
+              .replace('</body>', `${renderZellijShortcuts(codexSession)}</body>`),
             pageTitle,
           ),
         });
@@ -336,11 +342,12 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
       if (request.method === 'GET' && (/^\/zellij\/?$/u.test(pathname) || /^\/zellij\/[A-Za-z0-9_-]{1,64}\/?$/u.test(pathname))) {
         const sessionName = /^\/zellij\/([A-Za-z0-9_-]{1,64})\/?$/u.exec(pathname)?.[1];
         let repositoryName: string | undefined;
+        let repositoryId: string | undefined;
         const metadata = sessionName ? dependencies.managedSessions?.get(sessionName) : undefined;
         if (metadata) repositoryName = path.basename(metadata.relativePath);
         if (sessionName && repositoryService) {
           const listing = await repositoryService.list();
-          const repositoryId = metadata?.repositoryId
+          repositoryId = metadata?.repositoryId
             ?? [...repositorySessionNames(listing.entries).entries()]
               .find(([, name]) => name === sessionName)?.[0];
           repositoryName = listing.entries.find(entry => entry.id === repositoryId)?.name;
@@ -353,6 +360,7 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
           request.headers.cookie,
           zellijBrowserCookiePrefix,
           `${repositoryName ?? sessionName ?? 'Zellij'} - Zellij`,
+          metadata?.command === 'codex' || repositoryId !== undefined,
         );
         if (sessionName && response.body.includes('data-authenticated="false"')) {
           return reply.code(302).headers({

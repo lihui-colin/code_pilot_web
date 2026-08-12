@@ -183,7 +183,10 @@ describe('Zellij Web same-origin proxy', () => {
       const managedHtml = await fetch(`http://127.0.0.1:${appPort}/zellij/${sessionName}`, {
         headers: { cookie: 'codepilot_zellij_8024_zellij-auth=test-session' },
       });
-      expect(await managedHtml.text()).toContain('<title>codepilot-web - Zellij</title>');
+      const managedHtmlBody = await managedHtml.text();
+      expect(managedHtmlBody).toContain('<title>codepilot-web - Zellij</title>');
+      expect(managedHtmlBody).toContain('data-codex-session="true"');
+      expect(htmlBody).toContain('data-codex-session="false"');
       expect(htmlBody).toContain('id="codepilot-zellij-shortcuts"');
       expect(htmlBody).toContain('data-expanded="false"');
       expect(htmlBody).toContain('data-idle="true"');
@@ -241,6 +244,7 @@ describe('Zellij Web same-origin proxy', () => {
       expect(shortcutScript).toContain('class CodepilotShortcutBall');
       expect(shortcutScript).toContain('new CodepilotShortcutBall(toolbar)');
       expect(shortcutScript).toContain('const scrollBridge = (() => {');
+      expect(shortcutScript).toContain("pill?.dataset.codexSession === 'true'");
       expect(shortcutScript).toContain("const TRANSCRIPT_HEADER = 'T R A N S C R I P T'");
       expect(shortcutScript).toContain("sendRaw('\x07'); // Ctrl+G: lock Zellij so Ctrl+T reaches Codex");
       expect(shortcutScript).toContain("sendRaw('\x14'); // Ctrl+T: open the Codex transcript overlay");
@@ -252,6 +256,42 @@ describe('Zellij Web same-origin proxy', () => {
       expect(shortcutScript).toContain("!active.classList.contains('xterm-helper-textarea')");
       expect(shortcutScript).toContain('terminalWasFocused && !isTerminalFocused()');
       expect(shortcutScript).toContain('}, 3000)');
+
+      // A managed Codex session must keep intercepting touch scroll even when
+      // no Codex-identifying text remains in xterm's zero-scrollback buffer.
+      const managedDom = new JSDOM(managedHtmlBody, { runScripts: 'outside-only', url: 'https://codepilot.test/zellij/managed-session' });
+      const managedSequences: string[] = [];
+      Object.defineProperty(managedDom.window.navigator, 'maxTouchPoints', { configurable: true, value: 1 });
+      Object.assign(managedDom.window, {
+        __zjImeBypass: { sendFn: (sequence: string) => managedSequences.push(sequence) },
+        setTimeout: (callback: TimerHandler) => {
+          if (typeof callback === 'function') callback();
+          return 1;
+        },
+        setInterval: () => 1,
+        term: {
+          buffer: {
+            active: {
+              length: 2,
+              getLine: (row: number) => ({ translateToString: () => row === 1 ? '<p> PANE' : '' }),
+            },
+          },
+        },
+      });
+      managedDom.window.eval(shortcutScript);
+      const touchTarget = managedDom.window.document.querySelector('.xterm-helper-textarea')!;
+      const touchEvent = (type: string, clientY: number) => {
+        const event = new managedDom.window.Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [{ clientX: 20, clientY }] });
+        touchTarget.dispatchEvent(event);
+        return event;
+      };
+      touchEvent('touchstart', 100);
+      const touchMove = touchEvent('touchmove', 230);
+      expect(touchMove.defaultPrevented).toBe(true);
+      expect(managedSequences).toEqual(['\x07', '\x14', '\x1b[5~']);
+      managedDom.window.close();
+
       const dom = new JSDOM(htmlBody, { runScripts: 'outside-only', url: 'https://codepilot.test/zellij/session-name' });
       const sentSequences: string[] = [];
       const terminal = { options: { fontSize: 15 } };
