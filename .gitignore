@@ -176,6 +176,7 @@ report_dynamo_export.sarif
 
 docs/superpowers
 .codegraph
+.code-viewer
 weights
 tmp
 
