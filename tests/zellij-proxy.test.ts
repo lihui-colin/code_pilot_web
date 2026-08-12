@@ -185,8 +185,8 @@ describe('Zellij Web same-origin proxy', () => {
       });
       const managedHtmlBody = await managedHtml.text();
       expect(managedHtmlBody).toContain('<title>codepilot-web - Zellij</title>');
-      expect(managedHtmlBody).toContain('data-codex-session="true"');
-      expect(htmlBody).toContain('data-codex-session="false"');
+      expect(managedHtmlBody).not.toContain('data-codex-session');
+
       expect(htmlBody).toContain('id="codepilot-zellij-shortcuts"');
       expect(htmlBody).toContain('data-expanded="false"');
       expect(htmlBody).toContain('data-idle="true"');
@@ -206,10 +206,7 @@ describe('Zellij Web same-origin proxy', () => {
       expect(htmlBody).toContain('data-key="ArrowRight" data-sequence="27,91,67" data-keep-expanded="true"');
       expect(htmlBody).toContain('aria-label="发送左方向键"');
       expect(htmlBody).toContain('aria-label="发送右方向键"');
-      expect(htmlBody).toContain('id="codepilot-transcript-close"');
-      expect(htmlBody).toContain('class="codepilot-transcript-close"');
-      expect(htmlBody).toContain('aria-label="收起对话全文，返回聊天"');
-      expect(htmlBody).toContain('.codepilot-transcript-close[hidden] { display: none; }');
+      expect(htmlBody).not.toContain('codepilot-transcript-close');
       const arrowsHtml = htmlBody.slice(
         htmlBody.indexOf('id="codepilot-zellij-shortcuts-arrows"'),
         htmlBody.indexOf('<script src="/codepilot-zellij-shortcuts.js"></script>'),
@@ -243,69 +240,18 @@ describe('Zellij Web same-origin proxy', () => {
       expect(shortcutScript).not.toContain('terminal.options.fontSize =');
       expect(shortcutScript).toContain('class CodepilotShortcutBall');
       expect(shortcutScript).toContain('new CodepilotShortcutBall(toolbar)');
-      expect(shortcutScript).toContain('const scrollBridge = (() => {');
-      expect(shortcutScript).toContain("pill?.dataset.codexSession === 'true'");
-      expect(shortcutScript).toContain("const TRANSCRIPT_HEADER = 'T R A N S C R I P T'");
-      expect(shortcutScript).toContain("sendRaw('\x07'); // Ctrl+G: lock Zellij so Ctrl+T reaches Codex");
-      expect(shortcutScript).toContain("sendRaw('\x14'); // Ctrl+T: open the Codex transcript overlay");
-      expect(shortcutScript).toContain("sendRaw(direction < 0 ? PAGE_UP : PAGE_DOWN)");
-      expect(shortcutScript).toContain("document.addEventListener('touchmove', onTouchMove, { capture: true, passive: false })");
-      expect(shortcutScript).toContain("window.setInterval(updatePill, 700)");
+      // Zellij 0.44.3 owns terminal touch scrolling. The injected document
+      // script must not capture the gesture before Zellij's terminal handler.
+      expect(shortcutScript).not.toContain('scrollBridge');
+      expect(shortcutScript).not.toContain("document.addEventListener('touchstart'");
+      expect(shortcutScript).not.toContain("document.addEventListener('touchmove'");
+      expect(shortcutScript).not.toContain("document.addEventListener('touchend'");
+      expect(shortcutScript).not.toContain("sendRaw('\\x14')");
       expect(shortcutScript).toContain('const updateSoftKeyboardState = () =>');
       expect(shortcutScript).toContain("document.addEventListener('focusout', scheduleViewportRecovery)");
       expect(shortcutScript).toContain("!active.classList.contains('xterm-helper-textarea')");
       expect(shortcutScript).toContain('terminalWasFocused && !isTerminalFocused()');
       expect(shortcutScript).toContain('}, 3000)');
-
-      // A managed Codex session must keep intercepting touch scroll even when
-      // no Codex-identifying text remains in xterm's zero-scrollback buffer.
-      const managedDom = new JSDOM(managedHtmlBody, { runScripts: 'outside-only', url: 'https://codepilot.test/zellij/managed-session' });
-      const managedSequences: string[] = [];
-      const managedTimers: Array<() => void> = [];
-      const managedLines = ['', '<p> PANE'];
-      Object.defineProperty(managedDom.window.navigator, 'maxTouchPoints', { configurable: true, value: 1 });
-      Object.assign(managedDom.window, {
-        __zjImeBypass: { sendFn: (sequence: string) => managedSequences.push(sequence) },
-        setTimeout: (callback: TimerHandler) => {
-          if (typeof callback === 'function') managedTimers.push(callback);
-          return 1;
-        },
-        setInterval: () => 1,
-        term: {
-          buffer: {
-            active: {
-              length: 2,
-              getLine: (row: number) => ({ translateToString: () => managedLines[row] ?? '' }),
-            },
-          },
-        },
-      });
-      managedDom.window.eval(shortcutScript);
-      managedTimers.length = 0;
-      const touchTarget = managedDom.window.document.querySelector('.xterm-helper-textarea')!;
-      const touchEvent = (type: string, clientY: number) => {
-        const event = new managedDom.window.Event(type, { bubbles: true, cancelable: true });
-        Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [{ clientX: 20, clientY }] });
-        touchTarget.dispatchEvent(event);
-        return event;
-      };
-      touchEvent('touchstart', 100);
-      const touchMove = touchEvent('touchmove', 230);
-      expect(touchMove.defaultPrevented).toBe(true);
-      // More movement before either the 120 ms Ctrl+T delay or Codex rendering
-      // completes must not enqueue a second transcript toggle.
-      touchEvent('touchmove', 360);
-      expect(managedSequences).toEqual(['\x07']);
-      expect(managedTimers).toHaveLength(1);
-      managedTimers.shift()?.();
-      expect(managedSequences).toEqual(['\x07', '\x14']);
-      touchEvent('touchmove', 490);
-      expect(managedSequences).toEqual(['\x07', '\x14']);
-      expect(managedTimers).toHaveLength(1);
-      managedLines[0] = 'T R A N S C R I P T';
-      managedTimers.shift()?.();
-      expect(managedSequences).toEqual(['\x07', '\x14', '\x1b[5~']);
-      managedDom.window.close();
 
       const dom = new JSDOM(htmlBody, { runScripts: 'outside-only', url: 'https://codepilot.test/zellij/session-name' });
       const sentSequences: string[] = [];

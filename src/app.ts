@@ -169,7 +169,6 @@ async function proxyZellijHtml(
   cookie: string | undefined,
   cookiePrefix: string,
   pageTitle: string,
-  codexSession: boolean,
 ) {
   const url = new URL(destination);
   const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
@@ -203,7 +202,7 @@ async function proxyZellijHtml(
           body: lockHtmlTitle(
             Buffer.concat(chunks).toString('utf8')
               .replace('<base href="/" />', '<base href="/zellij/" />')
-              .replace('</body>', `${renderZellijShortcuts(codexSession)}</body>`),
+              .replace('</body>', `${renderZellijShortcuts()}</body>`),
             pageTitle,
           ),
         });
@@ -360,7 +359,6 @@ export async function createApp(config: AppConfig, dependencies: AppDependencies
           request.headers.cookie,
           zellijBrowserCookiePrefix,
           `${repositoryName ?? sessionName ?? 'Zellij'} - Zellij`,
-          metadata?.command === 'codex' || repositoryId !== undefined,
         );
         if (sessionName && response.body.includes('data-authenticated="false"')) {
           return reply.code(302).headers({

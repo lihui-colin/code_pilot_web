@@ -5,11 +5,10 @@
 // The per-ball configuration below only differs in the shortcut keys /
 // sequences, plus a default side and whether the ball may auto-collapse.
 //
-// The page also installs a touch scroll bridge for Codex TUI sessions: on
-// mobile, a vertical swipe in the main chat view opens Codex's full-transcript
-// overlay (Zellij must be locked first, otherwise Ctrl+T is intercepted) and
-// then turns the swipe into PageUp/PageDown so the conversation can actually
-// be paged through.
+// Touch scrolling is intentionally left to Zellij Web. Zellij 0.44.3 already
+// converts vertical touch gestures into terminal mouse-wheel reports; a
+// document-level capture handler would prevent that terminal handler from
+// receiving normal mobile-browser touch events.
 
 export const ZELLIJ_SHORTCUTS_SCRIPT_PATH = '/codepilot-zellij-shortcuts.js';
 
@@ -412,203 +411,6 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     }
   }
   document.querySelectorAll('.codepilot-zellij-toolbar').forEach(toolbar => new CodepilotShortcutBall(toolbar));
-  const scrollBridge = (() => {
-    const TRANSCRIPT_HEADER = 'T R A N S C R I P T';
-    const FULLSCREEN_HEADERS = ['D I F F', 'P A T C H', 'E X E C', 'P E R M I S S I O N S'];
-    const PAGE_UP = '\x1b[5~';
-    const PAGE_DOWN = '\x1b[6~';
-    // Pixels of vertical finger travel that flip one transcript page.
-    const PAGE_SWIPE_THRESHOLD = 120;
-    const state = {
-      active: false,
-      startX: 0,
-      startY: 0,
-      lastY: 0,
-      accum: 0,
-      opening: false,
-      closing: false,
-      transcriptRequested: false,
-      queuedPage: null,
-      weLocked: false,
-    };
-    const pill = document.getElementById('codepilot-transcript-close');
-    const sendRaw = data => {
-      const sendFn = window.__zjImeBypass && window.__zjImeBypass.sendFn;
-      if (typeof sendFn === 'function') sendFn(data);
-    };
-    const bufferHead = rowCount => {
-      const term = window.term;
-      if (!term || !term.buffer || !term.buffer.active) return '';
-      const buffer = term.buffer.active;
-      let text = '';
-      const end = Math.min(buffer.length, rowCount);
-      for (let y = 0; y < end; y += 1) {
-        const line = buffer.getLine(y);
-        if (line) text += line.translateToString(true) + '\\n';
-      }
-      return text;
-    };
-    // The welcome box ("OpenAI Codex") can scroll out of the first rows once a
-    // conversation grows, so scan the whole visible buffer and match any
-    // Codex-only UI marker before hijacking touch scrolling.
-    const isCodexTerminal = () => {
-      // Managed repository sessions are created with the fixed Codex command,
-      // so the server-side marker remains reliable after Codex's identifying
-      // text has scrolled out of Zellij's zero-scrollback xterm buffer.
-      if (pill?.dataset.codexSession === 'true') return true;
-      // The markers can wrap across narrow mobile lines, so collapse any
-      // newline/space runs before matching multi-word UI text.
-      const full = bufferHead(Number.POSITIVE_INFINITY).replace(/\\s+/gu, ' ');
-      return full.includes('OpenAI Codex')
-        || full.includes('ctrl + t to view transcript')
-        || full.includes('Explain this codebase')
-        || full.includes('/model to change')
-        || full.includes('esc to interrupt');
-    };
-    const currentOverlay = () => {
-      const head = bufferHead(8);
-      if (head.includes(TRANSCRIPT_HEADER)) return TRANSCRIPT_HEADER;
-      for (const header of FULLSCREEN_HEADERS) {
-        if (head.includes(header)) return header;
-      }
-      return null;
-    };
-    const statusRow = () => {
-      const term = window.term;
-      if (!term || !term.buffer || !term.buffer.active) return '';
-      const buffer = term.buffer.active;
-      const line = buffer.getLine(buffer.length - 1);
-      return line ? line.translateToString(true) : '';
-    };
-    const isLocked = () => {
-      const row = statusRow();
-      return /<g> LOCK/.test(row) && !/<p> PANE/.test(row);
-    };
-    const updatePill = () => {
-      if (!pill) return;
-      const transcriptVisible = currentOverlay() === TRANSCRIPT_HEADER;
-      pill.hidden = !(isTouchDevice() && transcriptVisible);
-      if (transcriptVisible) state.transcriptRequested = true;
-      else if (!state.opening && !state.closing) state.transcriptRequested = false;
-    };
-    const waitForTranscript = attempt => {
-      const overlay = currentOverlay();
-      if (overlay === TRANSCRIPT_HEADER) {
-        state.opening = false;
-        state.transcriptRequested = true;
-        if (state.queuedPage) sendRaw(state.queuedPage);
-        state.queuedPage = null;
-        updatePill();
-        return;
-      }
-      if (overlay || attempt >= 20) {
-        state.opening = false;
-        state.transcriptRequested = false;
-        state.queuedPage = null;
-        updatePill();
-        return;
-      }
-      window.setTimeout(() => waitForTranscript(attempt + 1), 100);
-    };
-    const openTranscript = initialPage => {
-      if (state.opening || state.closing || state.transcriptRequested) return;
-      state.opening = true;
-      state.transcriptRequested = true;
-      state.queuedPage = initialPage;
-      if (!isLocked()) {
-        state.weLocked = true;
-        sendRaw('\x07'); // Ctrl+G: lock Zellij so Ctrl+T reaches Codex
-      }
-      window.setTimeout(() => {
-        sendRaw('\x14'); // Ctrl+T: open the Codex transcript overlay
-        waitForTranscript(0);
-      }, 120);
-    };
-    const closeTranscript = () => {
-      if (state.opening || state.closing) return;
-      state.closing = true;
-      if (!isLocked()) sendRaw('\x07'); // lock so Ctrl+T is not intercepted
-      window.setTimeout(() => {
-        sendRaw('\x14'); // close the transcript overlay
-        window.setTimeout(() => {
-          if (state.weLocked) {
-            sendRaw('\x07'); // restore the Zellij mode we changed
-            state.weLocked = false;
-          }
-          state.closing = false;
-          state.transcriptRequested = false;
-          state.queuedPage = null;
-          updatePill();
-        }, 180);
-      }, 120);
-    };
-    // direction < 0 means "finger moved down" (older content, PageUp);
-    // direction > 0 means "finger moved up" (newer content, PageDown).
-    const pageTranscript = direction => {
-      const overlay = currentOverlay();
-      if (overlay === TRANSCRIPT_HEADER) {
-        sendRaw(direction < 0 ? PAGE_UP : PAGE_DOWN);
-        return;
-      }
-      if (overlay) return; // diff/approval overlay: keep native behavior
-      if (!isCodexTerminal()) return;
-      if (state.opening || state.transcriptRequested) {
-        // Keep at most one initial page request while the phone is waiting for
-        // Codex to render. Most importantly, never toggle Ctrl+T again here.
-        if (direction < 0) state.queuedPage = PAGE_UP;
-        return;
-      }
-      openTranscript(direction < 0 ? PAGE_UP : null);
-    };
-    const onTouchStart = event => {
-      const touch = event.touches && event.touches[0];
-      if (!touch) return;
-      const target = event.target;
-      if (target instanceof Element
-        && target.closest('.codepilot-zellij-toolbar, #codepilot-transcript-close')) return;
-      state.startX = touch.clientX;
-      state.startY = touch.clientY;
-      state.lastY = touch.clientY;
-      state.accum = 0;
-      state.active = true;
-    };
-    const onTouchMove = event => {
-      if (!state.active || !event.touches || event.touches.length !== 1) return;
-      const overlay = currentOverlay();
-      if (overlay && overlay !== TRANSCRIPT_HEADER) return;
-      if (!overlay && !isCodexTerminal()) return;
-      const touch = event.touches[0];
-      if (Math.abs(touch.clientX - state.startX) > Math.abs(touch.clientY - state.startY)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      state.accum += touch.clientY - state.lastY;
-      state.lastY = touch.clientY;
-      while (state.accum >= PAGE_SWIPE_THRESHOLD) {
-        state.accum -= PAGE_SWIPE_THRESHOLD;
-        pageTranscript(-1);
-      }
-      while (state.accum <= -PAGE_SWIPE_THRESHOLD) {
-        state.accum += PAGE_SWIPE_THRESHOLD;
-        pageTranscript(1);
-      }
-    };
-    const onTouchEnd = () => {
-      state.active = false;
-      state.accum = 0;
-    };
-    document.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
-    document.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
-    document.addEventListener('touchend', onTouchEnd, { capture: true, passive: true });
-    if (pill) {
-      pill.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        closeTranscript();
-      });
-    }
-    window.setInterval(updatePill, 700);
-    window.setTimeout(updatePill, 1500);
-  })();
   document.addEventListener('focusin', updateSoftKeyboardState);
   document.addEventListener('focusout', scheduleViewportRecovery);
   window.addEventListener('pageshow', scheduleViewportRecovery);
@@ -617,7 +419,7 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
   });
 })();`;
 
-export const renderZellijShortcuts = (codexSession = false): string => `
+export const renderZellijShortcuts = (): string => `
 <style id="codepilot-zellij-shortcuts-style">
   html:not(.codepilot-soft-keyboard-open), html:not(.codepilot-soft-keyboard-open) body, html:not(.codepilot-soft-keyboard-open) #terminal { height: 100dvh !important; min-height: 100dvh !important; }
   .codepilot-zellij-toolbar { --shortcut-scale: 1; --shortcut-size: 2.8rem; --shortcut-font-size: .78rem; --shortcut-toggle-font-size: 1.15rem; --shortcut-hint-font-size: .58rem; --shortcut-hint-gap: .18rem; --shortcut-idle-offset: -2.35rem; --shortcut-x: -1; --shortcut-1-x: .81rem; --shortcut-1-y: -7.3rem; --shortcut-2-x: 2.94rem; --shortcut-2-y: -4.77rem; --shortcut-3-x: 4.07rem; --shortcut-3-y: -1.66rem; --shortcut-4-x: 4.07rem; --shortcut-4-y: 1.66rem; --shortcut-5-x: 2.94rem; --shortcut-5-y: 4.77rem; --shortcut-6-x: .81rem; --shortcut-6-y: 7.3rem; position: fixed; right: max(.8rem, env(safe-area-inset-right, 0px)); bottom: max(.8rem, env(safe-area-inset-bottom, 0px)); z-index: 2147483647; width: var(--shortcut-size); height: var(--shortcut-size); pointer-events: none; }
@@ -636,12 +438,8 @@ export const renderZellijShortcuts = (codexSession = false): string => `
   .codepilot-zellij-toolbar[data-expanded="true"] .codepilot-ring-action:nth-of-type(6) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-5-x)), var(--shortcut-5-y)) scale(1); }
   .codepilot-zellij-toolbar[data-expanded="true"] .codepilot-ring-action:nth-of-type(7) { transform: translate(calc(var(--shortcut-x) * var(--shortcut-6-x)), var(--shortcut-6-y)) scale(1); }
   .codepilot-zellij-toolbar[data-expanded="true"] .codepilot-shortcut-toggle { opacity: 1; transform: rotate(45deg); }
-  .codepilot-transcript-close { position: fixed; top: max(.55rem, env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); z-index: 2147483646; padding: .35rem .85rem; border: 1px solid #8aebca; border-radius: 999px; color: #eff8f5; background: rgba(27, 44, 39, .96); box-shadow: 0 .25rem .8rem rgba(0, 0, 0, .35); font: 600 .78rem ui-monospace, SFMono-Regular, Consolas, monospace; cursor: pointer; touch-action: manipulation; pointer-events: auto; }
-  .codepilot-transcript-close[hidden] { display: none; }
-  .codepilot-transcript-close:active { background: #45635a; }
 </style>
 ${SHORTCUT_BALLS.map(renderShortcutBall).join('\n')}
-<button type="button" id="codepilot-transcript-close" class="codepilot-transcript-close" data-codex-session="${String(codexSession)}" aria-label="收起对话全文，返回聊天" hidden>‹ 返回</button>
 <script src="${ZELLIJ_SHORTCUTS_SCRIPT_PATH}"></script>`;
 
 export const ZELLIJ_SHORTCUTS = renderZellijShortcuts();
