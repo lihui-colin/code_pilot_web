@@ -203,6 +203,10 @@ describe('Zellij Web same-origin proxy', () => {
       expect(htmlBody).toContain('data-key="ArrowRight" data-sequence="27,91,67" data-keep-expanded="true"');
       expect(htmlBody).toContain('aria-label="发送左方向键"');
       expect(htmlBody).toContain('aria-label="发送右方向键"');
+      expect(htmlBody).toContain('id="codepilot-transcript-close"');
+      expect(htmlBody).toContain('class="codepilot-transcript-close"');
+      expect(htmlBody).toContain('aria-label="收起对话全文，返回聊天"');
+      expect(htmlBody).toContain('.codepilot-transcript-close[hidden] { display: none; }');
       const arrowsHtml = htmlBody.slice(
         htmlBody.indexOf('id="codepilot-zellij-shortcuts-arrows"'),
         htmlBody.indexOf('<script src="/codepilot-zellij-shortcuts.js"></script>'),
@@ -236,6 +240,13 @@ describe('Zellij Web same-origin proxy', () => {
       expect(shortcutScript).not.toContain('terminal.options.fontSize =');
       expect(shortcutScript).toContain('class CodepilotShortcutBall');
       expect(shortcutScript).toContain('new CodepilotShortcutBall(toolbar)');
+      expect(shortcutScript).toContain('const scrollBridge = (() => {');
+      expect(shortcutScript).toContain("const TRANSCRIPT_HEADER = 'T R A N S C R I P T'");
+      expect(shortcutScript).toContain("sendRaw('\x07'); // Ctrl+G: lock Zellij so Ctrl+T reaches Codex");
+      expect(shortcutScript).toContain("sendRaw('\x14'); // Ctrl+T: open the Codex transcript overlay");
+      expect(shortcutScript).toContain("sendRaw(direction < 0 ? PAGE_UP : PAGE_DOWN)");
+      expect(shortcutScript).toContain("document.addEventListener('touchmove', onTouchMove, { capture: true, passive: false })");
+      expect(shortcutScript).toContain("window.setInterval(updatePill, 700)");
       expect(shortcutScript).toContain('const updateSoftKeyboardState = () =>');
       expect(shortcutScript).toContain("document.addEventListener('focusout', scheduleViewportRecovery)");
       expect(shortcutScript).toContain("!active.classList.contains('xterm-helper-textarea')");
