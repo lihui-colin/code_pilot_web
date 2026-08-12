@@ -6,14 +6,18 @@
 # “manual run” 方式分别启动 session daemon 和 web/API 服务。
 #
 # 用法:
-#   ./scripts/pi-web-run.sh start      # 后台启动（sessiond + server）
-#   ./scripts/pi-web-run.sh stop       # 停止
-#   ./scripts/pi-web-run.sh restart    # 重启
-#   ./scripts/pi-web-run.sh status     # 查看状态
-#   ./scripts/pi-web-run.sh logs       # 跟随服务日志
+#   ./scripts/pi-web-run.sh start                # 后台启动（sessiond + server）
+#   ./scripts/pi-web-run.sh start --port 8080    # 指定端口启动
+#   ./scripts/pi-web-run.sh stop                 # 停止
+#   ./scripts/pi-web-run.sh restart [--port N]   # 按指定端口重启
+#   ./scripts/pi-web-run.sh status               # 查看状态
+#   ./scripts/pi-web-run.sh logs                 # 跟随服务日志
+#
+# 可配置参数:
+#   --port <port>    监听端口（优先级高于 PI_WEB_PORT 环境变量，默认 8024）
 #
 # 可配置环境变量:
-#   PI_WEB_HOST      绑定地址，默认 127.0.0.1
+#   PI_WEB_HOST      绑定地址，默认 0.0.0.0
 #   PI_WEB_PORT      监听端口，默认 8024
 #   PI_WEB_PASSWORD  设置后（若支持）开启访问保护
 
@@ -22,6 +26,32 @@ set -euo pipefail
 PI_WEB_HOST="${PI_WEB_HOST:-0.0.0.0}"
 PI_WEB_PORT="${PI_WEB_PORT:-8024}"
 PI_WEB_PASSWORD="${PI_WEB_PASSWORD:-}"
+
+# ---------- 参数解析 ----------
+ACTION=""
+ACTION_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --port)
+            [[ $# -ge 2 ]] || { echo "错误：--port 需要端口号参数" >&2; exit 2; }
+            PI_WEB_PORT="$2"
+            shift 2
+        ;;
+        --port=*)
+            PI_WEB_PORT="${1#*=}"
+            shift
+        ;;
+        start|stop|restart|status|logs)
+            ACTION="$1"
+            shift
+        ;;
+        *)
+            ACTION_ARGS+=("$1")
+            shift
+        ;;
+    esac
+done
+[[ -n "$ACTION" ]] || ACTION="${ACTION_ARGS[0]:-run}"
 
 script_file="$(readlink -f "${BASH_SOURCE[0]}")"
 project_root="$(cd "$(dirname "$script_file")/.." && pwd)"
@@ -127,15 +157,14 @@ logs() {
     tail -f -n 50 "$f"
 }
 
-action="${1:-run}"
-case "$action" in
+case "$ACTION" in
     start)   start ;;
     stop)    stop ;;
     restart) stop; start ;;
     status)  status ;;
     logs)    logs ;;
     *)
-        echo "用法: $0 {start|stop|restart|status|logs}" >&2
+        echo "用法: $0 {start|stop|restart|status|logs} [--port <port>]" >&2
         exit 2
     ;;
 esac
