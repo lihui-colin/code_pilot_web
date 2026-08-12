@@ -27,11 +27,39 @@ PI_WEB_HOST="${PI_WEB_HOST:-0.0.0.0}"
 PI_WEB_PORT="${PI_WEB_PORT:-8024}"
 PI_WEB_PASSWORD="${PI_WEB_PASSWORD:-}"
 
+usage() {
+    cat <<'EOF'
+PI WEB (jmfederico) 手动运行管理脚本
+
+用法:
+  ./scripts/pi-web-run.sh start                # 后台启动（sessiond + server）
+  ./scripts/pi-web-run.sh start --port 8080    # 指定端口启动
+  ./scripts/pi-web-run.sh stop                 # 停止
+  ./scripts/pi-web-run.sh restart [--port N]   # 按指定端口重启
+  ./scripts/pi-web-run.sh status [--port N]    # 查看状态
+  ./scripts/pi-web-run.sh logs                 # 跟随服务日志
+  ./scripts/pi-web-run.sh --help               # 显示本帮助
+
+参数:
+  --port <port>    监听端口（优先级高于 PI_WEB_PORT 环境变量，默认 8024）
+  -h, --help       显示本帮助并退出
+
+环境变量:
+  PI_WEB_HOST      绑定地址，默认 0.0.0.0
+  PI_WEB_PORT      监听端口，默认 8024
+  PI_WEB_PASSWORD  设置后（若支持）开启访问保护
+EOF
+}
+
 # ---------- 参数解析 ----------
 ACTION=""
 ACTION_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help)
+            usage
+            exit 0
+        ;;
         --port)
             [[ $# -ge 2 ]] || { echo "错误：--port 需要端口号参数" >&2; exit 2; }
             PI_WEB_PORT="$2"
