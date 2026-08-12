@@ -261,11 +261,13 @@ describe('Zellij Web same-origin proxy', () => {
       // no Codex-identifying text remains in xterm's zero-scrollback buffer.
       const managedDom = new JSDOM(managedHtmlBody, { runScripts: 'outside-only', url: 'https://codepilot.test/zellij/managed-session' });
       const managedSequences: string[] = [];
+      const managedTimers: Array<() => void> = [];
+      const managedLines = ['', '<p> PANE'];
       Object.defineProperty(managedDom.window.navigator, 'maxTouchPoints', { configurable: true, value: 1 });
       Object.assign(managedDom.window, {
         __zjImeBypass: { sendFn: (sequence: string) => managedSequences.push(sequence) },
         setTimeout: (callback: TimerHandler) => {
-          if (typeof callback === 'function') callback();
+          if (typeof callback === 'function') managedTimers.push(callback);
           return 1;
         },
         setInterval: () => 1,
@@ -273,12 +275,13 @@ describe('Zellij Web same-origin proxy', () => {
           buffer: {
             active: {
               length: 2,
-              getLine: (row: number) => ({ translateToString: () => row === 1 ? '<p> PANE' : '' }),
+              getLine: (row: number) => ({ translateToString: () => managedLines[row] ?? '' }),
             },
           },
         },
       });
       managedDom.window.eval(shortcutScript);
+      managedTimers.length = 0;
       const touchTarget = managedDom.window.document.querySelector('.xterm-helper-textarea')!;
       const touchEvent = (type: string, clientY: number) => {
         const event = new managedDom.window.Event(type, { bubbles: true, cancelable: true });
@@ -289,6 +292,18 @@ describe('Zellij Web same-origin proxy', () => {
       touchEvent('touchstart', 100);
       const touchMove = touchEvent('touchmove', 230);
       expect(touchMove.defaultPrevented).toBe(true);
+      // More movement before either the 120 ms Ctrl+T delay or Codex rendering
+      // completes must not enqueue a second transcript toggle.
+      touchEvent('touchmove', 360);
+      expect(managedSequences).toEqual(['\x07']);
+      expect(managedTimers).toHaveLength(1);
+      managedTimers.shift()?.();
+      expect(managedSequences).toEqual(['\x07', '\x14']);
+      touchEvent('touchmove', 490);
+      expect(managedSequences).toEqual(['\x07', '\x14']);
+      expect(managedTimers).toHaveLength(1);
+      managedLines[0] = 'T R A N S C R I P T';
+      managedTimers.shift()?.();
       expect(managedSequences).toEqual(['\x07', '\x14', '\x1b[5~']);
       managedDom.window.close();
 

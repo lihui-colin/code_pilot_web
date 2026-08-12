@@ -427,6 +427,8 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
       accum: 0,
       opening: false,
       closing: false,
+      transcriptRequested: false,
+      queuedPage: null,
       weLocked: false,
     };
     const pill = document.getElementById('codepilot-transcript-close');
@@ -484,21 +486,42 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
     };
     const updatePill = () => {
       if (!pill) return;
-      pill.hidden = !(isTouchDevice() && currentOverlay() === TRANSCRIPT_HEADER);
+      const transcriptVisible = currentOverlay() === TRANSCRIPT_HEADER;
+      pill.hidden = !(isTouchDevice() && transcriptVisible);
+      if (transcriptVisible) state.transcriptRequested = true;
+      else if (!state.opening && !state.closing) state.transcriptRequested = false;
     };
-    const openTranscript = () => {
-      if (state.opening || state.closing) return;
+    const waitForTranscript = attempt => {
+      const overlay = currentOverlay();
+      if (overlay === TRANSCRIPT_HEADER) {
+        state.opening = false;
+        state.transcriptRequested = true;
+        if (state.queuedPage) sendRaw(state.queuedPage);
+        state.queuedPage = null;
+        updatePill();
+        return;
+      }
+      if (overlay || attempt >= 20) {
+        state.opening = false;
+        state.transcriptRequested = false;
+        state.queuedPage = null;
+        updatePill();
+        return;
+      }
+      window.setTimeout(() => waitForTranscript(attempt + 1), 100);
+    };
+    const openTranscript = initialPage => {
+      if (state.opening || state.closing || state.transcriptRequested) return;
       state.opening = true;
+      state.transcriptRequested = true;
+      state.queuedPage = initialPage;
       if (!isLocked()) {
         state.weLocked = true;
         sendRaw('\x07'); // Ctrl+G: lock Zellij so Ctrl+T reaches Codex
       }
       window.setTimeout(() => {
         sendRaw('\x14'); // Ctrl+T: open the Codex transcript overlay
-        window.setTimeout(() => {
-          state.opening = false;
-          updatePill();
-        }, 200);
+        waitForTranscript(0);
       }, 120);
     };
     const closeTranscript = () => {
@@ -513,6 +536,8 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
             state.weLocked = false;
           }
           state.closing = false;
+          state.transcriptRequested = false;
+          state.queuedPage = null;
           updatePill();
         }, 180);
       }, 120);
@@ -527,11 +552,13 @@ export const ZELLIJ_SHORTCUTS_SCRIPT = `(() => {
       }
       if (overlay) return; // diff/approval overlay: keep native behavior
       if (!isCodexTerminal()) return;
-      openTranscript();
-      if (direction < 0) {
-        // Swiping down intends older content: page up once the overlay renders.
-        window.setTimeout(() => sendRaw(PAGE_UP), 320);
+      if (state.opening || state.transcriptRequested) {
+        // Keep at most one initial page request while the phone is waiting for
+        // Codex to render. Most importantly, never toggle Ctrl+T again here.
+        if (direction < 0) state.queuedPage = PAGE_UP;
+        return;
       }
+      openTranscript(direction < 0 ? PAGE_UP : null);
     };
     const onTouchStart = event => {
       const touch = event.touches && event.touches[0];

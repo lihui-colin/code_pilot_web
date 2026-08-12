@@ -438,7 +438,7 @@ Zellij Session 入口页面的浏览器标题固定为 `<repository-name> - Zell
 
 固定 Zellij `0.44.3` 自带的已知 `/zellij/assets/*` 静态资源必须返回 `Cache-Control: private, max-age=86400, immutable` 和包含版本、文件名的弱 `ETag`。浏览器发送匹配的 `If-None-Match` 时，管理服务必须直接返回 `304`，不得访问 Zellij 上游。客户端声明接受 gzip 时，大于等于 1 KiB 的可压缩响应使用 gzip 传输并设置正确的 `Content-Encoding` 与 `Vary`；请求正文解压必须保持关闭。入口 HTML、登录/API 响应和 WebSocket 不得使用静态资源长期缓存策略。
 
-移动触摸设备在 Codex TUI 会话中纵向滑动终端时，注入脚本必须接管滑动：服务端创建的 repository Codex Session 必须由入口 HTML 中的服务端标记识别，不能依赖可能已经滚出 xterm 可见缓冲区的 Codex 文本；external Session 可以通过当前终端中的 Codex UI 标记兼容识别。主对话视图下先锁定 Zellij（`Ctrl+G`，仅在当前未锁定时发送并记录）再发送 `Ctrl+T` 打开 Codex 全文回放层，随后把滑动转换为 `PageUp`/`PageDown` 控制序列经 Zellij Web 已建立的终端发送函数完整写入（上滑表示更新内容写 `ESC [ 6 ~`，下滑表示更早内容写 `ESC [ 5 ~`），并在捕获阶段阻止 Zellij 自带触摸滚动重复处理；回放层打开时页面顶部显示“‹ 返回”小按钮，点击后关闭回放层并恢复此前由脚本改变的 Zellij 锁定状态。若当前是全屏 diff、审批等非对话回放层，脚本不得接管滚动；非 Codex 终端或工具栏浮球上的触摸不得拦截。
+移动触摸设备在 Codex TUI 会话中纵向滑动终端时，注入脚本必须接管滑动：服务端创建的 repository Codex Session 必须由入口 HTML 中的服务端标记识别，不能依赖可能已经滚出 xterm 可见缓冲区的 Codex 文本；external Session 可以通过当前终端中的 Codex UI 标记兼容识别。主对话视图下先锁定 Zellij（`Ctrl+G`，仅在当前未锁定时发送并记录）再发送一次 `Ctrl+T` 打开 Codex 全文回放层；从发送打开指令至终端缓冲区确认全文回放层出现或等待超时之前，后续滑动不得再次发送 `Ctrl+T`，避免手机渲染延迟导致全文回放层与聊天界面来回切换。确认打开后把滑动转换为 `PageUp`/`PageDown` 控制序列经 Zellij Web 已建立的终端发送函数完整写入（上滑表示更新内容写 `ESC [ 6 ~`，下滑表示更早内容写 `ESC [ 5 ~`），并在捕获阶段阻止 Zellij 自带触摸滚动重复处理；回放层打开时页面顶部显示“‹ 返回”小按钮，点击后关闭回放层并恢复此前由脚本改变的 Zellij 锁定状态。若当前是全屏 diff、审批等非对话回放层，脚本不得接管滚动；非 Codex 终端或工具栏浮球上的触摸不得拦截。
 
 Zellij Web 保留自身 Token 与 Cookie 认证。通过同源 `/zellij` 入口登录后，浏览器只与主服务 HTTPS 端口通信；Zellij 上游端口不得加入防火墙允许列表。
 
