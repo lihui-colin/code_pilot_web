@@ -7,6 +7,7 @@
 #
 # 用法:
 #   ./scripts/codex-webui-service.sh deploy   # 首次克隆（如需）、构建并启动；默认动作
+#   ./scripts/codex-webui-service.sh update   # 拉取上游更新、构建并重启
 #   ./scripts/codex-webui-service.sh build    # 安装依赖并构建前后端
 #   ./scripts/codex-webui-service.sh start    # 后台启动
 #   ./scripts/codex-webui-service.sh stop     # 停止服务及其子进程
@@ -25,7 +26,7 @@
 #   CODEX_WEBUI_AUTH_DISABLED    首次配置是否免密，默认 true（仅限可信网络）
 #   WEBUI_API_KEY                首次生成 .env 时使用；未提供则自动生成
 #
-# 本脚本不自动拉取或覆盖已有源码。升级代码后再次执行 deploy 即可重建并重启。
+# deploy 不自动拉取或覆盖已有源码；使用 update 显式拉取安全的 fast-forward 更新。
 
 set -euo pipefail
 
@@ -98,6 +99,35 @@ ensure_source() {
     mkdir -p "$(dirname "$deploy_dir")"
     log "克隆 $repository_url（$repository_ref）到 $deploy_dir"
     git clone --branch "$repository_ref" --single-branch -- "$repository_url" "$deploy_dir"
+}
+
+update_source() {
+    require_build_tools
+    ensure_source
+
+    if ! git -C "$deploy_dir" diff --quiet \
+        || ! git -C "$deploy_dir" diff --cached --quiet \
+        || [[ -n "$(git -C "$deploy_dir" ls-files --others --exclude-standard)" ]]; then
+        warn "检测到本地修改；更新会保留它们，若与上游冲突则安全中止"
+    fi
+
+    log "获取上游更新: origin/$repository_ref"
+    git -C "$deploy_dir" fetch --prune origin "$repository_ref"
+
+    if ! git -C "$deploy_dir" merge-base --is-ancestor HEAD FETCH_HEAD; then
+        fail "上游历史无法 fast-forward 到当前版本；未修改源码，请手动处理分支历史"
+    fi
+
+    if [[ "$(git -C "$deploy_dir" rev-parse HEAD)" == \
+          "$(git -C "$deploy_dir" rev-parse FETCH_HEAD)" ]]; then
+        log "源码已经是最新版本"
+        return
+    fi
+
+    if ! git -C "$deploy_dir" merge --ff-only FETCH_HEAD; then
+        fail "上游更新与本地修改冲突；未覆盖本地文件，请手动处理后重试"
+    fi
+    log "源码已更新到 $(git -C "$deploy_dir" rev-parse --short HEAD)"
 }
 
 random_secret() {
@@ -308,6 +338,12 @@ case "$action" in
         stop_service
         start_service
     ;;
+    update)
+        update_source
+        build_service
+        stop_service
+        start_service
+    ;;
     build)
         build_service
     ;;
@@ -331,6 +367,6 @@ case "$action" in
         usage
     ;;
     *)
-        fail "未知动作: $action（支持 deploy|build|start|stop|restart|status|logs）"
+        fail "未知动作: $action（支持 deploy|update|build|start|stop|restart|status|logs）"
     ;;
 esac
