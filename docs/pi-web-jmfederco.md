@@ -4,20 +4,20 @@
 
 ```bash
 # 更新 pi agent + @jmfederico/pi-web；若服务在跑则先停再装再拉起
-./scripts/update-pi-web-jmfederico.sh
+./scripts/pi-web-run-jmfederico.sh update
 
 # 只更新其中一项
-./scripts/update-pi-web-jmfederico.sh --pi-only
-./scripts/update-pi-web-jmfederico.sh --web-only
+./scripts/pi-web-run-jmfederico.sh update --pi-only
+./scripts/pi-web-run-jmfederico.sh update --web-only
 
 # 指定版本 / 不重启 / 同步 relay skill
-PI_VERSION=0.85.1 PI_WEB_VERSION=1.202609.0 ./scripts/update-pi-web-jmfederico.sh
-./scripts/update-pi-web-jmfederico.sh --no-restart
-./scripts/update-pi-web-jmfederico.sh --update-relay
-./scripts/update-pi-web-jmfederico.sh --dry-run
+PI_VERSION=0.85.1 PI_WEB_VERSION=1.202609.0 ./scripts/pi-web-run-jmfederico.sh update
+./scripts/pi-web-run-jmfederico.sh update --no-restart
+./scripts/pi-web-run-jmfederico.sh update --update-relay
+./scripts/pi-web-run-jmfederico.sh update --dry-run
 ```
 
-本机无 systemd user 总线，更新脚本通过 [scripts/pi-web-run-jmfederico.sh](../scripts/pi-web-run-jmfederico.sh) 管理 sessiond + server。
+`update` 复用 `scripts/update-pi-web-jmfederico.sh` 的升级流程。本机无 systemd user 总线时，由运行脚本管理 sessiond + server。
 
 ## 配置
 

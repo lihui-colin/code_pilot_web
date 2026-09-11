@@ -270,4 +270,4 @@ fi
 
 doctor
 log "更新完成"
-log "管理命令: $run_script {start|stop|restart|status|logs}"
+log "管理命令: $run_script {start|stop|restart|update|status|logs}"

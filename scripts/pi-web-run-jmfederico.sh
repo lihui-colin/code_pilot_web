@@ -6,12 +6,13 @@
 # “manual run” 方式分别启动 session daemon 和 web/API 服务。
 #
 # 用法:
-#   ./scripts/pi-web-run.sh start                # 后台启动（sessiond + server）
-#   ./scripts/pi-web-run.sh start --port 8080    # 指定端口启动
-#   ./scripts/pi-web-run.sh stop                 # 停止
-#   ./scripts/pi-web-run.sh restart [--port N]   # 按指定端口重启
-#   ./scripts/pi-web-run.sh status               # 查看状态
-#   ./scripts/pi-web-run.sh logs                 # 跟随服务日志
+#   ./scripts/pi-web-run-jmfederico.sh start                # 后台启动（sessiond + server）
+#   ./scripts/pi-web-run-jmfederico.sh start --port 8080    # 指定端口启动
+#   ./scripts/pi-web-run-jmfederico.sh stop                 # 停止
+#   ./scripts/pi-web-run-jmfederico.sh restart [--port N]   # 按指定端口重启
+#   ./scripts/pi-web-run-jmfederico.sh update [更新选项]    # 升级 pi 和 pi-web
+#   ./scripts/pi-web-run-jmfederico.sh status               # 查看状态
+#   ./scripts/pi-web-run-jmfederico.sh logs                 # 跟随服务日志
 #
 # 可配置参数:
 #   --port <port>    监听端口（优先级高于 PI_WEB_PORT 环境变量，默认 8024）
@@ -32,22 +33,33 @@ usage() {
 PI WEB (jmfederico) 手动运行管理脚本
 
 用法:
-  ./scripts/pi-web-run.sh start                # 后台启动（sessiond + server）
-  ./scripts/pi-web-run.sh start --port 8080    # 指定端口启动
-  ./scripts/pi-web-run.sh stop                 # 停止
-  ./scripts/pi-web-run.sh restart [--port N]   # 按指定端口重启
-  ./scripts/pi-web-run.sh status [--port N]    # 查看状态
-  ./scripts/pi-web-run.sh logs                 # 跟随服务日志
-  ./scripts/pi-web-run.sh --help               # 显示本帮助
+  ./scripts/pi-web-run-jmfederico.sh start                # 后台启动（sessiond + server）
+  ./scripts/pi-web-run-jmfederico.sh start --port 8080    # 指定端口启动
+  ./scripts/pi-web-run-jmfederico.sh stop                 # 停止
+  ./scripts/pi-web-run-jmfederico.sh restart [--port N]   # 按指定端口重启
+  ./scripts/pi-web-run-jmfederico.sh update [更新选项]    # 升级 pi 和 pi-web
+  ./scripts/pi-web-run-jmfederico.sh status [--port N]    # 查看状态
+  ./scripts/pi-web-run-jmfederico.sh logs                 # 跟随服务日志
+  ./scripts/pi-web-run-jmfederico.sh --help               # 显示本帮助
 
 参数:
   --port <port>    监听端口（优先级高于 PI_WEB_PORT 环境变量，默认 8024）
   -h, --help       显示本帮助并退出
 
+更新选项:
+  --pi-only        只升级 Pi Coding Agent
+  --web-only       只升级 @jmfederico/pi-web
+  --no-restart     升级后不重启服务
+  --restart        即使服务原先未运行，升级后也启动
+  --update-relay   同步升级全局 relay skill
+  --dry-run        只显示将执行的升级操作
+
 环境变量:
   PI_WEB_HOST      绑定地址，默认 0.0.0.0
   PI_WEB_PORT      监听端口，默认 8024
   PI_WEB_PASSWORD  设置后（若支持）开启访问保护
+  PI_VERSION       update 使用的 pi 目标版本，默认 latest
+  PI_WEB_VERSION   update 使用的 pi-web 目标版本，默认 latest
 EOF
 }
 
@@ -69,7 +81,7 @@ while [[ $# -gt 0 ]]; do
             PI_WEB_PORT="${1#*=}"
             shift
         ;;
-        start|stop|restart|status|logs)
+        start|stop|restart|update|status|logs)
             ACTION="$1"
             shift
         ;;
@@ -88,6 +100,7 @@ server_log="$log_dir/server.log"
 sessiond_log="$log_dir/sessiond.log"
 server_pid="$log_dir/server.pid"
 sessiond_pid="$log_dir/sessiond.pid"
+update_script="$project_root/scripts/update-pi-web-jmfederico.sh"
 
 require_bins() {
     command -v pi-web-server   >/dev/null 2>&1 || { echo "错误：未找到 pi-web-server" >&2; exit 1; }
@@ -185,14 +198,24 @@ logs() {
     tail -f -n 50 "$f"
 }
 
+update() {
+    if [[ ! -x "$update_script" ]]; then
+        echo "错误：未找到可执行升级脚本 $update_script" >&2
+        exit 1
+    fi
+    PI_WEB_HOST="$PI_WEB_HOST" PI_WEB_PORT="$PI_WEB_PORT" PI_WEB_PASSWORD="$PI_WEB_PASSWORD" \
+        "$update_script" "${ACTION_ARGS[@]}"
+}
+
 case "$ACTION" in
     start)   start ;;
     stop)    stop ;;
     restart) stop; start ;;
+    update)  update ;;
     status)  status ;;
     logs)    logs ;;
     *)
-        echo "用法: $0 {start|stop|restart|status|logs} [--port <port>]" >&2
+        echo "用法: $0 {start|stop|restart|update|status|logs} [--port <port>]" >&2
         exit 2
     ;;
 esac
